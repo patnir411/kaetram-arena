@@ -13,6 +13,11 @@ logs/
 recordings/
 highlights/
 
+# Self-play data (large, generated)
+trajectories/
+trajectories_annotated/
+training_data/
+
 # Python
 __pycache__/
 *.pyc
