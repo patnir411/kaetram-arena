@@ -1,0 +1,18 @@
+# Screenshots and session state (generated at runtime)
+state/*.png
+state/session*.json
+.playwright-mcp/
+
+# Root-level test screenshots
+*.png
+
+# Logs
+logs/
+
+# Recordings and highlights
+recordings/
+highlights/
+
+# Python
+__pycache__/
+*.pyc
