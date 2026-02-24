@@ -7,13 +7,13 @@ PROJECT_DIR="$HOME/projects/kaetram-agent"
 STATE_FILE="$PROJECT_DIR/state/progress.json"
 SYSTEM_PROMPT_FILE="$PROJECT_DIR/prompts/system.md"
 LOG_DIR="$PROJECT_DIR/logs"
-MAX_TURNS=50
+MAX_TURNS=100
 PAUSE_BETWEEN=10
 
 mkdir -p "$LOG_DIR" "$PROJECT_DIR/state"
 
 if [ ! -f "$STATE_FILE" ]; then
-  echo '{"sessions":0,"milestone":"not_started","level":0,"notes":""}' > "$STATE_FILE"
+  echo '{"sessions":0,"level":1,"xp_estimate":"0","quests_started":[],"quests_completed":[],"locations_visited":["mudwich"],"kills_this_session":0,"last_action":"none","notes":"fresh start"}' > "$STATE_FILE"
 fi
 
 SESSION=0
@@ -26,11 +26,20 @@ while true; do
 
   SYSTEM=$(cat "$SYSTEM_PROMPT_FILE")
 
-  claude -p "Session #${SESSION}. Follow your system instructions exactly. Start by running the login code block, then play the game." \
+  # Read previous progress and include in prompt
+  PROGRESS=$(cat "$STATE_FILE" 2>/dev/null || echo '{}')
+
+  PROMPT="Session #${SESSION}. Your previous progress: ${PROGRESS}
+
+Follow your system instructions exactly. Phase 1: Run the login code block. Phase 2: Grind combat (kill rats/mobs, loot drops). Phase 3: Check quests if not started. Phase 4: Explore one new area. Phase 5: MANDATORY — write progress.json before session ends."
+
+  claude -p "$PROMPT" \
     --model sonnet \
     --max-turns "$MAX_TURNS" \
     --append-system-prompt "$SYSTEM" \
     --dangerously-skip-permissions \
+    --output-format stream-json \
+    --verbose \
     2>&1 | tee "$LOG_FILE" || true
 
   echo "=== Session $SESSION ended at $(date) ==="

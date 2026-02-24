@@ -8,7 +8,19 @@ import glob
 import mimetypes
 import threading
 import subprocess
+import re
 from datetime import datetime
+
+# Patterns to redact from public-facing output
+SENSITIVE_PATTERNS = re.compile(
+    r'(GEMINI_API_KEY|API_KEY|SECRET|TOKEN|PASSWORD|CREDENTIALS|Authorization|Bearer\s+\S+)'
+    r'|([A-Za-z0-9_-]{30,}(?=[\s"\']))',  # long token-like strings
+    re.IGNORECASE
+)
+
+def sanitize(text):
+    """Remove API keys and sensitive strings from text before serving."""
+    return SENSITIVE_PATTERNS.sub('[REDACTED]', text)
 
 PROJECT_DIR = os.path.expanduser("~/projects/kaetram-agent")
 STATE_DIR = os.path.join(PROJECT_DIR, "state")
@@ -28,6 +40,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 self.send_screenshot_list()
             elif self.path == "/api/live":
                 self.send_live_status()
+            elif self.path == "/api/activity":
+                self.send_activity()
             elif self.path.startswith("/screenshots/"):
                 self.send_screenshot_file()
             else:
@@ -86,7 +100,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         """Return live agent status — is claude running, latest screenshot age, etc."""
         # Check if claude process is running
         try:
-            result = subprocess.run(["pgrep", "-f", "claude.*sonnet"], capture_output=True, text=True, timeout=3)
+            result = subprocess.run(["pgrep", "-f", "play.sh"], capture_output=True, text=True, timeout=3)
             agent_running = result.returncode == 0
         except Exception:
             agent_running = False
@@ -131,6 +145,69 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             "screenshot_time": screenshot_time,
             "total_sessions": total_sessions,
             "highlights": highlights[-10:],
+        })
+
+    def send_activity(self):
+        """Parse the most recent stream-json log file for live agent activity."""
+        logs = sorted(glob.glob(os.path.join(LOG_DIR, "session_*.log")), key=os.path.getmtime)
+        if not logs:
+            return self._send_json({"events": [], "turn": 0, "cost_usd": 0})
+
+        latest = logs[-1]
+        events = []
+        turn = 0
+        cost_usd = 0
+        try:
+            with open(latest) as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or not line.startswith("{"):
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        continue
+
+                    t = obj.get("type", "")
+
+                    if t == "assistant":
+                        msg = obj.get("message", {})
+                        contents = msg.get("content", [])
+                        for c in contents:
+                            ct = c.get("type", "")
+                            if ct == "tool_use":
+                                tool = c.get("name", "unknown")
+                                # Shorten playwright tool names
+                                tool = tool.replace("mcp__playwright__", "")
+                                inp = c.get("input", {})
+                                summary = ""
+                                if "code" in inp:
+                                    code = inp["code"][:120]
+                                    summary = code.split("return ")[1].split("'")[1] if "return '" in code else code[:80]
+                                elif "command" in inp:
+                                    summary = inp["command"][:80]
+                                elif "url" in inp:
+                                    summary = inp["url"][:80]
+                                elif "file_path" in inp:
+                                    summary = inp["file_path"].split("/")[-1]
+                                turn += 1
+                                events.append({"turn": turn, "type": "tool", "tool": tool, "summary": sanitize(summary)})
+                            elif ct == "text":
+                                text = c.get("text", "")[:200]
+                                if text.strip():
+                                    events.append({"turn": turn, "type": "text", "text": sanitize(text)})
+
+                    elif t == "result":
+                        cost_usd = obj.get("total_cost_usd", 0)
+
+        except Exception:
+            pass
+
+        self._send_json({
+            "events": events[-30:],
+            "turn": turn,
+            "cost_usd": round(cost_usd, 4),
+            "log_file": os.path.basename(latest),
         })
 
     def send_sessions(self):
@@ -245,12 +322,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .session-entry .time { color: var(--dim); }
   .session-entry .size { color: var(--amber); min-width: 60px; text-align: right; }
 
-  /* Highlights */
-  .highlight { padding: 6px 10px; margin-bottom: 4px; border-radius: 4px; font-size: 12px; border-left: 3px solid var(--amber); background: #1a1500; }
-  .highlight.death { border-color: var(--red); background: #1a0500; }
-  .highlight.levelup { border-color: var(--green); background: #001a05; }
-  .highlight.loot { border-color: var(--amber); background: #1a1500; }
-  .highlight.quest { border-color: var(--blue); background: #001a2a; }
+  /* Activity feed */
+  .activity-event { padding: 4px 10px; margin-bottom: 2px; font-size: 11px; border-left: 2px solid #333; font-family: monospace; }
+  .activity-event .turn-num { color: var(--dim); margin-right: 6px; }
+  .activity-event .tool-name { color: var(--blue); font-weight: bold; }
+  .activity-event .summary { color: var(--text); margin-left: 6px; }
+  .activity-event.text-event { border-left-color: var(--green); }
+  .activity-event.text-event .agent-text { color: var(--green); }
+  .activity-feed { max-height: 400px; overflow-y: auto; }
 
   /* Lightbox */
   .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 100; justify-content: center; align-items: center; cursor: pointer; }
@@ -279,6 +358,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <div class="status-item"><span class="dot amber" id="dot-server"></span> Game Server: <span id="status-server">checking...</span></div>
   <div class="status-item">Sessions: <span id="status-sessions" style="color:var(--green)">-</span></div>
   <div class="status-item">Screenshot: <span id="status-screenshot-age" style="color:var(--green)">-</span></div>
+  <div class="status-item">Turn: <span id="status-turn" style="color:var(--green)">-</span></div>
+  <div class="status-item">Cost: $<span id="status-cost" style="color:var(--amber)">-</span></div>
   <div class="status-item refresh-info" style="color:#333">Refreshes every 5s</div>
 </div>
 
@@ -302,9 +383,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
   </div>
 
-  <div class="card full" style="margin-bottom:16px" id="highlights-card">
-    <h2>Highlights</h2>
-    <div id="highlights"><div class="empty">No highlights yet — kills, deaths, loot, and quests appear here</div></div>
+  <div class="card full" style="margin-bottom:16px" id="activity-card">
+    <h2>Live Activity Feed</h2>
+    <div class="activity-feed" id="activity-feed"><div class="empty">Waiting for agent activity...</div></div>
   </div>
 
   <div class="grid">
@@ -369,14 +450,25 @@ async function refresh() {
     document.getElementById('status-screenshot-age').textContent = humanTime(live.screenshot_age_seconds);
     document.getElementById('hero-time').textContent = live.screenshot_time || '-';
 
-    // Highlights
-    if (live.highlights && live.highlights.length > 0) {
-      let hhtml = '';
-      for (const h of live.highlights.reverse()) {
-        const cls = h.type || '';
-        hhtml += '<div class="highlight ' + cls + '"><strong>Session ' + (h.session||'?') + '</strong> [' + (h.type||'event') + '] ' + (h.desc||'') + '</div>';
+  } catch(e) {}
+
+  // Activity feed
+  try {
+    const activity = await (await fetch('/api/activity')).json();
+    document.getElementById('status-turn').textContent = activity.turn || '0';
+    document.getElementById('status-cost').textContent = (activity.cost_usd || 0).toFixed(2);
+    if (activity.events && activity.events.length > 0) {
+      let ahtml = '';
+      for (const ev of activity.events) {
+        if (ev.type === 'tool') {
+          ahtml += '<div class="activity-event"><span class="turn-num">#' + ev.turn + '</span><span class="tool-name">' + ev.tool + '</span><span class="summary">' + (ev.summary || '').replace(/</g,'&lt;') + '</span></div>';
+        } else if (ev.type === 'text') {
+          ahtml += '<div class="activity-event text-event"><span class="turn-num">#' + ev.turn + '</span><span class="agent-text">' + (ev.text || '').replace(/</g,'&lt;') + '</span></div>';
+        }
       }
-      document.getElementById('highlights').innerHTML = hhtml;
+      const feed = document.getElementById('activity-feed');
+      feed.innerHTML = ahtml;
+      feed.scrollTop = feed.scrollHeight;
     }
   } catch(e) {}
 
