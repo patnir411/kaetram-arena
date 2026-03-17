@@ -2,6 +2,86 @@
 
 This is an autonomous AI agent that plays Kaetram (a 2D pixel MMORPG) using Claude Code + Playwright browser automation. Read this before touching anything.
 
+---
+
+## SESSION STARTUP (read this every session)
+
+At the start of every new session, before doing anything else:
+1. Read this file (`CLAUDE.md`)
+2. Read `session_log.md` (recent decisions and context)
+3. Read `.claude/commands/training-summary/history.json` if it exists (reward trends)
+4. Only then ask what the user wants to do — never start cold
+
+At the end of every session, update `session_log.md` (under 30 lines).
+
+---
+
+## GOTCHAS
+
+**⚠️  Playwright subprocess deadlock** — `play.sh` MUST be launched from a separate terminal. If you spawn `claude -p` as a subprocess of the current Claude Code session, both processes share the same Playwright MCP browser and deadlock. Symptoms: agent session freezes at ~0 CPU, screenshot stops updating, log file stays 0 bytes. Fix: `ps aux | grep "claude -p" | grep -v grep` then `kill <PID>`.
+
+**⚠️  ws_observer spawn mismatch** — `ws_observer.py` connects as its own guest at the default spawn (~tile 328, 892, Programmer's house). Its `nearby_entities` reflects mobs near *that* position, not near ClaudeBot's actual location. When reasoning about entity coordinates from `game_state.json`, account for this offset. ClaudeBot teleports to Mudwich (188, 157); the ws_observer stays near 328, 892.
+
+**Node.js version** — Kaetram requires Node 16/18/20. Node 24/25 crashes on startup (uWS.js incompatibility). Always `nvm use 20` before starting the server.
+
+**Tutorial gate** — New players spawn in the Programmer's house behind a 16-stage tutorial that can't be bypassed even with `TUTORIAL_ENABLED=false`. Immediately after login, send `/teleport 188 157` in chat to jump to Mudwich village center.
+
+**Port conflicts** — If the server is restarted without killing old processes, the client binds to a random port instead of 9000. Kill all node processes first.
+
+**yarn build required** — After cloning, `yarn start` alone fails. Run `yarn build` first.
+
+---
+
+## SESSION STARTUP ORDER
+
+Run each in its own terminal, in order:
+
+1. **Terminal 1 — Kaetram server** (Node 20 required)
+   ```bash
+   ./scripts/start-kaetram.sh
+   ```
+
+2. **Terminal 2 — WebSocket observer**
+   ```bash
+   python3 ws_observer.py
+   ```
+
+3. **Terminal 3 — Dashboard** (optional)
+   ```bash
+   python3 dashboard.py
+   ```
+
+4. **Terminal 4 — Dataset logger** (optional)
+   ```bash
+   python3 logger.py
+   ```
+
+5. **Terminal 5 — Agent loop** ⚠️ MUST be a separate terminal, never a subprocess
+   ```bash
+   ./play.sh
+   ```
+
+---
+
+## CURRENT STATUS
+
+**Last updated:** 2026-03-17
+
+| PR | Title | Status |
+|----|-------|--------|
+| PR 1 | ws_observer.py + 21 unit tests | ✅ merged |
+| PR 2 | logger.py dataset recording | ✅ merged |
+| PR 3 | Inject game_state.json into session prompt | ✅ verified live, ready to merge |
+| PR 4 | Skills system + CLAUDE.md overhaul | 🔄 in progress (this session) |
+
+**Verified live (2026-03-17):** PR3 prompt injection confirmed — `nearby_entities` present in prompt, ClaudeBot in active combat with Rat (HP 12/20), +5 XP event captured in game_state.json.
+
+**Next:** Merge PR3, merge PR4, then consider making ws_observer follow ClaudeBot's position instead of staying at default spawn.
+
+**Blocked:** Nothing currently blocked.
+
+---
+
 ## What the system does
 
 ```
@@ -55,6 +135,18 @@ python3 logger.py
 | `state/game_state.json` | Written by ws_observer — nearby entities, combat, XP (gitignored) |
 | `logs/session_N_*.log` | Claude Code JSONL session logs |
 | `dataset/session_N/steps.jsonl` | Training records (screenshot path, state, action, reward) |
+
+## Skills (slash commands)
+
+Three custom skills live in `.claude/commands/`. Use them via `/game-session`, `/verify-pipeline`, `/training-summary`.
+
+| Skill | When to trigger |
+|-------|----------------|
+| `/game-session` | User wants to start/check the stack, asks what's running, says "launch the game" |
+| `/verify-pipeline` | User wants to confirm data is flowing, check health, inspect a training record |
+| `/training-summary` | User asks about dataset stats, reward trends, "how is training going" |
+
+---
 
 ## Kaetram gotchas (hard-won)
 
