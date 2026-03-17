@@ -192,8 +192,8 @@ Death packet sends instance as a plain string: `[29, "instance_string"]` (not a 
 ## Tests
 
 ```bash
-python3 test_ws_observer.py   # 21 unit tests for ws_observer
-python3 test_logger.py        # simulated 5-turn logger test
+python3 tests/test_ws_observer.py   # 21 unit tests for ws_observer
+python3 tests/test_logger.py        # simulated 5-turn logger test
 ```
 
 ## Storage / teardown

@@ -25,3 +25,4 @@ dataset/*/frames/
 # Python
 __pycache__/
 *.pyc
+tests/state/
