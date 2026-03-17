@@ -18,11 +18,12 @@ import shutil
 import time
 from pathlib import Path
 
-BASE        = Path(__file__).parent
-SCREENSHOT  = BASE / "state/screenshot.png"
-STATE_FILE  = BASE / "state/progress.json"
-LOGS_DIR    = BASE / "logs"
-DATASET_DIR = BASE / "dataset"
+BASE           = Path(__file__).parent
+SCREENSHOT     = BASE / "state/screenshot.png"
+STATE_FILE     = BASE / "state/progress.json"
+WS_STATE_FILE  = BASE / "state/game_state.json"
+LOGS_DIR       = BASE / "logs"
+DATASET_DIR    = BASE / "dataset"
 
 
 def latest_log():
@@ -64,10 +65,17 @@ def last_game_action(log: Path):
 
 
 def read_state():
+    state = {}
     try:
-        return json.loads(STATE_FILE.read_text())
+        state = json.loads(STATE_FILE.read_text())
     except (OSError, json.JSONDecodeError):
-        return {}
+        pass
+    try:
+        ws_state = json.loads(WS_STATE_FILE.read_text())
+        state = {**state, **ws_state}
+    except (OSError, json.JSONDecodeError):
+        pass
+    return state
 
 
 def compute_reward(prev, curr):
