@@ -66,7 +66,7 @@ def last_game_action(log: Path):
 def read_state():
     try:
         return json.loads(STATE_FILE.read_text())
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return {}
 
 
@@ -75,8 +75,9 @@ def compute_reward(prev, curr):
 
     # XP gained
     try:
-        xp_delta = float(str(curr.get("xp_estimate", 0)).replace(",", "") or 0) \
-                 - float(str(prev.get("xp_estimate", 0)).replace(",", "") or 0)
+        curr_xp  = float(str(curr.get("xp_estimate", 0)).replace(",", "") or 0)
+        prev_xp  = float(str(prev.get("xp_estimate", 0)).replace(",", "") or 0)
+        xp_delta = curr_xp - prev_xp
         r += max(0.0, xp_delta) * 0.01
     except (ValueError, TypeError):
         pass
