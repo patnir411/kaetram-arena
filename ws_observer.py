@@ -43,6 +43,7 @@ PKT_MOVEMENT = 11
 PKT_DESPAWN = 13
 PKT_COMBAT = 15
 PKT_POINTS = 17
+PKT_COMMAND = 20
 PKT_EXPERIENCE = 28
 PKT_DEATH = 29
 
@@ -250,11 +251,20 @@ async def run(host: str, port: int, username: str = "ObserverBot", password: str
                     print("ws_observer: logged in, observing…")
                     # Tell server we're ready — triggers updateRegion/updateEntities
                     await ws.send(json.dumps([PKT_READY, {"regionsLoaded": 0, "userAgent": "ws_observer"}]))
+                    # Wait for server to finish processing READY before teleporting.
+                    await asyncio.sleep(1)
+                    # Teleport to Mudwich so nearby_entities reflects ClaudeBot's play area.
+                    # Uses Command.CtrlClick (opcode=0) — requires isAdmin(), which is always
+                    # true when SKIP_DATABASE=true. Bypasses chat sanitization.
+                    await ws.send(json.dumps([PKT_COMMAND, [0, {"gridX": 188, "gridY": 157}]]))
+                    print("ws_observer: teleported to Mudwich (188, 157)")
                     continue
 
                 # Entity list: server sends IDs of nearby entities.
+                # A new List means we've entered a new region — clear stale entities first.
                 # Reply with Who to request their spawn data.
                 if top_op == PKT_LIST and isinstance(data, dict):
+                    state.nearby_entities.clear()
                     entity_ids = data.get("entities", [])
                     if entity_ids:
                         await ws.send(json.dumps([PKT_WHO, entity_ids]))

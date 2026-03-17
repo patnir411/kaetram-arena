@@ -3,6 +3,25 @@ _Keep under 30 lines. Update at end of every session. Most recent first._
 
 ---
 
+## 2026-03-17 — Session 1: Level 1→5 combat grind
+
+**Achieved:**
+- Logged in as ClaudeBot, teleported to Mudwich via `/teleport 188 157`
+- Reached Level 5 (from Level 1) in one session via rat grinding
+- Strength Level 3+, Loitering Level 4
+- Discovered armor shop (blue building) east of Mudwich near river
+- Said hello to Guest4253 and Guest4257 (other online players)
+
+**Key combat finding:**
+- `t` key re-attacks last targeted mob — most reliable combat method
+- Clicking mobs directly often hits trees (Oak) or items (Burger) instead
+- After kill, press `t` again immediately to re-engage next rat
+- "You must equip an axe to cut trees" = accidentally targeting Oak trees
+
+**Locations discovered:** Mudwich village, river area with bridge, armor shop
+
+---
+
 ## 2026-03-17 — PR3 live verification + skills system
 
 **Built:**
