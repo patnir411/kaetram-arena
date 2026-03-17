@@ -13,7 +13,6 @@ Output:
 """
 
 import json
-import os
 import shutil
 import time
 from pathlib import Path
@@ -27,8 +26,7 @@ DATASET_DIR    = BASE / "dataset"
 
 
 def latest_log():
-    logs = sorted(LOGS_DIR.glob("session_*.log"), key=os.path.getmtime)
-    return logs[-1] if logs else None
+    return max(LOGS_DIR.glob("session_*.log"), key=lambda p: p.stat().st_mtime, default=None)
 
 
 def session_id(log: Path) -> str:
@@ -72,6 +70,7 @@ def read_state():
         pass
     try:
         ws_state = json.loads(WS_STATE_FILE.read_text())
+        ws_state.pop("timestamp", None)  # don't shadow progress_state timestamp
         state = {**state, **ws_state}
     except (OSError, json.JSONDecodeError):
         pass

@@ -17,33 +17,37 @@ import asyncio
 import json
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-# ---------------------------------------------------------------------------
-# Import the module under test
-# ---------------------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).parent))
 import ws_observer as obs
-
-# Opcode constants (mirrors ws_observer.py)
-PKT_HANDSHAKE  = obs.PKT_HANDSHAKE
-PKT_LOGIN      = obs.PKT_LOGIN
-PKT_WELCOME    = obs.PKT_WELCOME
-PKT_SPAWN      = obs.PKT_SPAWN
-PKT_DESPAWN    = obs.PKT_DESPAWN
-PKT_MOVEMENT   = obs.PKT_MOVEMENT
-PKT_COMBAT     = obs.PKT_COMBAT
-PKT_POINTS     = obs.PKT_POINTS
-PKT_EXPERIENCE = obs.PKT_EXPERIENCE
-PKT_DEATH      = obs.PKT_DEATH
 
 
 # ---------------------------------------------------------------------------
 # Unit tests
 # ---------------------------------------------------------------------------
+
+class TestParsePacket(unittest.TestCase):
+    def test_two_element(self):
+        top, sub, data = obs._parse_packet([5, {"instance": "x"}])
+        self.assertEqual(top, 5)
+        self.assertIsNone(sub)
+        self.assertEqual(data, {"instance": "x"})
+
+    def test_three_element(self):
+        top, sub, data = obs._parse_packet([15, 1, {"instance": "a", "target": "b"}])
+        self.assertEqual(top, 15)
+        self.assertEqual(sub, 1)
+        self.assertEqual(data, {"instance": "a", "target": "b"})
+
+    def test_one_element(self):
+        top, sub, data = obs._parse_packet([0])
+        self.assertEqual(top, 0)
+        self.assertIsNone(sub)
+        self.assertIsNone(data)
+
 
 class TestGameState(unittest.TestCase):
     def setUp(self):
@@ -67,6 +71,11 @@ class TestGameState(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(len(self.state.nearby_entities), 2)
 
+    def test_spawn_stores_max_hp(self):
+        data = {"instance": "rat_001", "type": "mob", "x": 0, "y": 0, "hitPoints": 20, "maxHitPoints": 20}
+        obs.handle_spawn(data, self.state)
+        self.assertEqual(self.state.nearby_entities["rat_001"]["max_hp"], 20)
+
     def test_despawn(self):
         obs.handle_spawn({"instance": "rat_001", "type": "mob", "x": 0, "y": 0}, self.state)
         changed = obs.handle_despawn({"instance": "rat_001"}, self.state)
@@ -84,48 +93,61 @@ class TestGameState(unittest.TestCase):
         self.assertEqual(self.state.nearby_entities["rat_001"]["x"], 20)
         self.assertEqual(self.state.nearby_entities["rat_001"]["y"], 25)
 
+    def test_movement_no_change_returns_false(self):
+        obs.handle_spawn({"instance": "rat_001", "type": "mob", "x": 10, "y": 10}, self.state)
+        changed = obs.handle_movement({"instance": "rat_001", "x": 10, "y": 10}, self.state)
+        self.assertFalse(changed)
+
     def test_movement_unknown_entity(self):
         changed = obs.handle_movement({"instance": "ghost", "x": 5, "y": 5}, self.state)
         self.assertFalse(changed)
 
     def test_combat_hit(self):
-        data = {"opcode": obs.COMBAT_HIT, "attackerId": "ClaudeBot", "targetId": "Rat", "damage": 5}
+        # Actual wire format: {instance: attacker, target: defender, hit: {damage: N}}
+        data = {"instance": "ClaudeBot", "target": "rat_001", "hit": {"damage": 5, "type": 0}}
         changed = obs.handle_combat(data, self.state)
         self.assertTrue(changed)
         self.assertEqual(self.state.last_combat["damage"], 5)
         self.assertEqual(self.state.last_combat["attacker"], "ClaudeBot")
+        self.assertEqual(self.state.last_combat["target"], "rat_001")
 
-    def test_combat_non_hit_ignored(self):
-        data = {"opcode": 0, "attackerId": "ClaudeBot", "targetId": "Rat"}  # Initiate
+    def test_combat_dispatched_only_on_hit_subopcode(self):
+        """handle_combat is only called from run() when sub_op == COMBAT_HIT.
+        Other sub-opcodes never reach handle_combat, so this verifies the
+        handler itself doesn't double-check sub_op."""
+        data = {"instance": "X", "target": "Y", "hit": {"damage": 3}}
         changed = obs.handle_combat(data, self.state)
-        self.assertFalse(changed)
-        self.assertIsNone(self.state.last_combat)
+        self.assertTrue(changed)
 
     def test_points_updates_hp(self):
         obs.handle_spawn({"instance": "rat_001", "type": "mob", "x": 0, "y": 0, "hitPoints": 20}, self.state)
-        changed = obs.handle_points({"instance": "rat_001", "hitPoints": 12}, self.state)
+        changed = obs.handle_points({"instance": "rat_001", "hitPoints": 12, "maxHitPoints": 20}, self.state)
         self.assertTrue(changed)
         self.assertEqual(self.state.nearby_entities["rat_001"]["hp"], 12)
+        self.assertEqual(self.state.nearby_entities["rat_001"]["max_hp"], 20)
+
+    def test_points_no_fields_returns_false(self):
+        obs.handle_spawn({"instance": "rat_001", "type": "mob", "x": 0, "y": 0}, self.state)
+        changed = obs.handle_points({"instance": "rat_001"}, self.state)
+        self.assertFalse(changed)
 
     def test_experience_skill(self):
-        data = {"opcode": obs.EXP_SKILL, "amount": 40, "skill": "strength"}
+        # Actual wire format: {instance, amount, level, skill}
+        data = {"instance": "ClaudeBot", "amount": 40, "skill": 0, "level": 2}
         changed = obs.handle_experience(data, self.state)
         self.assertTrue(changed)
         self.assertEqual(self.state.last_xp_event["amount"], 40)
-        self.assertEqual(self.state.last_xp_event["skill"], "strength")
 
-    def test_experience_bare_amount(self):
-        """Packets without opcode field but with 'amount' key should still register."""
-        data = {"amount": 25, "skill": "magic"}
-        changed = obs.handle_experience(data, self.state)
-        self.assertTrue(changed)
-        self.assertEqual(self.state.last_xp_event["amount"], 25)
-
-    def test_death_zeroes_hp(self):
+    def test_death_string_instance(self):
+        """Death packet sends instance as a plain string, not a dict."""
         obs.handle_spawn({"instance": "rat_001", "type": "mob", "x": 0, "y": 0, "hitPoints": 5}, self.state)
-        changed = obs.handle_death({"instance": "rat_001"}, self.state)
+        changed = obs.handle_death("rat_001", self.state)
         self.assertTrue(changed)
         self.assertEqual(self.state.nearby_entities["rat_001"]["hp"], 0)
+
+    def test_death_unknown_instance(self):
+        changed = obs.handle_death("ghost_999", self.state)
+        self.assertFalse(changed)
 
     def test_player_count_nearby(self):
         obs.handle_spawn({"instance": "p1", "type": "player", "x": 0, "y": 0}, self.state)
@@ -162,37 +184,39 @@ class TestWriteState(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 SAMPLE_PACKETS = [
-    # Handshake
-    [PKT_HANDSHAKE, {"version": "1.0.0"}],
-    # Welcome (after login)
-    [PKT_WELCOME, {"username": "ObserverBot"}],
-    # Spawn two mobs
-    [PKT_SPAWN, [
-        {"instance": "rat_001", "type": "mob", "name": "Rat",   "x": 415, "y": 190, "hitPoints": 20},
-        {"instance": "rat_002", "type": "mob", "name": "Rat",   "x": 420, "y": 195, "hitPoints": 20},
-    ]],
-    # Movement
-    [PKT_MOVEMENT, {"instance": "rat_001", "x": 416, "y": 191}],
-    # Combat hit
-    [PKT_COMBAT, {"opcode": obs.COMBAT_HIT, "attackerId": "ClaudeBot", "targetId": "rat_001", "damage": 5}],
-    # Points update
-    [PKT_POINTS, {"instance": "rat_001", "hitPoints": 15}],
-    # Experience
-    [PKT_EXPERIENCE, {"opcode": obs.EXP_SKILL, "amount": 40, "skill": "strength"}],
+    # Server → Client: batched frames use outer array
+    [[obs.PKT_CONNECTED, None]],
+    [[obs.PKT_HANDSHAKE, {"type": "client", "instance": "0-123", "serverId": 1, "serverTime": 1000}]],
+    [[obs.PKT_WELCOME, {"instance": "0-123", "type": 0, "name": "ObserverBot",
+                        "x": 188, "y": 157, "hitPoints": 69, "maxHitPoints": 69}]],
+    # Spawn two mobs (no sub-opcode — 2-element packet)
+    [[obs.PKT_SPAWN, [
+        {"instance": "rat_001", "type": "mob", "name": "Rat", "x": 415, "y": 190,
+         "hitPoints": 20, "maxHitPoints": 20},
+        {"instance": "rat_002", "type": "mob", "name": "Rat", "x": 420, "y": 195,
+         "hitPoints": 20, "maxHitPoints": 20},
+    ]]],
+    # Movement — has sub-opcode (3-element packet)
+    [[obs.PKT_MOVEMENT, 4, {"instance": "rat_001", "x": 416, "y": 191}]],
+    # Combat Hit — has sub-opcode
+    [[obs.PKT_COMBAT, obs.COMBAT_HIT, {"instance": "ClaudeBot", "target": "rat_001",
+                                        "hit": {"damage": 5, "type": 0}}]],
+    # Points update (no sub-opcode)
+    [[obs.PKT_POINTS, {"instance": "rat_001", "hitPoints": 15, "maxHitPoints": 20}]],
+    # Experience.Skill — has sub-opcode
+    [[obs.PKT_EXPERIENCE, obs.EXP_SKILL, {"instance": "ClaudeBot", "amount": 40, "skill": 0}]],
     # Despawn
-    [PKT_DESPAWN, {"instance": "rat_002"}],
-    # Death
-    [PKT_DEATH, {"instance": "rat_001"}],
+    [[obs.PKT_DESPAWN, {"instance": "rat_002"}]],
+    # Death — data is instance string
+    [[obs.PKT_DEATH, "rat_001"]],
 ]
 
 
 async def mock_server_handler(websocket):
-    """Send sample packets, wait for login, then continue."""
-    for pkt in SAMPLE_PACKETS:
-        await websocket.send(json.dumps(pkt))
+    for frame in SAMPLE_PACKETS:
+        await websocket.send(json.dumps(frame))
         await asyncio.sleep(0.1)
     print("mock_server: all packets sent, holding connection open")
-    # Hold open so the observer can finish writing
     await asyncio.sleep(5)
 
 
@@ -205,7 +229,7 @@ async def serve_mock(port: int) -> None:
     print(f"mock_server: listening on ws://localhost:{port}")
     print(f"             run:  python3 ws_observer.py --host localhost --port {port}")
     async with ws_server.serve(mock_server_handler, "localhost", port):
-        await asyncio.Future()  # run forever
+        await asyncio.Future()
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +245,6 @@ def main():
     if args.serve:
         asyncio.run(serve_mock(args.port))
     else:
-        # Run unit tests, passing remaining args to unittest
         sys.argv = [sys.argv[0]] + remaining
         unittest.main(verbosity=2)
 
