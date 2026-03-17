@@ -1,6 +1,11 @@
 # Screenshots and session state (generated at runtime)
 state/*.png
 state/session*.json
+state/game_state.json
+state/game_state.tmp
+
+# Kaetram-Open server (installed locally, not part of this repo)
+/Kaetram-Open/
 .playwright-mcp/
 
 # Root-level test screenshots
