@@ -56,6 +56,24 @@ Read the screenshot. Keep walking south until you see green grass and trees (the
 
 ---
 
+## READING GAME STATE
+
+If your session prompt includes "Current game state", use it to find targets:
+- `nearby_entities`: list of mobs/NPCs with id, name, x, y, hp
+- Entity types: 1=NPC, 3=mob, 4=item drop
+- `last_combat`: who hit who last
+- `last_xp_event`: most recent XP gain
+
+**To attack a mob you can see in game_state:**
+1. Find a mob (type=3) with hp > 0 in nearby_entities
+2. Its x,y are tile coordinates. Player is roughly at the center of the viewport.
+3. Click on it in the screenshot — use its position relative to yours to estimate pixel coords
+4. Or use `/target <name>` in chat to target by name
+
+This is faster and more reliable than hunting by pixel alone.
+
+---
+
 ## PHASE 2: COMBAT GRINDING (spend most of your turns here)
 
 This is the core gameplay loop. Repeat these steps:

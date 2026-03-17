@@ -29,8 +29,28 @@ while true; do
   # Read previous progress and include in prompt
   PROGRESS=$(cat "$STATE_FILE" 2>/dev/null || echo '{}')
 
-  PROMPT="Session #${SESSION}. Your previous progress: ${PROGRESS}
+  # Read real-time game state from ws_observer (optional — graceful if absent)
+  GAME_STATE=""
+  if [ -f "$PROJECT_DIR/state/game_state.json" ]; then
+    GAME_STATE=$(python3 -c "
+import json, sys
+d = json.load(open('$PROJECT_DIR/state/game_state.json'))
+ents = d.get('nearby_entities', [])[:15]  # cap at 15 to keep prompt short
+d['nearby_entities'] = ents
+print(json.dumps(d, separators=(',',':')))
+" 2>/dev/null || echo "")
+  fi
 
+  GAME_STATE_BLOCK=""
+  if [ -n "$GAME_STATE" ]; then
+    GAME_STATE_BLOCK="
+Current game state (real-time from ws_observer):
+${GAME_STATE}
+Use nearby_entities to find and target mobs directly by coordinate."
+  fi
+
+  PROMPT="Session #${SESSION}. Your previous progress: ${PROGRESS}
+${GAME_STATE_BLOCK}
 Follow your system instructions exactly. Phase 1: Run the login code block. Phase 2: Grind combat (kill rats/mobs, loot drops). Phase 3: Check quests if not started. Phase 4: Explore one new area. Phase 5: MANDATORY — write progress.json before session ends."
 
   claude -p "$PROMPT" \
