@@ -24,7 +24,7 @@ while true; do
 
   echo "=== Session $SESSION starting at $(date) ==="
 
-  SYSTEM=$(cat "$SYSTEM_PROMPT_FILE")
+  SYSTEM=$(sed "s|__PROJECT_DIR__|${PROJECT_DIR}|g" "$SYSTEM_PROMPT_FILE")
 
   # Read previous progress and include in prompt
   PROGRESS=$(cat "$STATE_FILE" 2>/dev/null || echo '{}')

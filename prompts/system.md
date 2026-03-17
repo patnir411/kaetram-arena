@@ -10,7 +10,7 @@ Follow the phases below IN ORDER every session. Do not skip phases.
 Every time you take a screenshot with `page.screenshot()`, use the **Read tool** on the saved file to actually view it:
 
 ```
-Read file_path: /Users/barathv/MIT Dropbox/Barath Velmurugan/Desktop/Projects/new/kaetram-arena/state/screenshot.png
+Read file_path: __PROJECT_DIR__/state/screenshot.png
 ```
 
 This shows you the full image — characters, mobs, terrain, UI, HP bars, everything. Use what you see to decide your next move.
@@ -32,7 +32,7 @@ async (page) => {
   await page.waitForTimeout(8000);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(1000);
-  await page.screenshot({ path: '/Users/barathv/MIT Dropbox/Barath Velmurugan/Desktop/Projects/new/kaetram-arena/state/screenshot.png', type: 'png' });
+  await page.screenshot({ path: '__PROJECT_DIR__/state/screenshot.png', type: 'png' });
   return 'Logged in as ClaudeBot';
 }
 ```
@@ -47,7 +47,7 @@ async (page) => {
   await page.waitForTimeout(4000);
   await page.keyboard.up('s');
   await page.waitForTimeout(1000);
-  await page.screenshot({ path: '/Users/barathv/MIT Dropbox/Barath Velmurugan/Desktop/Projects/new/kaetram-arena/state/screenshot.png', type: 'png' });
+  await page.screenshot({ path: '__PROJECT_DIR__/state/screenshot.png', type: 'png' });
   return 'Walked south';
 }
 ```
@@ -70,7 +70,7 @@ async (page) => {
   await page.waitForTimeout(2500);
   await page.keyboard.up('d');
   await page.waitForTimeout(500);
-  await page.screenshot({ path: '/Users/barathv/MIT Dropbox/Barath Velmurugan/Desktop/Projects/new/kaetram-arena/state/screenshot.png', type: 'png' });
+  await page.screenshot({ path: '__PROJECT_DIR__/state/screenshot.png', type: 'png' });
   return 'Walked east';
 }
 ```
@@ -86,7 +86,7 @@ async (page) => {
   // Adjust x,y to where you see a mob. Viewport is 1280x720, player is at center ~640,360
   await page.mouse.click(640, 360);
   await page.waitForTimeout(5000);
-  await page.screenshot({ path: '/Users/barathv/MIT Dropbox/Barath Velmurugan/Desktop/Projects/new/kaetram-arena/state/screenshot.png', type: 'png' });
+  await page.screenshot({ path: '__PROJECT_DIR__/state/screenshot.png', type: 'png' });
   return 'Attacked and waited';
 }
 ```
@@ -103,7 +103,7 @@ If your HP is low, walk away from combat and wait 10-15 seconds. Check stats:
 async (page) => {
   await page.keyboard.press('p');
   await page.waitForTimeout(1500);
-  await page.screenshot({ path: '/Users/barathv/MIT Dropbox/Barath Velmurugan/Desktop/Projects/new/kaetram-arena/state/screenshot.png', type: 'png' });
+  await page.screenshot({ path: '__PROJECT_DIR__/state/screenshot.png', type: 'png' });
   await page.keyboard.press('Escape');
   return 'Checked profile';
 }
@@ -150,7 +150,7 @@ Take a screenshot at each new area you discover.
 You MUST do this before your session ends. Write your progress:
 
 ```bash
-cat > /Users/barathv/MIT Dropbox/Barath Velmurugan/Desktop/Projects/new/kaetram-arena/state/progress.json << 'PROGRESS'
+cat > __PROJECT_DIR__/state/progress.json << 'PROGRESS'
 {
   "sessions": SESSION_NUMBER,
   "level": YOUR_LEVEL,
@@ -173,7 +173,7 @@ Take a final screenshot too.
 
 ## CRITICAL RULES
 
-1. **ALWAYS use absolute screenshot path**: `/Users/barathv/MIT Dropbox/Barath Velmurugan/Desktop/Projects/new/kaetram-arena/state/screenshot.png`
+1. **ALWAYS use absolute screenshot path**: `__PROJECT_DIR__/state/screenshot.png`
 2. **NEVER use relative paths** — they break the browser
 3. **After every screenshot, Read the file** — that's how you see the game
 4. **Use browser_run_code for multi-step actions** — it's more reliable than individual tool calls
