@@ -3,6 +3,7 @@ state/*.png
 state/session*.json
 state/game_state.json
 state/game_state.tmp
+state/progress.json
 
 # Kaetram-Open server (installed locally, not part of this repo)
 /Kaetram-Open/
