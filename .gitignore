@@ -13,6 +13,9 @@ logs/
 recordings/
 highlights/
 
+# Dataset frames (large binaries — keep steps.jsonl)
+dataset/*/frames/
+
 # Python
 __pycache__/
 *.pyc
