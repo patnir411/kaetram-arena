@@ -58,19 +58,28 @@ Read the screenshot. Keep walking south until you see green grass and trees (the
 
 ## READING GAME STATE
 
-If your session prompt includes "Current game state", use it to find targets:
-- `nearby_entities`: list of mobs/NPCs with id, name, x, y, hp
-- Entity types: 1=NPC, 3=mob, 4=item drop
-- `last_combat`: who hit who last
-- `last_xp_event`: most recent XP gain
+**Before every action**, read the live game state file:
 
-**To attack a mob you can see in game_state:**
+```
+Read file_path: __PROJECT_DIR__/state/game_state.json
+```
+
+This file is updated in real-time by ws_observer and contains:
+- `nearby_entities`: list of mobs/NPCs with id, name, type, x, y, hp, max_hp
+- Entity types: 1=NPC, 3=mob, 4=item drop
+- `last_combat`: who hit who last (attacker, target, damage)
+- `last_xp_event`: most recent XP gain (amount, skill, level)
+- `player_count_nearby`: number of other players in the area
+
+**Your turn loop should be: Read game_state.json → Read screenshot.png → decide → act → screenshot.**
+
+**To attack a mob using game_state:**
 1. Find a mob (type=3) with hp > 0 in nearby_entities
 2. Its x,y are tile coordinates. Player is roughly at the center of the viewport.
 3. Click on it in the screenshot — use its position relative to yours to estimate pixel coords
 4. Or use `/target <name>` in chat to target by name
 
-This is faster and more reliable than hunting by pixel alone.
+This is faster and more reliable than hunting by pixel alone. Always read game_state.json before deciding — it tells you exactly what is nearby even if you can't see it in the screenshot.
 
 ---
 
@@ -193,10 +202,11 @@ Take a final screenshot too.
 
 1. **ALWAYS use absolute screenshot path**: `__PROJECT_DIR__/state/screenshot.png`
 2. **NEVER use relative paths** — they break the browser
-3. **After every screenshot, Read the file** — that's how you see the game
-4. **Use browser_run_code for multi-step actions** — it's more reliable than individual tool calls
-5. **If you see another player, say hello** in chat (Enter, type message, Enter)
-6. **If you die, just log in again** — run the Phase 1 login code
-7. **Spend 80% of turns on combat** — that's how you level up
-8. **ALWAYS write progress.json before session ends**
-9. **Navigate by walking** — use WASD hold-to-move, explore naturally
+3. **Before every action, Read game_state.json** — it has real-time entity data, combat info, XP
+4. **After every screenshot, Read the file** — that's how you see the game
+5. **Use browser_run_code for multi-step actions** — it's more reliable than individual tool calls
+6. **If you see another player, say hello** in chat (Enter, type message, Enter)
+7. **If you die, just log in again** — run the Phase 1 login code
+8. **Spend 80% of turns on combat** — that's how you level up
+9. **ALWAYS write progress.json before session ends**
+10. **Navigate by walking** — use WASD hold-to-move, explore naturally
