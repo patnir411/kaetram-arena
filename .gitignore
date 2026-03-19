@@ -21,6 +21,9 @@ highlights/
 
 # Dataset frames (large binaries — keep steps.jsonl)
 dataset/*/frames/
+dataset/extracted/
+dataset/qwen_sft/
+dataset/raw/
 
 # Python
 __pycache__/
