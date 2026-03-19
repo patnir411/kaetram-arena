@@ -165,6 +165,115 @@ class TestGameState(unittest.TestCase):
         self.assertIn("player_count_nearby", d)
 
 
+class TestPlayerPositionAndClickCoords(unittest.TestCase):
+    def setUp(self):
+        self.state = obs.GameState()
+
+    def test_claudebot_detection(self):
+        """Spawn packet with name='ClaudeBot' sets claudebot_instance."""
+        data = {"instance": "0-cb-123", "type": 0, "name": "ClaudeBot", "x": 190, "y": 160}
+        obs.handle_spawn(data, self.state)
+        self.assertEqual(self.state.claudebot_instance, "0-cb-123")
+
+    def test_non_claudebot_no_detection(self):
+        """Spawn of other players does not set claudebot_instance."""
+        data = {"instance": "0-other", "type": 0, "name": "SomePlayer", "x": 100, "y": 100}
+        obs.handle_spawn(data, self.state)
+        self.assertIsNone(self.state.claudebot_instance)
+
+    def test_player_position_in_output(self):
+        """to_dict() returns player_position when ClaudeBot is in nearby_entities."""
+        obs.handle_spawn({"instance": "0-cb", "type": 0, "name": "ClaudeBot", "x": 190, "y": 160}, self.state)
+        d = self.state.to_dict()
+        self.assertEqual(d["player_position"], {"x": 190, "y": 160})
+
+    def test_player_position_null(self):
+        """to_dict() returns player_position=None when ClaudeBot not present."""
+        obs.handle_spawn({"instance": "mob1", "type": 3, "name": "Rat", "x": 10, "y": 10}, self.state)
+        d = self.state.to_dict()
+        self.assertIsNone(d["player_position"])
+
+    def test_click_coords_on_screen(self):
+        """Entity 5 tiles east and 3 tiles south of player → click_x = 640+5*64=960, click_y = 360+3*64=552."""
+        obs.handle_spawn({"instance": "0-cb", "type": 0, "name": "ClaudeBot", "x": 190, "y": 160}, self.state)
+        obs.handle_spawn({"instance": "rat1", "type": 3, "name": "Rat", "x": 195, "y": 163,
+                          "hitPoints": 20, "maxHitPoints": 20}, self.state)
+        d = self.state.to_dict()
+        rat = [e for e in d["nearby_entities"] if e["name"] == "Rat"][0]
+        self.assertTrue(rat["on_screen"])
+        self.assertEqual(rat["click_x"], 960)
+        self.assertEqual(rat["click_y"], 552)
+
+    def test_click_coords_off_screen(self):
+        """Entity 200 tiles away → on_screen=False, no click_x/click_y."""
+        obs.handle_spawn({"instance": "0-cb", "type": 0, "name": "ClaudeBot", "x": 190, "y": 160}, self.state)
+        obs.handle_spawn({"instance": "ogre1", "type": 3, "name": "Ogre", "x": 390, "y": 360,
+                          "hitPoints": 150, "maxHitPoints": 150}, self.state)
+        d = self.state.to_dict()
+        ogre = [e for e in d["nearby_entities"] if e["name"] == "Ogre"][0]
+        self.assertFalse(ogre["on_screen"])
+        self.assertNotIn("click_x", ogre)
+        self.assertNotIn("click_y", ogre)
+
+    def test_nearest_mob(self):
+        """Nearest alive mob (type=3, hp>0) is selected correctly."""
+        obs.handle_spawn({"instance": "0-cb", "type": 0, "name": "ClaudeBot", "x": 190, "y": 160}, self.state)
+        obs.handle_spawn({"instance": "rat1", "type": 3, "name": "Rat", "x": 195, "y": 163,
+                          "hitPoints": 20, "maxHitPoints": 20}, self.state)
+        obs.handle_spawn({"instance": "rat2", "type": 3, "name": "Rat", "x": 192, "y": 161,
+                          "hitPoints": 20, "maxHitPoints": 20}, self.state)
+        d = self.state.to_dict()
+        self.assertIsNotNone(d["nearest_mob"])
+        self.assertEqual(d["nearest_mob"]["id"], "rat2")  # closer: distance=3 vs 8
+        self.assertEqual(d["nearest_mob"]["distance"], 3)
+
+    def test_nearest_mob_excludes_dead(self):
+        """Dead mobs (hp=0) are not considered for nearest_mob."""
+        obs.handle_spawn({"instance": "0-cb", "type": 0, "name": "ClaudeBot", "x": 190, "y": 160}, self.state)
+        obs.handle_spawn({"instance": "rat1", "type": 3, "name": "Rat", "x": 191, "y": 160,
+                          "hitPoints": 0, "maxHitPoints": 20}, self.state)
+        obs.handle_spawn({"instance": "rat2", "type": 3, "name": "Rat", "x": 195, "y": 163,
+                          "hitPoints": 20, "maxHitPoints": 20}, self.state)
+        d = self.state.to_dict()
+        self.assertEqual(d["nearest_mob"]["id"], "rat2")
+
+    def test_distance_calculation(self):
+        """Manhattan distance computed correctly."""
+        obs.handle_spawn({"instance": "0-cb", "type": 0, "name": "ClaudeBot", "x": 100, "y": 100}, self.state)
+        obs.handle_spawn({"instance": "m1", "type": 3, "name": "Mob", "x": 105, "y": 97,
+                          "hitPoints": 10, "maxHitPoints": 10}, self.state)
+        d = self.state.to_dict()
+        mob = [e for e in d["nearby_entities"] if e["name"] == "Mob"][0]
+        self.assertEqual(mob["distance"], 8)  # |5| + |3| = 8
+
+    def test_teleport_updates_position(self):
+        """PKT_TELEPORT updates entity position in nearby_entities."""
+        obs.handle_spawn({"instance": "0-cb", "type": 0, "name": "ClaudeBot", "x": 190, "y": 160}, self.state)
+        # Simulate teleport packet handling inline (same logic as run())
+        data = {"instance": "0-cb", "x": 300, "y": 400}
+        eid = obs._entity_id(data)
+        if eid in self.state.nearby_entities:
+            self.state.nearby_entities[eid]["x"] = data.get("x", 0)
+            self.state.nearby_entities[eid]["y"] = data.get("y", 0)
+        self.assertEqual(self.state.nearby_entities["0-cb"]["x"], 300)
+        self.assertEqual(self.state.nearby_entities["0-cb"]["y"], 400)
+
+    def test_welcome_extracts_instance(self):
+        """PKT_WELCOME saves observer_instance on GameState."""
+        self.state.observer_instance = None
+        # Simulate Welcome handling inline (same logic as run())
+        data = {"instance": "0-obs-456", "type": 0, "name": "ObserverBot", "x": 188, "y": 157}
+        if isinstance(data, dict):
+            self.state.observer_instance = data.get("instance")
+        self.assertEqual(self.state.observer_instance, "0-obs-456")
+
+    def test_to_dict_schema_includes_new_fields(self):
+        """to_dict() includes player_position and nearest_mob keys."""
+        d = self.state.to_dict()
+        self.assertIn("player_position", d)
+        self.assertIn("nearest_mob", d)
+
+
 class TestWriteState(unittest.TestCase):
     def test_atomic_write(self):
         state = obs.GameState()

@@ -1,5 +1,5 @@
 ---
-description: Trigger when the user asks to verify the pipeline, check health, confirm data is flowing, asks "is everything working", "check the pipeline", "is ws_observer running", "are steps being recorded", or wants to inspect a training record.
+description: Trigger when the user asks to verify the pipeline, check health, confirm data is flowing, asks "is everything working", "check the pipeline", "is game_state updating", "are steps being recorded", or wants to inspect a training record.
 ---
 
 Run a full pipeline health check and print a pass/fail report.
@@ -16,7 +16,7 @@ PROJECT_DIR=$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null || pwd)
 import json, time, os
 path = f"{PROJECT_DIR}/state/game_state.json"
 if not os.path.exists(path):
-    print("FAIL: game_state.json missing — ws_observer not running")
+    print("FAIL: game_state.json missing — agent hasn't observed yet")
 else:
     age = time.time() - os.path.getmtime(path)
     d = json.load(open(path))
@@ -24,10 +24,6 @@ else:
     print(f"{'PASS' if age < 30 else 'STALE'}: game_state.json age={age:.0f}s, entities={entity_count}")
 ```
 
-**Check B — ws_observer process:**
-```bash
-ps aux | grep "ws_observer\.py" | grep -v grep
-```
 
 **Check C — dataset sessions exist:**
 ```bash
@@ -77,14 +73,12 @@ ps aux | grep "logger\.py" | grep -v grep
 |-------|--------|
 | game_state.json exists | PASS/FAIL |
 | game_state.json < 30s old | PASS/STALE |
-| ws_observer process running | PASS/FAIL |
 | dataset/ has sessions | PASS/FAIL |
 | latest steps.jsonl non-empty | PASS/FAIL |
 | latest record has entity data | PASS/FAIL |
 | logger process running | PASS/FAIL |
 
 **Step 4 — for each FAIL, print the exact fix command:**
-- Missing game_state.json → `cd <PROJECT_DIR> && python3 ws_observer.py`
+- Missing game_state.json → Agent needs to run and complete an observe step
 - No dataset sessions → `cd <PROJECT_DIR> && python3 logger.py`
 - logger not running → `cd <PROJECT_DIR> && python3 logger.py`
-- ws_observer not running → `cd <PROJECT_DIR> && python3 ws_observer.py`

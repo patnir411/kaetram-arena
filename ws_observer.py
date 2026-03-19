@@ -40,6 +40,7 @@ PKT_WHO = 7     # Client requests spawn data for a list of entity IDs
 PKT_READY = 9
 PKT_SYNC = 10
 PKT_MOVEMENT = 11
+PKT_TELEPORT = 12
 PKT_DESPAWN = 13
 PKT_COMBAT = 15
 PKT_POINTS = 17
@@ -58,6 +59,15 @@ COMBAT_HIT = 1
 
 # Experience sub-opcodes (opcodes.ts Experience enum): Sync=0, Skill=1
 EXP_SKILL = 1
+
+# Viewport / click-coordinate constants
+TILE_SIZE = 16
+ZOOM = 4
+ACTUAL_TILE_PX = TILE_SIZE * ZOOM  # 64
+VIEWPORT_W = 1280
+VIEWPORT_H = 720
+CENTER_X = VIEWPORT_W // 2  # 640
+CENTER_Y = VIEWPORT_H // 2  # 360
 
 
 def _parse_packet(packet: list) -> tuple:
@@ -78,16 +88,60 @@ class GameState:
         self.nearby_entities: dict[str, dict] = {}  # id → entity dict
         self.last_combat: dict | None = None
         self.last_xp_event: dict | None = None
+        self.claudebot_instance: str | None = None  # detected by name on spawn
+        self.observer_instance: str | None = None    # from Welcome packet
 
     def to_dict(self) -> dict:
         entities = list(self.nearby_entities.values())
         player_count = sum(1 for e in entities if e.get("type") == "player")
+
+        # Find ClaudeBot's position
+        player_pos = None
+        if self.claudebot_instance and self.claudebot_instance in self.nearby_entities:
+            cb = self.nearby_entities[self.claudebot_instance]
+            player_pos = {"x": cb["x"], "y": cb["y"]}
+
+        # Enrich entities with click coordinates + distance
+        if player_pos:
+            px, py = player_pos["x"], player_pos["y"]
+            for ent in entities:
+                dx = ent["x"] - px
+                dy = ent["y"] - py
+                ent["distance"] = abs(dx) + abs(dy)  # Manhattan
+                # Screen pixel where agent should click to target this entity
+                sx = CENTER_X + dx * ACTUAL_TILE_PX
+                sy = CENTER_Y + dy * ACTUAL_TILE_PX
+                # Only include click coords if on-screen
+                if 0 <= sx <= VIEWPORT_W and 0 <= sy <= VIEWPORT_H:
+                    ent["click_x"] = sx
+                    ent["click_y"] = sy
+                    ent["on_screen"] = True
+                else:
+                    ent["on_screen"] = False
+
+        # Find nearest attackable mob
+        nearest_mob = None
+        if player_pos:
+            mobs = [e for e in entities if e.get("type") == 3 and e.get("hp", 0) > 0]
+            if mobs:
+                mobs.sort(key=lambda e: e.get("distance", 9999))
+                nearest_mob = {
+                    "name": mobs[0]["name"],
+                    "id": mobs[0]["id"],
+                    "distance": mobs[0]["distance"],
+                    "click_x": mobs[0].get("click_x"),
+                    "click_y": mobs[0].get("click_y"),
+                    "on_screen": mobs[0].get("on_screen", False),
+                }
+
         return {
             "timestamp": time.time(),
             "nearby_entities": entities,
             "last_combat": self.last_combat,
             "last_xp_event": self.last_xp_event,
             "player_count_nearby": player_count,
+            "player_position": player_pos,
+            "nearest_mob": nearest_mob,
         }
 
 
@@ -120,6 +174,8 @@ def handle_spawn(data: dict | list, state: GameState) -> bool:
             "hp": ent.get("hitPoints", ent.get("hp", 0)),
             "max_hp": ent.get("maxHitPoints", 0),
         }
+        if ent.get("name") == "ClaudeBot":
+            state.claudebot_instance = eid
         changed = True
     return changed
 
@@ -207,9 +263,32 @@ def handle_death(data: str | dict, state: GameState) -> bool:
     return False
 
 
+FOLLOW_INTERVAL = 3  # seconds — how often observer teleports to ClaudeBot
+
+
+async def _follow_loop(ws, state: GameState) -> None:
+    """Periodically teleport observer to ClaudeBot's position (or Mudwich fallback)."""
+    while True:
+        await asyncio.sleep(FOLLOW_INTERVAL)
+        if state.claudebot_instance and state.claudebot_instance in state.nearby_entities:
+            cb = state.nearby_entities[state.claudebot_instance]
+            target_x, target_y = cb["x"], cb["y"]
+            label = f"ClaudeBot ({target_x}, {target_y})"
+        else:
+            # Fallback: Mudwich village center where ClaudeBot spawns
+            target_x, target_y = 188, 157
+            label = "Mudwich (188, 157)"
+        try:
+            await ws.send(json.dumps([PKT_COMMAND, [0, {"gridX": target_x, "gridY": target_y}]]))
+            print(f"ws_observer: follow → {label}")
+        except Exception:
+            break
+
+
 async def run(host: str, port: int, username: str = "ObserverBot", password: str = "observer", debug: bool = False) -> None:
     uri = f"ws://{host}:{port}"
     state = GameState()
+    follow_task = None
     print(f"ws_observer: connecting to {uri} as {username}")
 
     async with websockets.connect(uri) as ws:
@@ -248,6 +327,8 @@ async def run(host: str, port: int, username: str = "ObserverBot", password: str
                     continue
 
                 if top_op == PKT_WELCOME:
+                    if isinstance(data, dict):
+                        state.observer_instance = data.get("instance")
                     print("ws_observer: logged in, observing…")
                     # Tell server we're ready — triggers updateRegion/updateEntities
                     await ws.send(json.dumps([PKT_READY, {"regionsLoaded": 0, "userAgent": "ws_observer"}]))
@@ -258,6 +339,9 @@ async def run(host: str, port: int, username: str = "ObserverBot", password: str
                     # true when SKIP_DATABASE=true. Bypasses chat sanitization.
                     await ws.send(json.dumps([PKT_COMMAND, [0, {"gridX": 188, "gridY": 157}]]))
                     print("ws_observer: teleported to Mudwich (188, 157)")
+                    # Start background follow loop — teleports to ClaudeBot every 3s
+                    if follow_task is None or follow_task.done():
+                        follow_task = asyncio.create_task(_follow_loop(ws, state))
                     continue
 
                 # Entity list: server sends IDs of nearby entities.
@@ -280,6 +364,13 @@ async def run(host: str, port: int, username: str = "ObserverBot", password: str
 
                 elif top_op == PKT_DESPAWN and isinstance(data, dict):
                     changed = handle_despawn(data, state)
+
+                elif top_op == PKT_TELEPORT and isinstance(data, dict):
+                    eid = _entity_id(data)
+                    if eid and eid in state.nearby_entities:
+                        state.nearby_entities[eid]["x"] = data.get("x", 0)
+                        state.nearby_entities[eid]["y"] = data.get("y", 0)
+                        changed = True
 
                 elif top_op == PKT_MOVEMENT and isinstance(data, dict):
                     changed = handle_movement(data, state)

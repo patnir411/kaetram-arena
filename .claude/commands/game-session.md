@@ -22,9 +22,8 @@ ls -la "$PROJECT_DIR/state/game_state.json" 2>/dev/null
 |---------|------|--------|
 | Kaetram game client | 9000 | ✓ running / ✗ down |
 | Kaetram game server WS | 9001 | ✓ running / ✗ down |
-| ws_observer.py | — | ✓ running / ✗ down |
-| logger.py | — | ✓ running / ✗ down |
 | dashboard.py | 8080 | ✓ running / ✗ down |
+| game_state.json | — | ✓ fresh (<30s) / ✗ stale |
 
 Also check if `state/game_state.json` exists and how old it is (fresh = < 30s).
 
@@ -34,16 +33,13 @@ Also check if `state/game_state.json` exists and how old it is (fresh = < 30s).
 # Terminal 1 — Kaetram server (Node 20 required)
 ./scripts/start-kaetram.sh
 
-# Terminal 2 — WebSocket observer
-cd <PROJECT_DIR> && python3 ws_observer.py
-
-# Terminal 3 — Dashboard (optional)
+# Terminal 2 — Dashboard (optional)
 cd <PROJECT_DIR> && python3 dashboard.py
 
-# Terminal 4 — Dataset logger (optional)
+# Terminal 3 — Dataset logger (optional)
 cd <PROJECT_DIR> && python3 logger.py
 
-# Terminal 5 — Agent loop (MUST be separate terminal — see gotcha below)
+# Terminal 4 — Agent loop (MUST be separate terminal — see gotcha below)
 cd <PROJECT_DIR> && ./play.sh
 ```
 
@@ -62,8 +58,6 @@ status = {
     "timestamp": datetime.datetime.now().isoformat(),
     "kaetram_9000": <bool>,
     "ws_9001": <bool>,
-    "ws_observer": <bool>,
-    "logger": <bool>,
     "dashboard_8080": <bool>,
     "game_state_fresh": <bool>
 }
