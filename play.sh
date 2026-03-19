@@ -7,13 +7,13 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_FILE="$PROJECT_DIR/state/progress.json"
 SYSTEM_PROMPT_FILE="$PROJECT_DIR/prompts/system.md"
 LOG_DIR="$PROJECT_DIR/logs"
-MAX_TURNS=100
+MAX_TURNS=10000
 PAUSE_BETWEEN=10
 
 mkdir -p "$LOG_DIR" "$PROJECT_DIR/state"
 
 if [ ! -f "$STATE_FILE" ]; then
-  echo '{"sessions":0,"level":1,"xp_estimate":"0","quests_started":[],"quests_completed":[],"locations_visited":["mudwich"],"kills_this_session":0,"last_action":"none","notes":"fresh start"}' > "$STATE_FILE"
+  echo '{"sessions":0,"level":1,"xp_estimate":"0","active_quests":[],"completed_quests":[],"active_achievements":[],"completed_achievements":[],"inventory_summary":[],"locations_visited":["mudwich"],"kills_this_session":0,"last_action":"none","next_objective":"accept quests from NPCs","notes":"fresh start"}' > "$STATE_FILE"
 fi
 
 SESSION=0
@@ -24,19 +24,24 @@ while true; do
 
   echo "=== Session $SESSION starting at $(date) ==="
 
-  SYSTEM=$(sed "s|__PROJECT_DIR__|${PROJECT_DIR}|g" "$SYSTEM_PROMPT_FILE")
+  SYSTEM=$(sed -e "s|__PROJECT_DIR__|${PROJECT_DIR}|g" \
+               -e "s|__USERNAME__|ClaudeBot|g" \
+               -e "s|__SERVER_PORT__||g" \
+               "$SYSTEM_PROMPT_FILE")
 
   # Read previous progress and include in prompt
   PROGRESS=$(cat "$STATE_FILE" 2>/dev/null || echo '{}')
 
-  # Read real-time game state from ws_observer (optional — graceful if absent)
+  # Read game state if available (written by the observe step's page.evaluate() call)
   GAME_STATE=""
   if [ -f "$PROJECT_DIR/state/game_state.json" ]; then
     GAME_STATE=$(python3 -c "
 import json, sys
 d = json.load(open('$PROJECT_DIR/state/game_state.json'))
-ents = d.get('nearby_entities', [])[:15]  # cap at 15 to keep prompt short
-d['nearby_entities'] = ents
+d['nearby_entities'] = d.get('nearby_entities', [])[:15]
+d['inventory'] = d.get('inventory', [])[:15]
+d['quests'] = d.get('quests', [])[:10]
+d['achievements'] = d.get('achievements', [])[:10]
 print(json.dumps(d, separators=(',',':')))
 " 2>/dev/null || echo "")
   fi
@@ -44,23 +49,54 @@ print(json.dumps(d, separators=(',',':')))
   GAME_STATE_BLOCK=""
   if [ -n "$GAME_STATE" ]; then
     GAME_STATE_BLOCK="
-Current game state (real-time from ws_observer):
+Previous game state (from last observe step):
 ${GAME_STATE}
-Use nearby_entities to find and target mobs directly by coordinate."
+Use nearest_mob.click_x/click_y to click on targets. Use player_position for spatial awareness."
   fi
 
-  PROMPT="Session #${SESSION}. Your previous progress: ${PROGRESS}
-${GAME_STATE_BLOCK}
-Follow your system instructions exactly. Phase 1: Run the login code block. Phase 2: Grind combat (kill rats/mobs, loot drops). Phase 3: Check quests if not started. Phase 4: Explore one new area. Phase 5: MANDATORY — write progress.json before session ends."
+  PROMPT="IMPORTANT: Do NOT search for files, read documentation, or explore the filesystem. Your ONLY job is to play the game via the browser. Start IMMEDIATELY with the login code block in your system instructions.
 
-  claude -p "$PROMPT" \
+Session #${SESSION}. Your previous progress: ${PROGRESS}
+${GAME_STATE_BLOCK}
+Follow your system instructions exactly. Load tools, then login, then run the OBSERVE-ACT loop: kill mobs, progress quests, explore. Write progress.json before session ends."
+
+  # Run from isolated dir to prevent claude from reading this project's CLAUDE.md
+  SANDBOX="/tmp/kaetram_session_${SESSION}_$$"
+  mkdir -p "$SANDBOX"
+  cp "$PROJECT_DIR/.mcp.json" "$SANDBOX/.mcp.json"
+  (cd "$SANDBOX" && claude -p "$PROMPT" \
     --model sonnet \
     --max-turns "$MAX_TURNS" \
     --append-system-prompt "$SYSTEM" \
     --dangerously-skip-permissions \
+    --disallowedTools "Glob Grep Agent Edit WebFetch WebSearch Write Skill mcp__playwright__browser_evaluate mcp__playwright__browser_snapshot mcp__playwright__browser_console_messages" \
     --output-format stream-json \
-    --verbose \
+    --verbose) \
     2>&1 | tee "$LOG_FILE" || true
+
+  rm -rf "$SANDBOX"
+
+  # Auto-extract last game state from session log (no agent Bash call needed)
+  python3 -c "
+import json
+last_state = None
+for line in open('$LOG_FILE'):
+    try:
+        obj = json.loads(line)
+        # browser_run_code results contain game state JSON as a string
+        msg = obj.get('message', {})
+        for block in msg.get('content', []):
+            text = block.get('text', '') if isinstance(block, dict) else ''
+            if 'player_position' in text and 'nearby_entities' in text:
+                last_state = text
+    except: pass
+if last_state:
+    try:
+        d = json.loads(last_state)
+        with open('$PROJECT_DIR/state/game_state.json', 'w') as f:
+            json.dump(d, f, separators=(',',':'))
+    except: pass
+" 2>/dev/null || true
 
   echo "=== Session $SESSION ended at $(date) ==="
   echo "Pausing ${PAUSE_BETWEEN}s before next session..."
