@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-convert_to_qwen.py — Transform extracted OODA turns into Qwen 2.5 VL SFT format.
+convert_to_qwen.py — Transform extracted OODA turns into Qwen3 VL SFT format.
 
 Reads turns.jsonl files produced by extract_turns.py and outputs conversation
-records in Qwen 2.5 VL messages format suitable for supervised finetuning.
+records in Qwen3 VL messages format suitable for supervised finetuning.
 
 Usage:
     python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
@@ -165,7 +165,7 @@ def format_reasoning(reasoning: str) -> str:
 
 
 def turn_to_conversation(turn: dict, image_dir: Path | None = None) -> dict | None:
-    """Convert a single turn into a Qwen 2.5 VL conversation record."""
+    """Convert a single turn into a Qwen3 VL conversation record."""
     game_state = turn.get("game_state")
     if not game_state or not game_state.get("player_position"):
         return None
@@ -228,7 +228,7 @@ def load_turns(input_dir: Path) -> list[tuple[str, dict]]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert extracted turns to Qwen 2.5 VL SFT format")
+    parser = argparse.ArgumentParser(description="Convert extracted turns to Qwen3 VL SFT format")
     parser.add_argument(
         "--input",
         type=Path,

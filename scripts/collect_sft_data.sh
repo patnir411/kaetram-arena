@@ -77,7 +77,7 @@ fi
 echo ""
 
 # Step 4: Convert to Qwen SFT format
-echo "--- Step 4: Converting to Qwen 2.5 VL SFT format ---"
+echo "--- Step 4: Converting to Qwen3 VL SFT format ---"
 python3 convert_to_qwen.py --input "$EXTRACTED_DIR" --output "$PROJECT_DIR/dataset/qwen_sft"
 echo ""
 
