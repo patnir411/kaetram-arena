@@ -1,6 +1,6 @@
 # Kaetram AI Agent
 
-An autonomous AI agent that plays [Kaetram](https://github.com/Kaetram/Kaetram-Open), a 2D pixel MMORPG, using Claude Code (Sonnet) and Playwright browser automation. The agent plays the game, collects structured training data, and builds a dataset for finetuning a smaller vision-language model (Qwen 2.5 VL 7B).
+An autonomous AI agent that plays [Kaetram](https://github.com/Kaetram/Kaetram-Open), a 2D pixel MMORPG, using Claude Code (Sonnet) and Playwright browser automation. The agent plays the game, collects structured training data, and builds a dataset for finetuning a smaller vision-language model (Qwen3 VL 4B).
 
 ## What it does
 
@@ -76,7 +76,7 @@ Each agent gets its own server port (9001, 9011, 9021, 9031), username (`ClaudeB
 
 ## SFT data pipeline
 
-Three-stage pipeline transforms raw Claude session logs into Qwen 2.5 VL training data:
+Three-stage pipeline transforms raw Claude session logs into Qwen3 VL training data:
 
 ```
 logs/session_*.log  ──►  extract_turns.py  ──►  dataset/extracted/*/turns.jsonl
@@ -91,13 +91,13 @@ logs/session_*.log  ──►  extract_turns.py  ──►  dataset/extracted/*/
 python3 extract_turns.py --log-dir logs/ --output-dir dataset/extracted/
 ```
 
-**Stage 2: Convert to Qwen format** — Transforms turns into Qwen 2.5 VL conversation records with `<think>` reasoning and structured `<action>` tags. 90/10 train/val split.
+**Stage 2: Convert to Qwen format** — Transforms turns into Qwen3 VL conversation records with `<think>` reasoning and structured `<action>` tags. 90/10 train/val split.
 
 ```bash
 python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
 ```
 
-### Output format (Qwen 2.5 VL SFT)
+### Output format (Qwen3 VL SFT)
 
 ```json
 {
@@ -131,7 +131,7 @@ kaetram-agent/
 ├── play.sh                  # Single-agent loop — launches Claude Code sessions
 ├── orchestrate.py           # Multi-agent launcher + health monitor
 ├── extract_turns.py         # JSONL log → clean OODA turn extraction
-├── convert_to_qwen.py       # Turns → Qwen 2.5 VL SFT format
+├── convert_to_qwen.py       # Turns → Qwen3 VL SFT format
 ├── state_extractor.js       # Injected into browser — exposes window.__extractGameState()
 ├── logger.py                # Real-time dataset logger (watches screenshot mtime)
 ├── dashboard.py             # Live web dashboard (port 8080)

@@ -3,7 +3,7 @@
 > **This file is for the human developer using Claude Code interactively.**
 > The agent subprocess launched by `play.sh` does NOT read this file — its instructions live exclusively in `prompts/system.md`. Do not add agent behavioral instructions here.
 
-This is an autonomous AI agent that plays Kaetram (a 2D pixel MMORPG) using Claude Code + Playwright browser automation. It collects gameplay data for finetuning a vision-language model (Qwen 2.5 VL 7B).
+This is an autonomous AI agent that plays Kaetram (a 2D pixel MMORPG) using Claude Code + Playwright browser automation. It collects gameplay data for finetuning a vision-language model (Qwen3 VL 4B).
 
 ---
 
@@ -86,7 +86,7 @@ Port allocation: agent N gets server WS port `9001 + N*10` (9001, 9011, 9021, 90
 
 ## SFT DATA PIPELINE
 
-Three-stage pipeline transforms raw Claude session logs into Qwen 2.5 VL training data:
+Three-stage pipeline transforms raw Claude session logs into Qwen3 VL training data:
 
 ```
 logs/session_*.log  →  extract_turns.py  →  dataset/extracted/*/turns.jsonl
@@ -102,7 +102,7 @@ python3 extract_turns.py --log-dir logs/ --output-dir dataset/extracted/ --no-fr
 python3 extract_turns.py --log-file logs/session_2_20260319_060749.log   # single file
 ```
 
-**Stage 2: Convert to Qwen format** — Transforms extracted turns into Qwen 2.5 VL conversation records with system/user/assistant messages, `<think>` reasoning, and structured `<action>` tags. 90/10 train/val split stratified by session.
+**Stage 2: Convert to Qwen format** — Transforms extracted turns into Qwen3 VL conversation records with system/user/assistant messages, `<think>` reasoning, and structured `<action>` tags. 90/10 train/val split stratified by session.
 
 ```bash
 python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
@@ -134,7 +134,7 @@ python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
 | PR 5-10 | Dashboard, ws_observer fixes, cleanup | merged |
 | — | Multi-agent SFT pipeline | implemented, ready to run |
 
-**Next:** Run multi-agent data collection (4 agents × 24h → ~5,000+ SFT examples), then finetune Qwen 2.5 VL 7B.
+**Next:** Run multi-agent data collection (4 agents × 24h → ~5,000+ SFT examples), then finetune Qwen3 VL 4B.
 
 **Blocked:** Nothing currently blocked.
 
@@ -178,7 +178,7 @@ orchestrate.py ──► N × (GameServer + AgentInstance)
 | `play.sh` | Single-agent loop — launches Claude Code sessions |
 | `orchestrate.py` | Multi-agent launcher + health monitor |
 | `extract_turns.py` | JSONL log → clean OODA turn extraction |
-| `convert_to_qwen.py` | Turns → Qwen 2.5 VL SFT format |
+| `convert_to_qwen.py` | Turns → Qwen3 VL SFT format |
 | `scripts/collect_sft_data.sh` | End-to-end pipeline wrapper |
 | `prompts/system.md` | System prompt Claude reads every session |
 | `state_extractor.js` | Injected into browser — exposes `window.__extractGameState()` |
