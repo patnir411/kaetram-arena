@@ -4,6 +4,7 @@ state/session*.json
 state/game_state.json
 state/game_state.tmp
 state/progress.json
+state/.session_counter
 
 # Kaetram-Open server (installed locally, not part of this repo)
 /Kaetram-Open/

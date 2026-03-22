@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-logger.py — Watches Claude's gameplay and builds a training dataset.
+logger.py — Watches Claude's gameplay and builds a text-only training dataset.
 
 Run alongside play.sh:
     python3 logger.py
@@ -8,17 +8,15 @@ Run alongside play.sh:
 Output:
     dataset/
       session_1/
-        frames/     step_0001.png  step_0002.png  ...
         steps.jsonl
 """
 
 import json
-import shutil
 import time
 from pathlib import Path
 
 BASE = Path(__file__).parent
-SCREENSHOT = BASE / "state/screenshot.png"
+STATE_TRIGGER = BASE / "state/live_screen.png"
 STATE_FILE = BASE / "state/progress.json"
 WS_STATE_FILE = BASE / "state/game_state.json"
 LOGS_DIR = BASE / "logs"
@@ -105,7 +103,6 @@ def main():
 
     sid = None
     step = 0
-    frames = None
     jsonl = None
     prev_st = {}
     prev_mtime = 0.0
@@ -114,11 +111,11 @@ def main():
 
     while True:
         try:
-            if not SCREENSHOT.exists():
+            if not STATE_TRIGGER.exists():
                 time.sleep(1)
                 continue
 
-            mtime = SCREENSHOT.stat().st_mtime
+            mtime = STATE_TRIGGER.stat().st_mtime
             if mtime <= prev_mtime:
                 time.sleep(0.5)
                 continue
@@ -135,15 +132,12 @@ def main():
                 sid = current_sid
                 step = 0
                 sdir = DATASET_DIR / sid
-                frames = sdir / "frames"
-                frames.mkdir(parents=True, exist_ok=True)
+                sdir.mkdir(parents=True, exist_ok=True)
                 jsonl = sdir / "steps.jsonl"
                 prev_st = read_state()
                 print(f"logger: session → {sid}")
 
             step += 1
-            frame = frames / f"step_{step:04d}.png"
-            shutil.copy2(SCREENSHOT, frame)
 
             curr_st = read_state()
             action = last_game_action(log)
@@ -153,7 +147,6 @@ def main():
                 "session": sid,
                 "step": step,
                 "timestamp": mtime,
-                "screenshot": str(frame),
                 "state": curr_st,
                 "action": action,
                 "done": False,

@@ -3,7 +3,7 @@
 > **This file is for the human developer using Claude Code interactively.**
 > The agent subprocess launched by `play.sh` does NOT read this file — its instructions live exclusively in `prompts/system.md`. Do not add agent behavioral instructions here.
 
-This is an autonomous AI agent that plays Kaetram (a 2D pixel MMORPG) using Claude Code + Playwright browser automation. It collects gameplay data for finetuning a vision-language model (Qwen3 VL 4B).
+This is an autonomous AI agent that plays Kaetram (a 2D pixel MMORPG) using Claude Code + Playwright browser automation. It collects gameplay data for finetuning a text model (Qwen3.5 9B).
 
 ---
 
@@ -29,9 +29,48 @@ At the end of every session, update `session_log.md` (under 30 lines).
 
 **yarn build required** — After cloning, `yarn start` alone fails. Run `yarn build` first.
 
+**`require()` is not available in Playwright MCP `browser_run_code`** — The execution context is an ESM-like sandbox, not CommonJS Node.js. `require('fs')`, `require('path')`, etc. all fail with "require is not defined". Errors are silently swallowed by try/catch. Do NOT attempt to write files from `browser_run_code` — use a separate Bash tool call instead, or read data from the session log.
+
 ---
 
-## RUNNING MODES
+## MANAGING TRAINING RUNS
+
+### Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `./scripts/restart-agent.sh [N] [H]` | **Primary command.** Kills everything, resets DB (fresh Level 1 characters), clears state, relaunches N agents for H hours. Default: 4 agents, 24h. Use `0` for no time limit. Supports `--warrior N --gatherer N --explorer N --quester N`. |
+| `./scripts/stop-agent.sh` | Stop orchestrator + all agents gracefully. Preserves logs. |
+| `./scripts/resume-agent.sh` | Resume agents without DB reset. Preserves character progress. Supports `--warrior N --gatherer N --explorer N --quester N --hours H`. |
+| `./scripts/reset-state.sh [N] [--force]` | Reset MongoDB player data only (no restart). Use `--force` to skip safety check. |
+| `./scripts/start-kaetram.sh` | Start Kaetram game server (single-agent mode, Node 20 required). |
+
+### Quick start (multi-agent)
+
+```bash
+# Restart fresh: 4 agents, no time limit (round-robin personalities)
+./scripts/restart-agent.sh 4 0
+
+# One of each personality
+./scripts/restart-agent.sh --warrior 1 --gatherer 1 --explorer 1 --quester 1 --hours 0
+
+# Custom mix: 2 warriors + 2 questers
+./scripts/restart-agent.sh --warrior 2 --quester 2 --hours 0
+
+# Monitor
+tail -f /tmp/orchestrate.log        # orchestrator status
+tmux attach -t datacol               # orchestrator tmux session
+# Dashboard at http://localhost:8080 (WebSocket screenshots on :8081)
+```
+
+### What restart-agent.sh does
+
+1. Kills orchestrator + all claude agent processes
+2. Kills game server instances (preserves client on :9000)
+3. **Resets MongoDB player data** — agents start fresh Level 1 with Bronze Axe
+4. Clears sandbox state (screenshots, progress.json, game_state.json)
+5. Ensures dashboard is running on :8080
+6. Launches orchestrator in `datacol` tmux session
 
 ### Single-agent mode (development/testing)
 
@@ -52,26 +91,33 @@ Run each in its own terminal, in order:
    ./play.sh
    ```
 
-4. **Restart agent fresh** (kills old process, clears state, relaunches)
-   ```bash
-   ./scripts/restart-agent.sh
-   ```
-
 ### Multi-agent mode (scaled data collection)
 
-The orchestrator runs N agents in parallel, each with its own Kaetram server instance.
-
 ```bash
-# 4 agents for 24 hours — run in tmux so it survives SSH disconnect
-python3 orchestrate.py --agents 4 --hours 24
+# 4 agents, no time limit (round-robin personalities)
+./scripts/restart-agent.sh 4 0
 
-# 2 agents, run until ctrl-c
-python3 orchestrate.py --agents 2
+# 2 agents, 8 hours
+./scripts/restart-agent.sh 2 8
+
+# One of each personality
+./scripts/restart-agent.sh --warrior 1 --gatherer 1 --explorer 1 --quester 1 --hours 0
 ```
 
 Port allocation: agent N gets server WS port `9001 + N*10` (9001, 9011, 9021, 9031). All agents share the static client on port 9000. Each agent logs in as `ClaudeBotN`.
 
+**Agent playstyles:** Each agent gets a playstyle that defines its DECIDE priorities in `system.md`. Playstyle files in `prompts/personalities/` are injected via the `__PERSONALITY_BLOCK__` placeholder. All agents get `game_knowledge.md` appended. Dashboard shows playstyle badges (red=WARRIOR, amber=GATHERER, blue=EXPLORER, purple=QUESTER). Default (no flags): round-robin assignment. Each agent's sandbox gets a `metadata.json` with its personality.
+
+| Flag | Playstyle | Color | Approach |
+|------|-----------|-------|----------|
+| `--warrior` | Aggressive | Red | Takes risks, pushes combat zones, attempts bosses early |
+| `--gatherer` | Methodical | Amber | Over-prepares, builds skills, crafts before advancing |
+| `--explorer` | Curious | Blue | Talks to every NPC, enters every building, discovers paths |
+| `--quester` | Efficient | Purple | Shortest path through quest chain, no wasted turns |
+
 **Resource budget (4 agents on this VM):** ~3.3 GB RAM, ~35% CPU, ~6 GB disk/24h — comfortable on 16 GB / 4 vCPU.
+
+**Database**: MongoDB (`kaetram-mongo` Docker container, port 27017) persists player state. `SKIP_DATABASE=false` in `.env`. Characters survive disconnects/server restarts.
 
 ### End-to-end data collection pipeline
 
@@ -86,7 +132,7 @@ Port allocation: agent N gets server WS port `9001 + N*10` (9001, 9011, 9021, 90
 
 ## SFT DATA PIPELINE
 
-Three-stage pipeline transforms raw Claude session logs into Qwen3 VL training data:
+Three-stage pipeline transforms raw Claude session logs into Qwen3.5 9B training data:
 
 ```
 logs/session_*.log  →  extract_turns.py  →  dataset/extracted/*/turns.jsonl
@@ -102,7 +148,7 @@ python3 extract_turns.py --log-dir logs/ --output-dir dataset/extracted/ --no-fr
 python3 extract_turns.py --log-file logs/session_2_20260319_060749.log   # single file
 ```
 
-**Stage 2: Convert to Qwen format** — Transforms extracted turns into Qwen3 VL conversation records with system/user/assistant messages, `<think>` reasoning, and structured `<action>` tags. 90/10 train/val split stratified by session.
+**Stage 2: Convert to Qwen format** — Transforms extracted turns into Qwen3.5 9B conversation records with system/user/assistant messages, `<think>` reasoning, and structured `<action>` tags. 90/10 train/val split stratified by session.
 
 ```bash
 python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
@@ -114,16 +160,16 @@ python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
 - `heal(slot=N)` — consume edible item
 - `warp(location)` — fast travel (Mudwich, Crossroads, Lakesworld)
 - `quest_accept()` — click quest button
-- `set_style(style)` — change attack style (Stab, Hack, Chop)
+- `set_style(style)` — change attack style (Hack=6, Chop=7, Defensive=3)
 - `wait(Ns)` — wait for combat/regen
 
-**Verified on existing data:** 558 turns extracted from 54 session logs → 542 train / 16 val Qwen SFT records.
+**Verified on existing data:** 558 turns extracted from 54 session logs → 542 train / 16 val Qwen3.5 SFT records.
 
 ---
 
 ## CURRENT STATUS
 
-**Last updated:** 2026-03-19
+**Last updated:** 2026-03-20
 
 | PR | Title | Status |
 |----|-------|--------|
@@ -133,8 +179,9 @@ python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
 | PR 4 | Skills system + CLAUDE.md overhaul | merged |
 | PR 5-10 | Dashboard, ws_observer fixes, cleanup | merged |
 | — | Multi-agent SFT pipeline | implemented, ready to run |
+| — | 4-personality agent system | implemented (warrior, gatherer, explorer, quester) |
 
-**Next:** Run multi-agent data collection (4 agents × 24h → ~5,000+ SFT examples), then finetune Qwen3 VL 4B.
+**Next:** Collect data with personality-diverse agents, then finetune Qwen3.5 9B.
 
 **Blocked:** Nothing currently blocked.
 
@@ -148,10 +195,12 @@ play.sh ─────► Claude Code (Sonnet) ─────► Playwright MC
                reads/writes               page.evaluate()         window.game
                state/, prompts/           extracts game state    (Kaetram client)
                      │                          │
-                     │                   writes state/game_state.json
+                     │                   returns state as tool result
                      │                          │
                      └──────────────────► logger.py ◄── watches screenshot mtime
                                            writes dataset/session_N/steps.jsonl
+
+Dashboard reads game state by parsing the latest session log (tool results).
 
 Multi-agent mode:
 orchestrate.py ──► N × (GameServer + AgentInstance)
@@ -170,6 +219,7 @@ orchestrate.py ──► N × (GameServer + AgentInstance)
 | 9001 | Kaetram game server WS (single-agent default) |
 | 9001, 9011, 9021, 9031 | Game server WS (multi-agent, one per agent) |
 | 8080 | Dashboard |
+| 8081 | Dashboard WebSocket relay (realtime screenshot push) |
 
 ## Key files
 
@@ -178,14 +228,16 @@ orchestrate.py ──► N × (GameServer + AgentInstance)
 | `play.sh` | Single-agent loop — launches Claude Code sessions |
 | `orchestrate.py` | Multi-agent launcher + health monitor |
 | `extract_turns.py` | JSONL log → clean OODA turn extraction |
-| `convert_to_qwen.py` | Turns → Qwen3 VL SFT format |
+| `convert_to_qwen.py` | Turns → Qwen3.5 9B SFT format |
 | `scripts/collect_sft_data.sh` | End-to-end pipeline wrapper |
-| `prompts/system.md` | System prompt Claude reads every session |
+| `prompts/system.md` | Base system prompt with `__PERSONALITY_BLOCK__` placeholder |
+| `prompts/game_knowledge.md` | Game-specific knowledge (mob stats, quest guides, NPC coords) — appended for all agents |
+| `prompts/personalities/*.md` | Personality DECIDE overrides (warrior, gatherer, explorer, quester) |
 | `state_extractor.js` | Injected into browser — exposes `window.__extractGameState()` |
 | `logger.py` | Real-time dataset logger (watches screenshot mtime) |
 | `dashboard.py` | Live web dashboard (port 8080) |
 | `state/progress.json` | Cross-session state (written by Claude) |
-| `state/game_state.json` | Live entity/combat/XP data (gitignored) |
+| `state/game_state.json` | Legacy — no longer written live. Dashboard reads state from session logs instead. |
 | `logs/session_N_*.log` | Claude Code JSONL session logs |
 
 ## Placeholders in `prompts/system.md`
@@ -195,6 +247,7 @@ orchestrate.py ──► N × (GameServer + AgentInstance)
 | `__PROJECT_DIR__` | `play.sh` via sed | repo root |
 | `__USERNAME__` | `play.sh` or `orchestrate.py` | `ClaudeBot` |
 | `__SERVER_PORT__` | `play.sh` or `orchestrate.py` | empty (no override) |
+| `__PERSONALITY_BLOCK__` | `play.sh` or `orchestrate.py` | empty (generic DECIDE) |
 
 ## Skills (slash commands)
 

@@ -7,5 +7,5 @@ source "$NVM_SH"
 nvm use 20
 cd ~/projects/Kaetram-Open
 export ACCEPT_LICENSE=true
-export SKIP_DATABASE=true
+export SKIP_DATABASE=false
 yarn start

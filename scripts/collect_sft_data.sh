@@ -76,8 +76,8 @@ if [ -d "$PROJECT_DIR/logs" ]; then
 fi
 echo ""
 
-# Step 4: Convert to Qwen SFT format
-echo "--- Step 4: Converting to Qwen3 VL SFT format ---"
+# Step 4: Convert to Qwen3.5 SFT format
+echo "--- Step 4: Converting to Qwen3.5 9B SFT format ---"
 python3 convert_to_qwen.py --input "$EXTRACTED_DIR" --output "$PROJECT_DIR/dataset/qwen_sft"
 echo ""
 

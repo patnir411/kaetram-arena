@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-convert_to_qwen.py — Transform extracted OODA turns into Qwen3 VL SFT format.
+convert_to_qwen.py — Transform extracted OODA turns into Qwen3.5 9B SFT format.
 
 Reads turns.jsonl files produced by extract_turns.py and outputs conversation
-records in Qwen3 VL messages format suitable for supervised finetuning.
+records in Qwen3.5 9B messages format suitable for supervised finetuning.
 
 Usage:
     python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
@@ -13,13 +13,12 @@ import argparse
 import json
 import random
 import re
-import shutil
 import sys
 from pathlib import Path
 
 # Condensed game rules for the system message (~500 tokens)
 SYSTEM_PROMPT = """\
-You are an AI agent playing Kaetram, a 2D pixel MMORPG. You observe the game via screenshots and structured game state, then decide and execute actions.
+You are an AI agent playing Kaetram, a 2D pixel MMORPG. You observe the game via structured game state and an ASCII map, then decide and execute actions.
 
 ## Entity Types
 - type 0: other player
@@ -33,7 +32,7 @@ You are an AI agent playing Kaetram, a 2D pixel MMORPG. You observe the game via
 - heal(slot=N): Consume edible item at slot N to restore HP.
 - warp(location): Fast travel (Mudwich, Crossroads, Lakesworld).
 - quest_accept(): Click the quest button to accept/progress a quest.
-- set_style(style): Change attack style (Stab, Hack for Strength XP, Chop).
+- set_style(style): Change attack style (Hack=6 for Strength+Defense XP, Chop=7, Defensive=3).
 - wait(Ns): Wait N seconds for combat/regen.
 
 ## Priority System
@@ -164,8 +163,8 @@ def format_reasoning(reasoning: str) -> str:
     return " ".join(lines)
 
 
-def turn_to_conversation(turn: dict, image_dir: Path | None = None) -> dict | None:
-    """Convert a single turn into a Qwen3 VL conversation record."""
+def turn_to_conversation(turn: dict) -> dict | None:
+    """Convert a single turn into a Qwen3.5 9B conversation record (text-only)."""
     game_state = turn.get("game_state")
     if not game_state or not game_state.get("player_position"):
         return None
@@ -179,26 +178,13 @@ def turn_to_conversation(turn: dict, image_dir: Path | None = None) -> dict | No
     pruned = prune_game_state(game_state)
     state_json = json.dumps(pruned, separators=(",", ":"))
 
-    # Determine screenshot path
-    screenshot = turn.get("screenshot_path", "")
-    if image_dir and screenshot:
-        src = Path(screenshot)
-        if src.exists():
-            dst = image_dir / f"{turn['turn_id']}.png"
-            if not dst.exists():
-                shutil.copy2(src, dst)
-            screenshot = str(dst)
-
-    # User message content
-    user_content = []
-    if screenshot and Path(screenshot).exists():
-        user_content.append({"type": "image", "image": f"file://{screenshot}"})
-    user_content.append(
+    # User message content (text-only)
+    user_content = [
         {
             "type": "text",
             "text": f"<game_state>\n{state_json}\n</game_state>\n\nWhat should you do?",
         }
-    )
+    ]
 
     # Assistant message: <think>reasoning</think>\n<action>structured_action</action>
     clean_reasoning = format_reasoning(reasoning) if reasoning else "Assessing situation."
@@ -228,7 +214,7 @@ def load_turns(input_dir: Path) -> list[tuple[str, dict]]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert extracted turns to Qwen3 VL SFT format")
+    parser = argparse.ArgumentParser(description="Convert extracted turns to Qwen3.5 9B SFT format")
     parser.add_argument(
         "--input",
         type=Path,
@@ -256,14 +242,12 @@ def main():
         sys.exit(1)
 
     args.output.mkdir(parents=True, exist_ok=True)
-    image_dir = args.output / "images"
-    image_dir.mkdir(exist_ok=True)
 
     # Convert turns to conversations
     conversations = []
     skipped = 0
     for session, turn in all_turns:
-        conv = turn_to_conversation(turn, image_dir)
+        conv = turn_to_conversation(turn)
         if conv:
             conv["_session"] = session
             conversations.append(conv)
@@ -309,7 +293,6 @@ def main():
     print(f"Converted {len(conversations)} turns ({skipped} skipped)")
     print(f"  Train: {len(train)} → {train_path}")
     print(f"  Val:   {len(val)} → {val_path}")
-    print(f"  Images: {image_dir}")
 
     # Print action type distribution
     from collections import Counter

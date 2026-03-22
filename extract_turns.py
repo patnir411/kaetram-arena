@@ -3,7 +3,7 @@
 extract_turns.py — Post-process Claude JSONL session logs into clean OODA turns.
 
 Reads the stream-json output from `claude -p` sessions and extracts
-(screenshot, game_state, reasoning, action) tuples for SFT training.
+(game_state, reasoning, action) tuples for SFT training.
 
 Usage:
     python3 extract_turns.py --log-dir logs/ --output-dir dataset/extracted/
@@ -13,7 +13,6 @@ Usage:
 import argparse
 import json
 import re
-import shutil
 import sys
 from pathlib import Path
 
@@ -113,17 +112,6 @@ def is_browser_action(event: dict) -> bool:
         return False
     code = event.get("input", {}).get("code", "")
     return "__latestGameState" not in code and "__extractGameState" not in code
-
-
-def extract_screenshot_path(code: str) -> str | None:
-    """Extract screenshot file path from browser_run_code JS."""
-    m = re.search(r"path:\s*'([^']+\.png)'", code)
-    if m:
-        return m.group(1)
-    m = re.search(r'path:\s*"([^"]+\.png)"', code)
-    if m:
-        return m.group(1)
-    return None
 
 
 def parse_game_state(text: str) -> dict | None:
@@ -258,7 +246,7 @@ def structured_action(action_type: str, action_code: str) -> str:
 
     if action_type == "set_style":
         m = re.search(r"setAttackStyle\((\d+)\)", action_code)
-        styles = {"0": "Stab", "1": "Hack", "2": "Chop"}
+        styles = {"1": "Stab", "2": "Slash", "3": "Defensive", "6": "Hack", "7": "Chop"}
         idx = m.group(1) if m else "?"
         return f"set_style({styles.get(idx, idx)})"
 
@@ -360,7 +348,6 @@ def extract_turns(log_path: Path) -> list[dict]:
     for oi_pos, obs_idx in enumerate(observe_indices):
         obs_event = events[obs_idx]
         obs_code = obs_event.get("input", {}).get("code", "")
-        screenshot_path = extract_screenshot_path(obs_code)
         obs_tool_id = obs_event.get("id", "")
 
         # Find the tool_result for this call
@@ -424,7 +411,6 @@ def extract_turns(log_path: Path) -> list[dict]:
             "turn_id": f"{log_path.stem}_t{len(turns):03d}",
             "timestamp": game_state.get("timestamp", 0),
             "game_state": game_state,
-            "screenshot_path": screenshot_path or "",
             "reasoning": reasoning,
             "action_code": action_code,
             "action_type": action_type,
@@ -454,7 +440,7 @@ def extract_turns(log_path: Path) -> list[dict]:
     return deduped
 
 
-def process_log(log_path: Path, output_dir: Path, copy_frames: bool = True) -> int:
+def process_log(log_path: Path, output_dir: Path) -> int:
     """Process a single log file. Returns number of turns extracted."""
     turns = extract_turns(log_path)
     if not turns:
@@ -462,18 +448,6 @@ def process_log(log_path: Path, output_dir: Path, copy_frames: bool = True) -> i
 
     session_dir = output_dir / log_path.stem
     session_dir.mkdir(parents=True, exist_ok=True)
-    frames_dir = session_dir / "frames"
-
-    if copy_frames:
-        frames_dir.mkdir(exist_ok=True)
-
-    # Copy screenshots and update paths
-    for turn in turns:
-        src = turn["screenshot_path"]
-        if copy_frames and src and Path(src).exists():
-            dst = frames_dir / f"{turn['turn_id']}.png"
-            shutil.copy2(src, dst)
-            turn["screenshot_path"] = str(dst)
 
     # Write turns JSONL
     jsonl_path = session_dir / "turns.jsonl"
@@ -494,11 +468,6 @@ def main():
         default=Path("dataset/extracted"),
         help="Output directory (default: dataset/extracted/)",
     )
-    parser.add_argument(
-        "--no-frames",
-        action="store_true",
-        help="Skip copying screenshot frames (just extract turns)",
-    )
     args = parser.parse_args()
 
     if not args.log_dir and not args.log_file:
@@ -517,7 +486,7 @@ def main():
         sys.exit(1)
 
     for log_path in logs:
-        n = process_log(log_path, args.output_dir, copy_frames=not args.no_frames)
+        n = process_log(log_path, args.output_dir)
         if n > 0:
             print(f"  {log_path.name}: {n} turns")
         total_turns += n

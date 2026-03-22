@@ -1,14 +1,15 @@
 # Kaetram AI Agent
 
-An autonomous AI agent that plays [Kaetram](https://github.com/Kaetram/Kaetram-Open), a 2D pixel MMORPG, using Claude Code (Sonnet) and Playwright browser automation. The agent plays the game, collects structured training data, and builds a dataset for finetuning a smaller vision-language model (Qwen3 VL 4B).
+An autonomous AI agent that plays [Kaetram](https://github.com/Kaetram/Kaetram-Open), a 2D pixel MMORPG, using Claude Code (Sonnet) and Playwright browser automation. The agent plays the game, collects structured training data, and builds a dataset for finetuning a text model (Qwen3.5 9B).
 
 ## What it does
 
 - Logs in, navigates the world, fights monsters, loots drops, talks to NPCs, completes quests
 - Extracts real-time game state (nearby entities, combat events, XP) directly from the browser via `page.evaluate()`
-- Records every action as a `(screenshot, game_state, reasoning, action)` tuple
+- Records every action as a `(game_state, reasoning, action)` tuple
 - Runs indefinitely in sessions — each session picks up where the last left off
 - Supports multi-agent mode: run N agents in parallel for scaled data collection
+- 4 agent personalities (warrior, gatherer, explorer, quester) for diverse training data
 
 ## Architecture
 
@@ -18,21 +19,23 @@ play.sh ──────────► Claude Code (Sonnet) ─────�
                     reads/writes                page.evaluate()         window.game
                     state/, prompts/            extracts game state    (Kaetram client)
                           │                           │
-                          │                    writes state/game_state.json
+                          │                   returns state as tool result
                           │                           │
-                          └───────────────────► logger.py ◄── watches screenshot mtime
+                          └───────────────────► logger.py ◄── watches live_screen.png mtime
                                                 writes dataset/session_N/steps.jsonl
 ```
 
 **`play.sh`** — infinite loop, launches Claude Code sessions (10,000 turns max, 10s pause between)
 
-**`state_extractor.js`** — injected into the browser during login; exposes `window.__extractGameState()` which the agent calls each turn to read player position, nearby entities, combat target, HP, XP
+**`state_extractor.js`** — injected into the browser during login; exposes `window.__extractGameState()` + `window.__generateAsciiMap()` which the agent calls each turn to read player position, nearby entities, combat target, HP, XP, and a text map of the viewport
 
-**`logger.py`** — watches `state/screenshot.png` for changes, records one step per screenshot into `dataset/session_N/steps.jsonl`
+**`logger.py`** — watches `state/live_screen.png` for changes, records one step per screenshot into `dataset/session_N/steps.jsonl`
 
 **`dashboard.py`** — live web UI at port 8080, shows screenshots, entity list, session log
 
-**`prompts/system.md`** — the system prompt Claude reads every session: login, OODA loop, targeting by coordinate, healing, quests
+**`prompts/system.md`** — base system prompt: login, OODA loop, targeting, healing, combat (generic, no game-specific knowledge)
+
+**`prompts/game_knowledge.md`** — game-specific knowledge (mob stats, quest walkthroughs, NPC coords) appended to all agents
 
 ## Quick start
 
@@ -58,14 +61,17 @@ python3 dashboard.py
 Run N agents in parallel, each with its own Kaetram server instance:
 
 ```bash
-# 4 agents for 24 hours
+# 4 agents for 24 hours (round-robin personalities)
 python3 orchestrate.py --agents 4 --hours 24
 
 # 2 agents, run until ctrl-c
 python3 orchestrate.py --agents 2
+
+# One of each personality
+python3 orchestrate.py --warrior 1 --gatherer 1 --explorer 1 --quester 1
 ```
 
-Each agent gets its own server port (9001, 9011, 9021, 9031), username (`ClaudeBot0`–`ClaudeBot3`), and log directory. Resource budget for 4 agents: ~3.3 GB RAM, ~35% CPU.
+Each agent gets its own server port (9001, 9011, 9021, 9031), username (`ClaudeBot0`–`ClaudeBot3`), log directory, and personality. All agents get `prompts/game_knowledge.md` (quest guides, NPC coords, mob stats). Resource budget for 4 agents: ~3.3 GB RAM, ~35% CPU.
 
 ### End-to-end data pipeline
 
@@ -76,7 +82,7 @@ Each agent gets its own server port (9001, 9011, 9021, 9031), username (`ClaudeB
 
 ## SFT data pipeline
 
-Three-stage pipeline transforms raw Claude session logs into Qwen3 VL training data:
+Three-stage pipeline transforms raw Claude session logs into Qwen3.5 9B training data:
 
 ```
 logs/session_*.log  ──►  extract_turns.py  ──►  dataset/extracted/*/turns.jsonl
@@ -91,20 +97,19 @@ logs/session_*.log  ──►  extract_turns.py  ──►  dataset/extracted/*/
 python3 extract_turns.py --log-dir logs/ --output-dir dataset/extracted/
 ```
 
-**Stage 2: Convert to Qwen format** — Transforms turns into Qwen3 VL conversation records with `<think>` reasoning and structured `<action>` tags. 90/10 train/val split.
+**Stage 2: Convert to Qwen format** — Transforms turns into Qwen3.5 9B conversation records with `<think>` reasoning and structured `<action>` tags. 90/10 train/val split.
 
 ```bash
 python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
 ```
 
-### Output format (Qwen3 VL SFT)
+### Output format (Qwen3.5 9B SFT)
 
 ```json
 {
   "messages": [
     {"role": "system", "content": [{"type": "text", "text": "<condensed game rules>"}]},
     {"role": "user", "content": [
-      {"type": "image", "image": "file:///path/to/screenshot.png"},
       {"type": "text", "text": "<game_state>\n{...}\n</game_state>\n\nWhat should you do?"}
     ]},
     {"role": "assistant", "content": [{"type": "text", "text": "<think>\nI see a Rat at distance 2...\n</think>\n<action>\nclick(408, 312)\n</action>"}]}
@@ -121,7 +126,7 @@ python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
 | `heal(slot=N)` | Consume edible item |
 | `warp(location)` | Fast travel (Mudwich, Crossroads, Lakesworld) |
 | `quest_accept()` | Accept/progress a quest |
-| `set_style(style)` | Change attack style (Stab, Hack, Chop) |
+| `set_style(style)` | Change attack style (Hack=6, Chop=7, Defensive=3) |
 | `wait(Ns)` | Wait for combat/regen |
 
 ## Project structure
@@ -131,13 +136,15 @@ kaetram-agent/
 ├── play.sh                  # Single-agent loop — launches Claude Code sessions
 ├── orchestrate.py           # Multi-agent launcher + health monitor
 ├── extract_turns.py         # JSONL log → clean OODA turn extraction
-├── convert_to_qwen.py       # Turns → Qwen3 VL SFT format
+├── convert_to_qwen.py       # Turns → Qwen3.5 9B SFT format
 ├── state_extractor.js       # Injected into browser — exposes window.__extractGameState()
 ├── logger.py                # Real-time dataset logger (watches screenshot mtime)
 ├── dashboard.py             # Live web dashboard (port 8080)
 ├── ws_observer.py           # [Deprecated] WebSocket observer
 ├── prompts/
-│   └── system.md            # System prompt: login, OODA loop, targeting, quests
+│   ├── system.md            # Base system prompt: login, OODA loop, targeting (generic)
+│   ├── game_knowledge.md    # Game knowledge: quests, NPCs, mobs (appended to all agents)
+│   └── personalities/       # Personality DECIDE overrides (warrior, gatherer, explorer, quester)
 ├── scripts/
 │   ├── start-kaetram.sh     # Starts Kaetram server (handles nvm use 20)
 │   ├── restart-agent.sh     # Kill + restart agent fresh
@@ -157,7 +164,7 @@ kaetram-agent/
 ├── dataset/                 # Training data
 │   ├── session_N/           # Real-time logger output (steps.jsonl + frames/)
 │   ├── extracted/           # Extracted OODA turns (gitignored)
-│   ├── qwen_sft/            # Final Qwen SFT dataset (gitignored)
+│   ├── qwen_sft/            # Final Qwen3.5 SFT dataset (gitignored)
 │   └── raw/                 # Multi-agent raw logs (gitignored)
 ├── logs/                    # Claude Code JSONL session logs
 ├── session_log.md           # Running decision log across sessions
