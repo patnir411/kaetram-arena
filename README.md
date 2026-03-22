@@ -9,7 +9,7 @@ An autonomous AI agent that plays [Kaetram](https://github.com/Kaetram/Kaetram-O
 - Records every action as a `(game_state, reasoning, action)` tuple
 - Runs indefinitely in sessions — each session picks up where the last left off
 - Supports multi-agent mode: run N agents in parallel for scaled data collection
-- 4 agent personalities (warrior, gatherer, explorer, quester) for diverse training data
+- 4 agent playstyles (aggressive, methodical, curious, efficient) for diverse training data
 
 ## Architecture
 
@@ -67,8 +67,8 @@ python3 orchestrate.py --agents 4 --hours 24
 # 2 agents, run until ctrl-c
 python3 orchestrate.py --agents 2
 
-# One of each personality
-python3 orchestrate.py --warrior 1 --gatherer 1 --explorer 1 --quester 1
+# One of each playstyle
+python3 orchestrate.py --aggressive 1 --methodical 1 --curious 1 --efficient 1
 ```
 
 Each agent gets its own server port (9001, 9011, 9021, 9031), username (`ClaudeBot0`–`ClaudeBot3`), log directory, and personality. All agents get `prompts/game_knowledge.md` (quest guides, NPC coords, mob stats). Resource budget for 4 agents: ~3.3 GB RAM, ~35% CPU.
@@ -144,7 +144,7 @@ kaetram-agent/
 ├── prompts/
 │   ├── system.md            # Base system prompt: login, OODA loop, targeting (generic)
 │   ├── game_knowledge.md    # Game knowledge: quests, NPCs, mobs (appended to all agents)
-│   └── personalities/       # Personality DECIDE overrides (warrior, gatherer, explorer, quester)
+│   └── personalities/       # Playstyle DECIDE overrides (aggressive, methodical, curious, efficient)
 ├── scripts/
 │   ├── start-kaetram.sh     # Starts Kaetram server (handles nvm use 20)
 │   ├── restart-agent.sh     # Kill + restart agent fresh

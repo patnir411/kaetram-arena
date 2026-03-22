@@ -428,11 +428,53 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         data["freshness_seconds"] = freshness
         self._send_json(data)
 
+    @staticmethod
+    def _parse_tool_result_text(text):
+        """Parse game state JSON from a tool_result text string.
+
+        Handles markdown wrapper (### Result\\n"..."\\n### Ran Playwright)
+        and ASCII_MAP appendix. Returns parsed dict or None.
+        """
+        if not isinstance(text, str):
+            return None
+        # Quick reject: must contain a game state key
+        if "player_stats" not in text and "playerStats" not in text:
+            return None
+        # Strip markdown wrapper
+        if text.startswith("### Result"):
+            lines = text.split("\n")
+            json_line = lines[1].strip() if len(lines) > 1 else ""
+            if json_line.startswith('"') and json_line.endswith('"'):
+                try:
+                    text = json.loads(json_line)
+                except Exception:
+                    pass
+        # Strip ASCII map / symbols appendix
+        if isinstance(text, str):
+            for sep in ("\n\nASCII_MAP:", "\n\nASCII:", "\n\nSYMBOLS:"):
+                idx = text.find(sep)
+                if idx != -1:
+                    text = text[:idx]
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            return None
+        if not isinstance(parsed, dict):
+            return None
+        # Normalize camelCase variants (the only real-world deviation observed)
+        if "playerStats" in parsed and "player_stats" not in parsed:
+            parsed["player_stats"] = parsed.pop("playerStats")
+        if "playerPosition" in parsed and "player_position" not in parsed:
+            parsed["player_position"] = parsed.pop("playerPosition")
+        if "player_stats" in parsed or "player_position" in parsed:
+            return parsed
+        return None
+
     def _extract_game_state_from_log(self, qs=None):
         """Extract latest game state from session log tool results.
 
-        The agent's OBSERVE step returns JSON with player_stats, nearby_entities, etc.
-        as a browser_run_code result. Parse the latest session log (last 200KB) to find it.
+        Scans the last 1MB of the latest session log for tool_result blocks
+        containing game state JSON from the agent's OBSERVE step.
         """
         agent_id = qs.get("agent", [None])[0] if qs else None
         if agent_id is not None:
@@ -445,13 +487,14 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             return None
         latest = logs[-1]
         last_state = None
-        last_mtime = None
+        last_timestamp = None
+        tail_size = 1048576  # 1MB
         try:
             with open(latest) as fh:
                 fh.seek(0, 2)
                 size = fh.tell()
-                fh.seek(max(0, size - 204800))  # last 200KB
-                if size > 204800:
+                fh.seek(max(0, size - tail_size))
+                if size > tail_size:
                     fh.readline()  # skip partial first line
                 for line in fh:
                     line = line.strip()
@@ -463,17 +506,15 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                         continue
                     if obj.get("type") != "user":
                         continue
+                    line_ts = obj.get("timestamp")  # ISO format from JSONL
                     msg = obj.get("message", {})
                     content = msg.get("content", msg)
                     if not isinstance(content, list):
                         continue
                     for block in content:
-                        if not isinstance(block, dict):
-                            continue
-                        if block.get("type") != "tool_result":
+                        if not isinstance(block, dict) or block.get("type") != "tool_result":
                             continue
                         c = block.get("content", "")
-                        # Handle nested list format
                         if isinstance(c, list):
                             for item in c:
                                 if isinstance(item, dict):
@@ -481,67 +522,24 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                                     break
                             else:
                                 continue
-                        if not isinstance(c, str):
-                            continue
-                        # Must look like game state (standard or agent-improvised format)
-                        if "player_stats" not in c and '"hp"' not in c and '"pos"' not in c:
-                            continue
-                        # Extract JSON from the result text (may have markdown wrapper)
-                        text = c
-                        # Strip markdown: ### Result\n"..."\n### Ran Playwright
-                        if text.startswith("### Result"):
-                            lines = text.split("\n")
-                            json_line = lines[1].strip() if len(lines) > 1 else ""
-                            if json_line.startswith('"') and json_line.endswith('"'):
-                                try:
-                                    text = json.loads(json_line)
-                                except Exception:
-                                    pass
-                        # Try to parse as JSON — may have ASCII_MAP or SYMBOLS appended
-                        for sep in ("\n\nASCII_MAP:", "\n\nASCII:", "\n\nSYMBOLS:"):
-                            if sep in text:
-                                text = text.split(sep)[0]
-                        try:
-                            parsed = json.loads(text)
-                            if not isinstance(parsed, dict):
-                                continue
-                            # Normalize agent-improvised formats to standard keys
-                            if "player_stats" not in parsed and ("hp" in parsed or "pos" in parsed):
-                                pos = parsed.get("pos", {})
-                                hp_raw = parsed.get("hp", 0)
-                                # hp can be int (just current hp) or object {"hp":99,"max_hp":99,"level":4,...}
-                                if isinstance(hp_raw, dict):
-                                    parsed["player_stats"] = {
-                                        "hp": hp_raw.get("hp", 0),
-                                        "max_hp": hp_raw.get("max_hp", 0),
-                                        "level": hp_raw.get("level", 0),
-                                        "experience": hp_raw.get("experience", 0),
-                                        "mana": hp_raw.get("mana", 0),
-                                        "max_mana": hp_raw.get("max_mana", 0),
-                                    }
-                                else:
-                                    parsed["player_stats"] = {
-                                        "hp": hp_raw,
-                                        "max_hp": parsed.get("maxHp", parsed.get("max_hp", hp_raw)),
-                                        "level": parsed.get("level", 0),
-                                        "experience": parsed.get("experience", 0),
-                                        "mana": 0, "max_mana": 0,
-                                    }
-                                if pos and "player_position" not in parsed:
-                                    parsed["player_position"] = pos
-                                for ent_key in ("mobs", "entities", "nearbyMobs", "allEntities"):
-                                    if ent_key in parsed and "nearby_entities" not in parsed:
-                                        parsed["nearby_entities"] = parsed[ent_key]
-                                        break
-                            if "player_stats" in parsed or "player_position" in parsed:
-                                last_state = parsed
-                                last_mtime = os.path.getmtime(latest)
-                        except Exception:
-                            pass
+                        parsed = self._parse_tool_result_text(c)
+                        if parsed:
+                            last_state = parsed
+                            last_timestamp = line_ts
         except Exception:
             pass
         if last_state:
-            last_state["_freshness"] = round(time.time() - last_mtime, 1) if last_mtime else -1
+            freshness = -1
+            if last_timestamp:
+                try:
+                    from datetime import timezone
+                    dt = datetime.fromisoformat(last_timestamp.replace("Z", "+00:00"))
+                    freshness = round(time.time() - dt.timestamp(), 1)
+                except Exception:
+                    freshness = round(time.time() - os.path.getmtime(latest), 1)
+            else:
+                freshness = round(time.time() - os.path.getmtime(latest), 1)
+            last_state["_freshness"] = freshness
         return last_state
 
     def _resolve_state_dir(self, qs):
@@ -578,7 +576,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         personalities = {}
         pdir = os.path.join(PROJECT_DIR, "prompts", "personalities")
         if os.path.isdir(pdir):
-            for name in ("warrior", "gatherer", "explorer", "quester"):
+            for name in ("aggressive", "methodical", "curious", "efficient"):
                 pfile = os.path.join(pdir, f"{name}.md")
                 if os.path.isfile(pfile):
                     try:
@@ -764,21 +762,10 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
         agent_running = mode != "none"
 
-        # Game state freshness — check per-agent sandboxes in multi mode, fall back to single
+        # game_state.json is not written during gameplay (state extracted from logs).
+        # Keep response keys for backward compat.
         gs_fresh = False
         game_state_age = -1
-        if mode == "multi":
-            for i in range(MAX_AGENTS):
-                gs_file = os.path.join("/tmp", f"kaetram_agent_{i}", "state", "game_state.json")
-                if os.path.isfile(gs_file):
-                    age = int(time.time() - os.path.getmtime(gs_file))
-                    if game_state_age < 0 or age < game_state_age:
-                        game_state_age = age
-        else:
-            gs_file = os.path.join(STATE_DIR, "game_state.json")
-            if os.path.isfile(gs_file):
-                game_state_age = int(time.time() - os.path.getmtime(gs_file))
-        gs_fresh = 0 <= game_state_age < 30
 
         # Screenshot age — check per-agent sandboxes in multi mode
         screenshot_age = -1
@@ -851,17 +838,17 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             state_dir = os.path.join(sandbox, "state")
             agent = {"id": i, "username": f"ClaudeBot{i}", "server_port": BASE_SERVER_PORT + i * PORT_STRIDE}
 
-            # Read personality/mode from metadata.json
+            # Read playstyle from metadata.json
             metadata_file = os.path.join(sandbox, "metadata.json")
             if os.path.isfile(metadata_file):
                 try:
                     with open(metadata_file) as mf:
                         meta = json.load(mf)
-                    agent["mode"] = meta.get("personality", meta.get("mode", "quester"))
+                    agent["mode"] = meta.get("personality", meta.get("mode", "efficient"))
                 except Exception:
-                    agent["mode"] = "quester"
+                    agent["mode"] = "efficient"
             else:
-                agent["mode"] = "quester"
+                agent["mode"] = "efficient"
 
             # Read progress.json
             progress_file = os.path.join(state_dir, "progress.json")
@@ -872,18 +859,10 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 except Exception:
                     agent["progress"] = {}
 
-            # Read game_state.json, fall back to session log extraction
-            gs = None
-            gs_file = os.path.join(state_dir, "game_state.json")
-            if os.path.isfile(gs_file):
-                try:
-                    gs = json.load(open(gs_file))
-                except Exception:
-                    pass
-            if not gs:
-                gs = self._extract_game_state_from_log({"agent": [str(i)]})
-                if gs:
-                    gs.pop("_freshness", None)
+            # Extract game state from session log
+            gs = self._extract_game_state_from_log({"agent": [str(i)]})
+            if gs:
+                gs.pop("_freshness", None)
             if gs:
                 agent["game_state"] = {
                     "player_stats": gs.get("player_stats"),
@@ -1356,16 +1335,16 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   /* Agent grid (multi-agent) */
   .agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; margin-bottom: 14px; }
   .agent-card { background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--green); border-radius: 8px; padding: 10px; cursor: pointer; transition: border-color 0.2s, box-shadow 0.2s; }
-  .agent-card.mode-warrior { border-left-color: var(--red); background: #140a0a; }
-  .agent-card.mode-gatherer { border-left-color: var(--amber); background: #14120a; }
-  .agent-card.mode-explorer { border-left-color: var(--blue); background: #0a0e14; }
-  .agent-card.mode-quester { border-left-color: var(--purple); background: #0e0a14; }
+  .agent-card.mode-aggressive { border-left-color: var(--red); background: #140a0a; }
+  .agent-card.mode-methodical { border-left-color: var(--amber); background: #14120a; }
+  .agent-card.mode-curious { border-left-color: var(--blue); background: #0a0e14; }
+  .agent-card.mode-efficient { border-left-color: var(--purple); background: #0e0a14; }
   .agent-card:hover { border-color: #444; }
   .agent-card.selected { border-color: var(--green); box-shadow: 0 0 8px rgba(0,255,65,0.15); border-left-color: var(--green); }
-  .agent-card.selected.mode-warrior { border-color: var(--red); box-shadow: 0 0 8px rgba(255,65,65,0.15); border-left-color: var(--red); }
-  .agent-card.selected.mode-gatherer { border-color: var(--amber); box-shadow: 0 0 8px rgba(255,170,0,0.15); border-left-color: var(--amber); }
-  .agent-card.selected.mode-explorer { border-color: var(--blue); box-shadow: 0 0 8px rgba(0,170,255,0.15); border-left-color: var(--blue); }
-  .agent-card.selected.mode-quester { border-color: var(--purple); box-shadow: 0 0 8px rgba(192,132,252,0.15); border-left-color: var(--purple); }
+  .agent-card.selected.mode-aggressive { border-color: var(--red); box-shadow: 0 0 8px rgba(255,65,65,0.15); border-left-color: var(--red); }
+  .agent-card.selected.mode-methodical { border-color: var(--amber); box-shadow: 0 0 8px rgba(255,170,0,0.15); border-left-color: var(--amber); }
+  .agent-card.selected.mode-curious { border-color: var(--blue); box-shadow: 0 0 8px rgba(0,170,255,0.15); border-left-color: var(--blue); }
+  .agent-card.selected.mode-efficient { border-color: var(--purple); box-shadow: 0 0 8px rgba(192,132,252,0.15); border-left-color: var(--purple); }
   .agent-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
   .agent-card-name { font-weight: bold; font-size: 12px; }
   .agent-card-thumb { width: 100%; height: 120px; object-fit: contain; background: #000; border-radius: 4px; margin-top: 6px; }
@@ -1939,8 +1918,9 @@ async function loadPrompt() {
     document.getElementById('prompt-content').innerHTML = simpleMarkdown(esc(data.content || ''));
 
     // Render personality cards
-    const PCOLORS = { warrior: 'var(--red)', gatherer: 'var(--amber)', explorer: 'var(--blue)', quester: 'var(--purple)' };
-    const PBGS = { warrior: '#140a0a', gatherer: '#14120a', explorer: '#0a0e14', quester: '#0e0a14' };
+    const PCOLORS = { aggressive: 'var(--red)', methodical: 'var(--amber)', curious: 'var(--blue)', efficient: 'var(--purple)' };
+    const PBGS = { aggressive: '#140a0a', methodical: '#14120a', curious: '#0a0e14', efficient: '#0e0a14' };
+    const PLABELS = { aggressive: 'AGGRESSIVE', methodical: 'METHODICAL', curious: 'CURIOUS', efficient: 'EFFICIENT' };
     const grid = document.getElementById('personality-grid');
     if (data.personalities && Object.keys(data.personalities).length > 0) {
       let html = '';
@@ -1948,7 +1928,7 @@ async function loadPrompt() {
         const color = PCOLORS[name] || 'var(--green)';
         const bg = PBGS[name] || 'var(--card)';
         html += '<div class="card" style="border-left:3px solid ' + color + ';background:' + bg + '">';
-        html += '<h2 style="color:' + color + '">' + name.toUpperCase() + ' <span class="badge" style="color:' + color + '">prompts/personalities/' + name + '.md</span></h2>';
+        html += '<h2 style="color:' + color + '">' + (PLABELS[name] || name.toUpperCase()) + ' <span class="badge" style="color:' + color + '">prompts/personalities/' + name + '.md</span></h2>';
         html += '<div class="md-block" style="max-height:300px">' + simpleMarkdown(esc(content)) + '</div>';
         html += '</div>';
       }
@@ -2343,14 +2323,14 @@ async function refreshFast() {
         const newIds = new Set(agents.map(a => String(a.id)));
         const needRebuild = existingIds.size !== newIds.size || [...newIds].some(id => !existingIds.has(id));
 
-        const PERSONALITY_COLORS = { warrior: 'var(--red)', gatherer: 'var(--amber)', explorer: 'var(--blue)', quester: 'var(--purple)' };
-        const PERSONALITY_LABELS = { warrior: 'WARRIOR', gatherer: 'GATHERER', explorer: 'EXPLORER', quester: 'QUESTER' };
+        const PERSONALITY_COLORS = { aggressive: 'var(--red)', methodical: 'var(--amber)', curious: 'var(--blue)', efficient: 'var(--purple)' };
+        const PERSONALITY_LABELS = { aggressive: 'AGGRESSIVE', methodical: 'METHODICAL', curious: 'CURIOUS', efficient: 'EFFICIENT' };
 
         if (needRebuild) {
           // Full rebuild — only when agents are added/removed
           let html = '';
           for (const a of agents) {
-            const personality = a.mode || 'quester';
+            const personality = a.mode || 'efficient';
             const modeClass = ' mode-' + personality;
             const modeColor = PERSONALITY_COLORS[personality] || 'var(--green)';
             const modeLabel = PERSONALITY_LABELS[personality] || personality.toUpperCase();
@@ -2378,10 +2358,10 @@ async function refreshFast() {
           else card.classList.remove('selected');
 
           // Personality class
-          for (const cls of ['mode-warrior', 'mode-gatherer', 'mode-explorer', 'mode-quester', 'mode-blind']) {
+          for (const cls of ['mode-aggressive', 'mode-methodical', 'mode-curious', 'mode-efficient', 'mode-blind']) {
             card.classList.remove(cls);
           }
-          const personality = a.mode || 'quester';
+          const personality = a.mode || 'efficient';
           card.classList.add('mode-' + personality);
 
           const ps = (a.game_state || {}).player_stats || {};

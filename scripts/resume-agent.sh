@@ -9,7 +9,7 @@
 #
 # Usage:
 #   ./scripts/resume-agent.sh                                    # resume all agents (default mode)
-#   ./scripts/resume-agent.sh --warrior 1 --gatherer 1 --explorer 1 --quester 1
+#   ./scripts/resume-agent.sh --aggressive 1 --methodical 1 --curious 1 --efficient 1
 #   ./scripts/resume-agent.sh --hours 8                          # resume with time limit
 
 set -euo pipefail
@@ -17,17 +17,17 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Parse args (same flags as restart-agent.sh)
-N_WARRIOR=""
-N_GATHERER=""
-N_EXPLORER=""
-N_QUESTER=""
+N_AGGRESSIVE=""
+N_METHODICAL=""
+N_CURIOUS=""
+N_EFFICIENT=""
 HOURS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --warrior)   N_WARRIOR="$2"; shift 2;;
-    --gatherer)  N_GATHERER="$2"; shift 2;;
-    --explorer)  N_EXPLORER="$2"; shift 2;;
-    --quester)   N_QUESTER="$2"; shift 2;;
+    --aggressive)  N_AGGRESSIVE="$2"; shift 2;;
+    --methodical)  N_METHODICAL="$2"; shift 2;;
+    --curious)     N_CURIOUS="$2"; shift 2;;
+    --efficient)   N_EFFICIENT="$2"; shift 2;;
     --hours)     HOURS="$2"; shift 2;;
     *) shift;;
   esac
@@ -58,7 +58,7 @@ fi
 HAS_PERSONALITY=false
 PERSONALITY_ARGS=""
 PERSONALITY_TOTAL=0
-for p in warrior gatherer explorer quester; do
+for p in aggressive methodical curious efficient; do
   eval "count=\$N_$(echo $p | tr '[:lower:]' '[:upper:]')"
   if [ -n "$count" ] && [ "$count" -gt 0 ]; then
     HAS_PERSONALITY=true

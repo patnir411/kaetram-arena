@@ -14,8 +14,8 @@
 #   ./scripts/restart-agent.sh 2            # 2 agents, 24 hours
 #   ./scripts/restart-agent.sh 4 8          # 4 agents, 8 hours
 #   ./scripts/restart-agent.sh 4 0          # 4 agents, no time limit
-#   ./scripts/restart-agent.sh --warrior 1 --gatherer 1 --explorer 1 --quester 1
-#   ./scripts/restart-agent.sh --warrior 2 --quester 2 --hours 0
+#   ./scripts/restart-agent.sh --aggressive 1 --methodical 1 --curious 1 --efficient 1
+#   ./scripts/restart-agent.sh --aggressive 2 --efficient 2 --hours 0
 
 set -euo pipefail
 
@@ -24,18 +24,18 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Defaults
 N_AGENTS=""
 HOURS="24"
-N_WARRIOR=""
-N_GATHERER=""
-N_EXPLORER=""
-N_QUESTER=""
+N_AGGRESSIVE=""
+N_METHODICAL=""
+N_CURIOUS=""
+N_EFFICIENT=""
 
 # Parse args
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --warrior)   N_WARRIOR="$2"; shift 2;;
-    --gatherer)  N_GATHERER="$2"; shift 2;;
-    --explorer)  N_EXPLORER="$2"; shift 2;;
-    --quester)   N_QUESTER="$2"; shift 2;;
+    --aggressive)  N_AGGRESSIVE="$2"; shift 2;;
+    --methodical)  N_METHODICAL="$2"; shift 2;;
+    --curious)     N_CURIOUS="$2"; shift 2;;
+    --efficient)   N_EFFICIENT="$2"; shift 2;;
     --hours)     HOURS="$2"; shift 2;;
     *)
       # Positional: first=agents, second=hours
@@ -49,7 +49,7 @@ done
 HAS_PERSONALITY=false
 PERSONALITY_ARGS=""
 TOTAL_AGENTS=0
-for p in warrior gatherer explorer quester; do
+for p in aggressive methodical curious efficient; do
   eval "count=\$N_$(echo $p | tr '[:lower:]' '[:upper:]')"
   if [ -n "$count" ] && [ "$count" -gt 0 ]; then
     HAS_PERSONALITY=true
@@ -65,10 +65,10 @@ fi
 
 echo "=== Restarting Kaetram training run ==="
 if $HAS_PERSONALITY; then
-  [ -n "$N_WARRIOR" ] && [ "$N_WARRIOR" -gt 0 ] && echo "  Warrior:  $N_WARRIOR"
-  [ -n "$N_GATHERER" ] && [ "$N_GATHERER" -gt 0 ] && echo "  Gatherer: $N_GATHERER"
-  [ -n "$N_EXPLORER" ] && [ "$N_EXPLORER" -gt 0 ] && echo "  Explorer: $N_EXPLORER"
-  [ -n "$N_QUESTER" ] && [ "$N_QUESTER" -gt 0 ] && echo "  Quester:  $N_QUESTER"
+  [ -n "$N_AGGRESSIVE" ] && [ "$N_AGGRESSIVE" -gt 0 ] && echo "  Aggressive:  $N_AGGRESSIVE"
+  [ -n "$N_METHODICAL" ] && [ "$N_METHODICAL" -gt 0 ] && echo "  Methodical:  $N_METHODICAL"
+  [ -n "$N_CURIOUS" ] && [ "$N_CURIOUS" -gt 0 ] && echo "  Curious:     $N_CURIOUS"
+  [ -n "$N_EFFICIENT" ] && [ "$N_EFFICIENT" -gt 0 ] && echo "  Efficient:   $N_EFFICIENT"
   echo "  Total:    $TOTAL_AGENTS"
 else
   echo "  Agents: $TOTAL_AGENTS (round-robin personalities)"

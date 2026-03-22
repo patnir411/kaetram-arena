@@ -39,9 +39,9 @@ At the end of every session, update `session_log.md` (under 30 lines).
 
 | Script | Purpose |
 |--------|---------|
-| `./scripts/restart-agent.sh [N] [H]` | **Primary command.** Kills everything, resets DB (fresh Level 1 characters), clears state, relaunches N agents for H hours. Default: 4 agents, 24h. Use `0` for no time limit. Supports `--warrior N --gatherer N --explorer N --quester N`. |
+| `./scripts/restart-agent.sh [N] [H]` | **Primary command.** Kills everything, resets DB (fresh Level 1 characters), clears state, relaunches N agents for H hours. Default: 4 agents, 24h. Use `0` for no time limit. Supports `--aggressive N --methodical N --curious N --efficient N`. |
 | `./scripts/stop-agent.sh` | Stop orchestrator + all agents gracefully. Preserves logs. |
-| `./scripts/resume-agent.sh` | Resume agents without DB reset. Preserves character progress. Supports `--warrior N --gatherer N --explorer N --quester N --hours H`. |
+| `./scripts/resume-agent.sh` | Resume agents without DB reset. Preserves character progress. Supports `--aggressive N --methodical N --curious N --efficient N --hours H`. |
 | `./scripts/reset-state.sh [N] [--force]` | Reset MongoDB player data only (no restart). Use `--force` to skip safety check. |
 | `./scripts/start-kaetram.sh` | Start Kaetram game server (single-agent mode, Node 20 required). |
 
@@ -51,11 +51,11 @@ At the end of every session, update `session_log.md` (under 30 lines).
 # Restart fresh: 4 agents, no time limit (round-robin personalities)
 ./scripts/restart-agent.sh 4 0
 
-# One of each personality
-./scripts/restart-agent.sh --warrior 1 --gatherer 1 --explorer 1 --quester 1 --hours 0
+# One of each playstyle
+./scripts/restart-agent.sh --aggressive 1 --methodical 1 --curious 1 --efficient 1 --hours 0
 
-# Custom mix: 2 warriors + 2 questers
-./scripts/restart-agent.sh --warrior 2 --quester 2 --hours 0
+# Custom mix: 2 aggressive + 2 efficient
+./scripts/restart-agent.sh --aggressive 2 --efficient 2 --hours 0
 
 # Monitor
 tail -f /tmp/orchestrate.log        # orchestrator status
@@ -101,19 +101,19 @@ Run each in its own terminal, in order:
 ./scripts/restart-agent.sh 2 8
 
 # One of each personality
-./scripts/restart-agent.sh --warrior 1 --gatherer 1 --explorer 1 --quester 1 --hours 0
+./scripts/restart-agent.sh --aggressive 1 --methodical 1 --curious 1 --efficient 1 --hours 0
 ```
 
 Port allocation: agent N gets server WS port `9001 + N*10` (9001, 9011, 9021, 9031). All agents share the static client on port 9000. Each agent logs in as `ClaudeBotN`.
 
-**Agent playstyles:** Each agent gets a playstyle that defines its DECIDE priorities in `system.md`. Playstyle files in `prompts/personalities/` are injected via the `__PERSONALITY_BLOCK__` placeholder. All agents get `game_knowledge.md` appended. Dashboard shows playstyle badges (red=WARRIOR, amber=GATHERER, blue=EXPLORER, purple=QUESTER). Default (no flags): round-robin assignment. Each agent's sandbox gets a `metadata.json` with its personality.
+**Agent playstyles:** Each agent gets a playstyle that defines its DECIDE priorities in `system.md`. Playstyle files in `prompts/personalities/` are injected via the `__PERSONALITY_BLOCK__` placeholder. All agents get `game_knowledge.md` appended. Dashboard shows playstyle badges (red=AGGRESSIVE, amber=METHODICAL, blue=CURIOUS, purple=EFFICIENT). Default (no flags): round-robin assignment. Each agent's sandbox gets a `metadata.json` with its playstyle.
 
 | Flag | Playstyle | Color | Approach |
 |------|-----------|-------|----------|
-| `--warrior` | Aggressive | Red | Takes risks, pushes combat zones, attempts bosses early |
-| `--gatherer` | Methodical | Amber | Over-prepares, builds skills, crafts before advancing |
-| `--explorer` | Curious | Blue | Talks to every NPC, enters every building, discovers paths |
-| `--quester` | Efficient | Purple | Shortest path through quest chain, no wasted turns |
+| `--aggressive` | Aggressive | Red | Takes risks, pushes combat zones, attempts bosses early |
+| `--methodical` | Methodical | Amber | Over-prepares, builds skills, crafts before advancing |
+| `--curious` | Curious | Blue | Talks to every NPC, enters every building, discovers paths |
+| `--efficient` | Efficient | Purple | Shortest path through quest chain, no wasted turns |
 
 **Resource budget (4 agents on this VM):** ~3.3 GB RAM, ~35% CPU, ~6 GB disk/24h — comfortable on 16 GB / 4 vCPU.
 
@@ -179,7 +179,7 @@ python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
 | PR 4 | Skills system + CLAUDE.md overhaul | merged |
 | PR 5-10 | Dashboard, ws_observer fixes, cleanup | merged |
 | — | Multi-agent SFT pipeline | implemented, ready to run |
-| — | 4-personality agent system | implemented (warrior, gatherer, explorer, quester) |
+| — | 4-playstyle agent system | implemented (aggressive, methodical, curious, efficient) |
 
 **Next:** Collect data with personality-diverse agents, then finetune Qwen3.5 9B.
 
@@ -232,7 +232,7 @@ orchestrate.py ──► N × (GameServer + AgentInstance)
 | `scripts/collect_sft_data.sh` | End-to-end pipeline wrapper |
 | `prompts/system.md` | Base system prompt with `__PERSONALITY_BLOCK__` placeholder |
 | `prompts/game_knowledge.md` | Game-specific knowledge (mob stats, quest guides, NPC coords) — appended for all agents |
-| `prompts/personalities/*.md` | Personality DECIDE overrides (warrior, gatherer, explorer, quester) |
+| `prompts/personalities/*.md` | Playstyle DECIDE overrides (aggressive, methodical, curious, efficient) |
 | `state_extractor.js` | Injected into browser — exposes `window.__extractGameState()` |
 | `logger.py` | Real-time dataset logger (watches screenshot mtime) |
 | `dashboard.py` | Live web dashboard (port 8080) |

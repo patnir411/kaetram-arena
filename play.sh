@@ -11,10 +11,10 @@ SYSTEM_PROMPT_FILE="$PROJECT_DIR/prompts/system.md"
 PERSONALITY=""
 for arg in "$@"; do
   case "$arg" in
-    --warrior)   PERSONALITY="warrior";;
-    --gatherer)  PERSONALITY="gatherer";;
-    --explorer)  PERSONALITY="explorer";;
-    --quester)   PERSONALITY="quester";;
+    --aggressive)  PERSONALITY="aggressive";;
+    --methodical)  PERSONALITY="methodical";;
+    --curious)     PERSONALITY="curious";;
+    --efficient)   PERSONALITY="efficient";;
   esac
 done
 LOG_DIR="$PROJECT_DIR/logs"

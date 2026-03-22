@@ -33,7 +33,7 @@ NVM_SH = Path.home() / ".nvm" / "nvm.sh"
 SYSTEM_PROMPT_FILE = PROJECT_DIR / "prompts" / "system.md"
 GAME_KNOWLEDGE_FILE = PROJECT_DIR / "prompts" / "game_knowledge.md"
 PERSONALITY_DIR = PROJECT_DIR / "prompts" / "personalities"
-VALID_PERSONALITIES = ("warrior", "gatherer", "explorer", "quester")
+VALID_PERSONALITIES = ("aggressive", "methodical", "curious", "efficient")
 MCP_JSON = PROJECT_DIR / ".mcp.json"
 STATE_TEMPLATE = {
     "sessions": 0,
@@ -122,7 +122,7 @@ class AgentInstance:
     server_port: int
     sandbox_dir: Path
     log_dir: Path
-    personality: str = "quester"    # "warrior", "gatherer", "explorer", "quester"
+    personality: str = "efficient"    # "aggressive", "methodical", "curious", "efficient"
     process: subprocess.Popen | None = None
     session: int = 0
     max_turns: int = 10000
@@ -198,29 +198,11 @@ class AgentInstance:
         except OSError:
             progress = "{}"
 
-        # Read game state if available
-        gs_file = self.sandbox_dir / "state" / "game_state.json"
-        game_state_block = ""
-        try:
-            gs = json.loads(gs_file.read_text())
-            gs["nearby_entities"] = gs.get("nearby_entities", [])[:15]
-            gs["inventory"] = gs.get("inventory", [])[:15]
-            gs["quests"] = gs.get("quests", [])[:10]
-            gs["achievements"] = gs.get("achievements", [])[:10]
-            gs_str = json.dumps(gs, separators=(",", ":"))
-            game_state_block = (
-                f"\nPrevious game state (from last observe step):\n{gs_str}\n"
-                "Use nearest_mob.click_x/click_y to click on targets. "
-                "Use player_position for spatial awareness."
-            )
-        except (OSError, json.JSONDecodeError):
-            pass
-
         playstyle_hint = {
-            "warrior": "You play AGGRESSIVE — fight hard mobs, push into new zones, attempt bosses. Combat is your priority.",
-            "gatherer": "You play METHODICAL — prepare thoroughly, gather resources, craft items, build skills before advancing.",
-            "explorer": "You play CURIOUS — talk to every NPC, enter every building, discover hidden paths, accept all quests.",
-            "quester": "You play EFFICIENT — shortest path through quest chain, minimal waste, turn in immediately.",
+            "aggressive": "You play AGGRESSIVE — fight hard mobs, push into new zones, attempt bosses. Combat is your priority.",
+            "methodical": "You play METHODICAL — prepare thoroughly, gather resources, craft items, build skills before advancing.",
+            "curious": "You play CURIOUS — talk to every NPC, enter every building, discover hidden paths, accept all quests.",
+            "efficient": "You play EFFICIENT — shortest path through quest chain, minimal waste, turn in immediately.",
         }.get(self.personality, "")
 
         return (
@@ -228,8 +210,7 @@ class AgentInstance:
             "IMPORTANT: Do NOT search for files, read documentation, or explore the filesystem. "
             "Your ONLY job is to play the game via the browser. "
             "Start IMMEDIATELY with the login code block in your system instructions.\n\n"
-            f"Session #{self.session}. Your previous progress: {progress}"
-            f"{game_state_block}\n"
+            f"Session #{self.session}. Your previous progress: {progress}\n"
             "Follow your system instructions exactly. Load tools, then login, "
             "then run the OBSERVE-ACT loop. Write progress.json before session ends."
         )
@@ -245,7 +226,7 @@ class AgentInstance:
 
         # Clear stale screenshots from previous session so dashboard doesn't show old frames
         state_dir = self.sandbox_dir / "state"
-        for f in ("screenshot.png", "live_screen.png", "game_state.json"):
+        for f in ("screenshot.png", "live_screen.png"):
             (state_dir / f).unlink(missing_ok=True)
 
         system_prompt = self._build_system_prompt()
@@ -359,7 +340,7 @@ class Orchestrator:
             server = GameServer(agent_id=i, port=port)
             self.servers.append(server)
 
-            personality = assignments[i] if i < len(assignments) else "quester"
+            personality = assignments[i] if i < len(assignments) else "efficient"
             sandbox = Path(f"/tmp/kaetram_agent_{i}")
             log_dir = PROJECT_DIR / "dataset" / "raw" / f"agent_{i}" / "logs"
             agent = AgentInstance(
@@ -507,24 +488,24 @@ def main():
         "--hours", type=float, default=None, help="Auto-stop after N hours (default: run forever)"
     )
     parser.add_argument(
-        "--warrior", type=int, default=0, help="Number of warrior-personality agents"
+        "--aggressive", type=int, default=0, help="Number of aggressive-playstyle agents"
     )
     parser.add_argument(
-        "--gatherer", type=int, default=0, help="Number of gatherer-personality agents"
+        "--methodical", type=int, default=0, help="Number of methodical-playstyle agents"
     )
     parser.add_argument(
-        "--explorer", type=int, default=0, help="Number of explorer-personality agents"
+        "--curious", type=int, default=0, help="Number of curious-playstyle agents"
     )
     parser.add_argument(
-        "--quester", type=int, default=0, help="Number of quester-personality agents"
+        "--efficient", type=int, default=0, help="Number of efficient-playstyle agents"
     )
     args = parser.parse_args()
 
     personality_counts = {
-        "warrior": args.warrior,
-        "gatherer": args.gatherer,
-        "explorer": args.explorer,
-        "quester": args.quester,
+        "aggressive": args.aggressive,
+        "methodical": args.methodical,
+        "curious": args.curious,
+        "efficient": args.efficient,
     }
     explicit_total = sum(personality_counts.values())
 
