@@ -14,6 +14,7 @@ import argparse
 import functools
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -38,15 +39,10 @@ MCP_JSON = PROJECT_DIR / ".mcp.json"
 STATE_TEMPLATE = {
     "sessions": 0,
     "level": 1,
-    "xp_estimate": "0",
     "active_quests": [],
     "completed_quests": [],
-    "active_achievements": [],
-    "completed_achievements": [],
     "inventory_summary": [],
-    "locations_visited": ["mudwich"],
     "kills_this_session": 0,
-    "last_action": "none",
     "next_objective": "accept quests from NPCs",
     "notes": "fresh start",
 }
@@ -72,24 +68,32 @@ class GameServer:
         # Use --port CLI arg to override (see packages/server/src/args.ts).
         cmd = (
             f'source "{NVM_SH}" && nvm use 20 --silent && '
-            f'node --enable-source-maps dist/main.js --port {self.port}'
+            f'exec node --enable-source-maps dist/main.js --port {self.port}'
         )
         self.process = subprocess.Popen(
             ["bash", "-c", cmd],
             cwd=str(KAETRAM_SERVER_DIR),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            preexec_fn=os.setsid,
         )
         self.last_restart = time.time()
         self.restart_count += 1
 
     def stop(self):
         if self.process and self.process.poll() is None:
-            self.process.terminate()
+            # Kill entire process group (bash + node child)
+            try:
+                os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                pass
             try:
                 self.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self.process.kill()
+                try:
+                    os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
                 self.process.wait()
             self.process = None
 
@@ -125,7 +129,7 @@ class AgentInstance:
     personality: str = "efficient"    # "aggressive", "methodical", "curious", "efficient"
     process: subprocess.Popen | None = None
     session: int = 0
-    max_turns: int = 10000
+    max_turns: int = 150
     pause_between: int = 10
 
     def setup(self):
@@ -176,19 +180,56 @@ class AgentInstance:
         prompt = prompt.replace("__USERNAME__", self.username)
         prompt = prompt.replace("__SERVER_PORT__", str(self.server_port))
 
+        # Inject game knowledge block (before personality so agent reads world context first)
+        game_knowledge = GAME_KNOWLEDGE_FILE.read_text() if GAME_KNOWLEDGE_FILE.exists() else ""
+        prompt = prompt.replace("__GAME_KNOWLEDGE_BLOCK__", game_knowledge)
+
         # Inject personality block
         personality_file = PERSONALITY_DIR / f"{self.personality}.md"
-        if personality_file.exists():
-            personality_block = personality_file.read_text()
-        else:
-            personality_block = ""
+        personality_block = personality_file.read_text() if personality_file.exists() else ""
         prompt = prompt.replace("__PERSONALITY_BLOCK__", personality_block)
 
-        # All agents get game knowledge
-        if GAME_KNOWLEDGE_FILE.exists():
-            prompt += "\n\n---\n\n" + GAME_KNOWLEDGE_FILE.read_text()
-
         return prompt
+
+    def _extract_game_state_from_log(self) -> str | None:
+        """Extract the last game state JSON from the most recent session log."""
+        try:
+            logs = sorted(self.log_dir.glob("session_*.log"),
+                          key=lambda p: p.stat().st_mtime, reverse=True)
+            if not logs:
+                return None
+            # Read last 1MB to avoid scanning huge files
+            log_path = logs[0]
+            size = log_path.stat().st_size
+            tail_size = min(size, 1_048_576)
+            with open(log_path, "rb") as f:
+                if size > tail_size:
+                    f.seek(size - tail_size)
+                data = f.read().decode("utf-8", errors="replace")
+            last_state = None
+            for line in data.splitlines():
+                if "player_position" in line and "nearby_entities" in line:
+                    # Find JSON substring in the line
+                    try:
+                        obj = json.loads(line)
+                        # browser_run_code results contain game state as a string in content
+                        for block in obj.get("message", {}).get("content", []):
+                            text = block.get("text", "") if isinstance(block, dict) else ""
+                            if "player_position" in text and "nearby_entities" in text:
+                                last_state = text
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
+            if not last_state:
+                return None
+            # Truncate arrays for prompt size
+            d = json.loads(last_state)
+            d["nearby_entities"] = d.get("nearby_entities", [])[:15]
+            d["inventory"] = d.get("inventory", [])[:15]
+            d["quests"] = d.get("quests", [])[:10]
+            d["achievements"] = d.get("achievements", [])[:10]
+            return json.dumps(d, separators=(",", ":"))
+        except (OSError, json.JSONDecodeError):
+            return None
 
     def _build_user_prompt(self) -> str:
         """Build the user prompt for a session."""
@@ -205,12 +246,23 @@ class AgentInstance:
             "efficient": "You play EFFICIENT — shortest path through quest chain, minimal waste, turn in immediately.",
         }.get(self.personality, "")
 
+        game_state_block = ""
+        game_state = self._extract_game_state_from_log()
+        if game_state:
+            game_state_block = (
+                "\nPrevious game state (from last observe step):\n"
+                f"{game_state}\n"
+                "Use nearest_mob.click_x/click_y to click on targets. "
+                "Use player_position for spatial awareness."
+            )
+
         return (
             f"{playstyle_hint}\n\n"
             "IMPORTANT: Do NOT search for files, read documentation, or explore the filesystem. "
             "Your ONLY job is to play the game via the browser. "
             "Start IMMEDIATELY with the login code block in your system instructions.\n\n"
             f"Session #{self.session}. Your previous progress: {progress}\n"
+            f"{game_state_block}\n"
             "Follow your system instructions exactly. Load tools, then login, "
             "then run the OBSERVE-ACT loop. Write progress.json before session ends."
         )
@@ -292,10 +344,67 @@ class AgentInstance:
         except OSError:
             return False
 
+    def _check_rate_limit(self) -> float | None:
+        """Check if the latest session log ended with a rate limit rejection.
+
+        Returns the reset timestamp if rate-limited, None otherwise.
+        """
+        try:
+            logs = sorted(self.log_dir.glob("session_*.log"),
+                          key=lambda p: p.stat().st_mtime, reverse=True)
+            if not logs:
+                return None
+            log_path = logs[0]
+            # Only check small logs (rate-limit kills produce <10KB logs)
+            if log_path.stat().st_size > 50_000:
+                return None
+            data = log_path.read_text(errors="replace")
+            if "overageStatus" not in data:
+                return None
+            for line in data.splitlines():
+                if '"rejected"' in line and "resetsAt" in line:
+                    try:
+                        obj = json.loads(line)
+                        # Navigate nested structure to find resetsAt
+                        content = obj.get("message", {}).get("content", [])
+                        for block in content:
+                            text = block.get("text", "") if isinstance(block, dict) else ""
+                            if "resetsAt" in text:
+                                match = re.search(r'"resetsAt"\s*:\s*(\d+)', text)
+                                if match:
+                                    return float(match.group(1))
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
+                # Also check raw line for resetsAt pattern
+                if '"rejected"' in line:
+                    match = re.search(r'"resetsAt"\s*:\s*(\d+)', line)
+                    if match:
+                        return float(match.group(1))
+            return None
+        except OSError:
+            return None
+
     def maybe_restart_session(self) -> bool:
         """If the session exited, start a new one after a pause. Returns True if restarted."""
         if self.is_alive():
             return False
+        # Check for rate limit before restarting
+        reset_at = self._check_rate_limit()
+        if reset_at:
+            wait_seconds = max(0, reset_at - time.time())
+            if wait_seconds > 0:
+                wait_minutes = int(wait_seconds / 60)
+                print(
+                    f"  [!] Agent {self.agent_id} ({self.username}): "
+                    f"rate-limited, waiting {wait_minutes}min until reset"
+                )
+                # Don't restart — the orchestrator will check again next loop
+                self._rate_limit_until = reset_at
+                return False
+        # Respect rate limit backoff if previously set
+        if hasattr(self, "_rate_limit_until") and time.time() < self._rate_limit_until:
+            return False
+        self._rate_limit_until = 0
         self.stop()  # clean up file handle
         time.sleep(self.pause_between)
         self.start_session()
@@ -309,6 +418,62 @@ class AgentInstance:
         time.sleep(self.pause_between)
         self.start_session()
         return True
+
+    def maybe_restart_if_disconnected(self) -> bool:
+        """Kill and restart if the agent appears disconnected (position 0,0 repeatedly).
+
+        Checks the last 20 lines of the latest log for player_position (0,0) or
+        state extractor errors, which indicate a server disconnect. If found in 3+
+        of the last 20 state reads, the session is likely stuck reconnecting.
+        Returns True if restarted.
+        """
+        if not self.is_alive():
+            return False
+        try:
+            logs = sorted(self.log_dir.glob("session_*.log"),
+                          key=lambda p: p.stat().st_mtime, reverse=True)
+            if not logs:
+                return False
+            log_path = logs[0]
+            # Only check if the log is recent (modified in the last 2 minutes)
+            if time.time() - log_path.stat().st_mtime > 120:
+                return False
+            # Read last 50KB of the log
+            size = log_path.stat().st_size
+            with open(log_path, "r", errors="replace") as f:
+                if size > 50_000:
+                    f.seek(size - 50_000)
+                    f.readline()  # skip partial line
+                lines = f.readlines()
+            # Check last 20 tool results for disconnect indicators
+            # Skip if log is too small (< 100KB) — early session startup has
+            # normal "State extractor not loaded" errors that aren't disconnects
+            if size < 100_000:
+                return False
+            disconnect_count = 0
+            checked = 0
+            for line in reversed(lines[-40:]):
+                if checked >= 20:
+                    break
+                if '"player_position"' in line:
+                    checked += 1
+                    if '"x":0,"y":0' in line or '"x": 0, "y": 0' in line:
+                        disconnect_count += 1
+                elif 'State extractor not loaded' in line or 'Game not loaded' in line:
+                    checked += 1
+                    disconnect_count += 1
+            if disconnect_count >= 5:
+                print(
+                    f"  [!] Agent {self.agent_id} ({self.username}): "
+                    f"detected disconnect ({disconnect_count} bad states), restarting session"
+                )
+                self.stop()
+                time.sleep(self.pause_between)
+                self.start_session()
+                return True
+        except OSError:
+            pass
+        return False
 
 
 class Orchestrator:
@@ -420,6 +585,8 @@ class Orchestrator:
                         f"  [>] Agent {agent.agent_id} ({agent.username}): "
                         f"new session #{agent.session}"
                     )
+                elif agent.maybe_restart_if_disconnected():
+                    pass  # already printed inside the method
                 elif agent.maybe_restart_if_stale(threshold_seconds=900):
                     print(
                         f"  [!] Agent {agent.agent_id} ({agent.username}): "

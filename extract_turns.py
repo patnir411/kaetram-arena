@@ -94,6 +94,69 @@ def parse_events(log_path: Path) -> list[dict]:
     return events
 
 
+def is_memory_write(event: dict) -> bool:
+    """Check if a tool_use event is a Bash call that writes progress.json."""
+    if event["type"] != "tool_use":
+        return False
+    name = event.get("name", "").lower()
+    if "bash" not in name:
+        return False
+    command = event.get("input", {}).get("command", "")
+    return "progress.json" in command
+
+
+def extract_memory_content(event: dict) -> dict | None:
+    """Parse progress.json content from a Bash heredoc command.
+
+    Handles patterns like:
+        cat > .../progress.json << 'PROGRESS'
+        { "sessions": 1, ... }
+        PROGRESS
+    """
+    command = event.get("input", {}).get("command", "")
+    if not command:
+        return None
+
+    # Try heredoc pattern: cat > ... << 'DELIM' ... DELIM
+    m = re.search(
+        r"<<\s*['\"]?(\w+)['\"]?\s*\n(.*?)\n\1",
+        command,
+        re.DOTALL,
+    )
+    if m:
+        body = m.group(2).strip()
+        try:
+            return json.loads(body)
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Try echo/printf pattern with inline JSON
+    m = re.search(r"echo\s+['\"](\{.*?\})['\"]", command, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Last resort: find any JSON object in the command
+    idx = command.find("{")
+    if idx >= 0:
+        # Find matching closing brace
+        depth = 0
+        for i in range(idx, len(command)):
+            if command[i] == "{":
+                depth += 1
+            elif command[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(command[idx : i + 1])
+                    except (json.JSONDecodeError, ValueError):
+                        break
+
+    return None
+
+
 def is_observe(event: dict) -> bool:
     """Check if a tool_use event is an observe step (reads __latestGameState)."""
     if event["type"] != "tool_use":
@@ -115,21 +178,31 @@ def is_browser_action(event: dict) -> bool:
 
 
 def parse_game_state(text: str) -> dict | None:
-    """Parse game state JSON from tool_result text. Handles double-encoding."""
+    """Parse game state JSON from tool_result text. Handles double-encoding.
+
+    The tool result format is multi-line:
+      ### Result
+      "{\"timestamp\":...}"    <-- double-encoded JSON string
+      ### Ran Playwright code
+      ...
+    Stop parsing at "### Ran Playwright code" to avoid picking up JSON from
+    the echoed source code.
+    """
     text = text.strip()
     if not text:
         return None
 
-    # The tool result format is multi-line:
-    #   ### Result
-    #   "{\"timestamp\":...}"    <-- double-encoded JSON string
-    #   ### Ran Playwright code
-    #   ...
-    # We need to extract and parse the JSON line.
     lines = text.split("\n")
 
-    # Try each line for JSON content
+    # Stop at the code echo section
+    result_lines = []
     for line in lines:
+        if line.strip().startswith("### Ran Playwright code"):
+            break
+        result_lines.append(line)
+
+    # Try each line for JSON content
+    for line in result_lines:
         line = line.strip()
         if not line or line.startswith("###") or line.startswith("```") or line.startswith("-"):
             continue
@@ -147,7 +220,7 @@ def parse_game_state(text: str) -> dict | None:
             continue
 
     # Fallback: find first { and try to parse to end of that line
-    for line in lines:
+    for line in result_lines:
         idx = line.find("{")
         if idx >= 0:
             try:
@@ -160,23 +233,75 @@ def parse_game_state(text: str) -> dict | None:
     return None
 
 
+def extract_ascii_map(text: str) -> str:
+    """Extract the ASCII map section from tool_result text."""
+    if "ASCII_MAP:" not in text:
+        return ""
+    idx = text.find("ASCII_MAP:")
+    if idx < 0:
+        return ""
+    ascii_section = text[idx + len("ASCII_MAP:"):].strip()
+    # Trim at STUCK_CHECK if present
+    stuck_idx = ascii_section.find("STUCK_CHECK:")
+    if stuck_idx >= 0:
+        ascii_section = ascii_section[:stuck_idx].strip()
+    return ascii_section
+
+
 def classify_action(code: str) -> str:
-    """Classify browser action JS code into a named action type."""
+    """Classify browser action JS code into a named action type.
+
+    Helper functions are checked FIRST because they internally contain
+    .click() calls that would otherwise match the generic 'click' pattern.
+    """
     code_lower = code.lower()
 
+    # --- Helper function patterns (highest priority) ---
+    if "__attackmob" in code_lower:
+        return "attack"
+    if "__interactnpc" in code_lower:
+        return "interact_npc"
+    if "__navigateto" in code_lower:
+        return "navigate"
+    if "__moveto" in code_lower:
+        return "move"
+    if "__clickentity" in code_lower:
+        return "click_entity"
+    if "__clicktile" in code_lower:
+        return "click_tile"
+    if "__talktonpc" in code_lower:
+        return "talk_npc"
+    if "__safewarp" in code_lower:
+        return "warp"
+    if "__stuckreset" in code_lower:
+        return "stuck_reset"
+    if "__clearcombatstate" in code_lower:
+        return "clear_combat"
+    if "__navcancel" in code_lower:
+        return "nav_cancel"
+
+    # --- Infrastructure actions ---
+    if "page.goto" in code:
+        return "reconnect"
+    if "#respawn" in code or "'respawn'" in code or '"respawn"' in code:
+        return "respawn"
+    if ("#login" in code or "#play" in code) and ("fill(" in code_lower or ".click()" in code_lower):
+        return "login"
+
+    # --- Original action patterns ---
     if "quest-button" in code or "quest_button" in code:
         return "quest_accept"
     if "selectEdible" in code or "selectedible" in code_lower:
         return "heal"
     if "action-equip" in code:
         return "equip"
-    if "warp" in code_lower and ("show()" in code or "warp0" in code or "warp1" in code):
+    if "warp" in code_lower and ("show()" in code or "warp0" in code or "warp1" in code or "warp2" in code):
         return "warp"
     if "setattackstyle" in code_lower:
         return "set_style"
-    if "mouseevent" in code_lower or ".click(" in code_lower or "dispatchevent" in code_lower:
+    if "mouseevent" in code_lower or "dispatchevent" in code_lower:
         return "click"
-    if "waitfortimeout" in code_lower:
+    if "waitfortimeout" in code_lower and "mouseevent" not in code_lower:
         return "wait"
 
     return "other"
@@ -210,6 +335,73 @@ def extract_action_target(code: str) -> dict | None:
 
 def structured_action(action_type: str, action_code: str) -> str:
     """Convert raw JS action code into a structured action string for SFT."""
+
+    # --- Helper function actions ---
+    if action_type == "attack":
+        m = re.search(r"__attackMob\(['\"]([^'\"]+)['\"]", action_code)
+        name = m.group(1) if m else "?"
+        return f"attack({name})"
+
+    if action_type == "interact_npc":
+        m = re.search(r"__interactNPC\(['\"]([^'\"]+)['\"]", action_code)
+        name = m.group(1) if m else "?"
+        return f"interact_npc({name})"
+
+    if action_type == "navigate":
+        # Try {x: N, y: N} object pattern
+        m = re.search(r"\{\s*x:\s*(\d+),\s*y:\s*(\d+)\s*\}", action_code)
+        if m:
+            return f"navigate({m.group(1)}, {m.group(2)})"
+        # Try __navigateTo(x, y) direct args
+        m = re.search(r"__navigateTo\((\d+),\s*(\d+)\)", action_code)
+        if m:
+            return f"navigate({m.group(1)}, {m.group(2)})"
+        return "navigate(?, ?)"
+
+    if action_type == "move":
+        m = re.search(r"\{\s*x:\s*(\d+),\s*y:\s*(\d+)\s*\}", action_code)
+        if m:
+            return f"move({m.group(1)}, {m.group(2)})"
+        m = re.search(r"__moveTo\((\d+),\s*(\d+)\)", action_code)
+        if m:
+            return f"move({m.group(1)}, {m.group(2)})"
+        return "move(?, ?)"
+
+    if action_type == "click_entity":
+        m = re.search(r"__clickEntity\(['\"]([^'\"]+)['\"]", action_code)
+        label = m.group(1) if m else "?"
+        return f"click_entity({label})"
+
+    if action_type == "click_tile":
+        m = re.search(r"__clickTile\((\d+),\s*(\d+)\)", action_code)
+        if m:
+            return f"click_tile({m.group(1)}, {m.group(2)})"
+        return "click_tile(?, ?)"
+
+    if action_type == "talk_npc":
+        m = re.search(r"__talkToNPC\(['\"]?([^'\")\s]+)", action_code)
+        npc_id = m.group(1) if m else "?"
+        return f"talk_npc({npc_id})"
+
+    if action_type == "respawn":
+        return "respawn()"
+
+    if action_type == "reconnect":
+        return "reconnect()"
+
+    if action_type == "login":
+        return "login()"
+
+    if action_type == "stuck_reset":
+        return "stuck_reset()"
+
+    if action_type == "clear_combat":
+        return "clear_combat()"
+
+    if action_type == "nav_cancel":
+        return "nav_cancel()"
+
+    # --- Original action types ---
     if action_type == "click":
         mx = re.search(r"clientX:\s*(\d+)", action_code)
         my = re.search(r"clientY:\s*(\d+)", action_code)
@@ -236,9 +428,15 @@ def structured_action(action_type: str, action_code: str) -> str:
         return f"heal(slot={slot})"
 
     if action_type == "warp":
-        m = re.search(r"warp(\d+)", action_code)
+        # __safeWarp(id) pattern
+        m = re.search(r"__safeWarp\((\d+)\)", action_code)
+        if not m:
+            m = re.search(r"warp(\d+)", action_code)
         idx = m.group(1) if m else "0"
-        locations = {"0": "Mudwich", "1": "Crossroads", "2": "Lakesworld"}
+        locations = {
+            "0": "Mudwich", "1": "Crossroads", "2": "Lakesworld",
+            "3": "Patsow", "4": "Crullfield", "5": "Undersea",
+        }
         return f"warp({locations.get(idx, idx)})"
 
     if action_type == "quest_accept":
@@ -258,53 +456,146 @@ def structured_action(action_type: str, action_code: str) -> str:
     return f"other({action_type})"
 
 
+def _safe_int(val, default=0):
+    """Safely extract an integer from a value that might be a dict, str, or None."""
+    if isinstance(val, (int, float)):
+        return int(val)
+    if isinstance(val, dict):
+        # Agent sometimes nests the full stats dict under 'hp' key
+        return int(val.get("hp", val.get("level", default)))
+    if isinstance(val, str):
+        try:
+            return int(val)
+        except ValueError:
+            pass
+    return default
+
+
+def _build_player_stats(gs: dict) -> dict:
+    """Build a player_stats dict from whatever fields are available in gs."""
+    # Try 'stats' sub-dict first
+    stats = gs.get("stats", {})
+    if isinstance(stats, str):
+        try:
+            stats = json.loads(stats)
+        except (json.JSONDecodeError, ValueError):
+            stats = {}
+    if not isinstance(stats, dict):
+        stats = {}
+
+    # If gs["hp"] is itself a dict (agent put full stats under "hp" key), use it as stats
+    hp_val = gs.get("hp")
+    if isinstance(hp_val, dict):
+        stats = hp_val
+        hp_val = stats.get("hp", 0)
+
+    player = gs.get("player", {})
+    if not isinstance(player, dict):
+        player = {}
+
+    hp = _safe_int(hp_val) or _safe_int(stats.get("hp")) or _safe_int(player.get("hp"))
+    max_hp = (
+        _safe_int(gs.get("max_hp")) or _safe_int(gs.get("maxHp"))
+        or _safe_int(stats.get("max_hp")) or _safe_int(stats.get("maxHp"))
+        or _safe_int(player.get("max_hp")) or _safe_int(player.get("maxHp"))
+    )
+    level = (
+        _safe_int(gs.get("level")) or _safe_int(stats.get("level"))
+        or _safe_int(player.get("level"))
+        or 1
+    )
+    experience = (
+        _safe_int(gs.get("experience")) or _safe_int(gs.get("xp"))
+        or _safe_int(stats.get("experience")) or _safe_int(stats.get("xp"))
+    )
+    return {
+        "hp": hp,
+        "max_hp": max_hp,
+        "level": level,
+        "experience": experience,
+    }
+
+
 def normalize_game_state(gs: dict) -> dict | None:
     """Normalize variant game state formats to a standard schema.
 
-    The agent sometimes returns custom subsets (e.g., {pos: {x,y}, player: {...}})
-    instead of the full __latestGameState format. This normalizes them.
+    The agent sometimes returns custom subsets instead of the full
+    __latestGameState format. This handles all observed variants.
     """
     if not gs or not isinstance(gs, dict):
         return None
     if gs.get("error"):
         return None
 
-    # Already standard format
-    if "player_position" in gs and "player_stats" in gs:
-        return gs
+    normalized = dict(gs)
 
-    # Custom format: {pos: {x, y}, player: {hp, ...}, ...}
-    if "pos" in gs:
-        normalized = dict(gs)
-        normalized["player_position"] = gs["pos"]
-        if "player" in gs:
-            p = gs["player"]
-            normalized["player_stats"] = {
-                "hp": p.get("hp", 0),
-                "max_hp": p.get("max_hp", p.get("maxHp", 0)),
-                "level": p.get("level", 1),
-                "experience": p.get("experience", p.get("xp", 0)),
-            }
-        return normalized
+    # --- Normalize field aliases ---
+    for alias, canonical in [
+        ("nearby_mobs", "nearby_entities"),
+        ("nearby", "nearby_entities"),
+        ("entities", "nearby_entities"),
+        ("inv", "inventory"),
+    ]:
+        if alias in normalized and canonical not in normalized:
+            normalized[canonical] = normalized.pop(alias)
 
-    # Custom format: {x: N, y: N, ...} (bare position)
-    if "x" in gs and "y" in gs and isinstance(gs.get("x"), (int, float)):
-        normalized = dict(gs)
-        normalized["player_position"] = {"x": gs["x"], "y": gs["y"]}
-        return normalized
+    # --- Ensure player_position ---
+    if "player_position" not in normalized:
+        if "pos" in gs:
+            pos = gs["pos"]
+            if isinstance(pos, dict) and "x" in pos:
+                normalized["player_position"] = pos
+            elif isinstance(pos, str):
+                m = re.match(r'\(?\s*(\d+)\s*,\s*(\d+)\s*\)?', pos)
+                if m:
+                    normalized["player_position"] = {"x": int(m.group(1)), "y": int(m.group(2))}
+        elif "x" in gs and "y" in gs and isinstance(gs.get("x"), (int, float)):
+            normalized["player_position"] = {"x": int(gs["x"]), "y": int(gs["y"])}
 
-    # Custom format with just player stats: {level: N, hp: N, ...}
-    if "level" in gs and "hp" in gs:
-        normalized = dict(gs)
-        normalized["player_stats"] = {
-            "hp": gs.get("hp", 0),
-            "max_hp": gs.get("max_hp", gs.get("maxHp", 0)),
-            "level": gs.get("level", 1),
-        }
-        # No position — can't use as primary state, but keep for reference
+    if "player_position" not in normalized:
         return None
 
-    return None
+    pp = normalized["player_position"]
+    if isinstance(pp, str):
+        try:
+            pp = json.loads(pp)
+            normalized["player_position"] = pp
+        except (json.JSONDecodeError, ValueError):
+            m = re.match(r'\(?\s*(\d+)\s*,\s*(\d+)\s*\)?', pp)
+            if m:
+                pp = {"x": int(m.group(1)), "y": int(m.group(2))}
+                normalized["player_position"] = pp
+            else:
+                return None
+    if not isinstance(pp, dict) or "x" not in pp:
+        return None
+
+    # --- Ensure player_stats ---
+    existing_ps = normalized.get("player_stats")
+    if isinstance(existing_ps, str):
+        try:
+            existing_ps = json.loads(existing_ps)
+        except (json.JSONDecodeError, ValueError):
+            existing_ps = None
+
+    # Check if existing player_stats is valid (has non-zero hp or max_hp)
+    ps_valid = (
+        isinstance(existing_ps, dict)
+        and (existing_ps.get("hp", 0) > 0 or existing_ps.get("max_hp", 0) > 0)
+    )
+
+    if not ps_valid:
+        # Build player_stats from top-level fields, stats dict, or player dict
+        built_ps = _build_player_stats(gs)
+        if built_ps["hp"] > 0 or built_ps["max_hp"] > 0:
+            normalized["player_stats"] = built_ps
+        elif isinstance(existing_ps, dict):
+            # Keep existing even if zero — it's the standard format with actual zeros
+            normalized["player_stats"] = existing_ps
+        else:
+            normalized["player_stats"] = built_ps
+
+    return normalized
 
 
 def has_action_code(code: str) -> bool:
@@ -313,17 +604,51 @@ def has_action_code(code: str) -> bool:
     return any(
         k in code_lower
         for k in [
+            # Helper functions
+            "__attackmob",
+            "__interactnpc",
+            "__navigateto",
+            "__moveto",
+            "__clickentity",
+            "__clicktile",
+            "__safewarp",
+            "__stuckreset",
+            "__talktonpc",
+            "__clearcombatstate",
+            "__navcancel",
+            # Original patterns
             "mouseevent",
             "dispatchevent",
-            ".click(",
             "warp",
             "selectEdible",
             "selectedible",
             "action-equip",
             "quest-button",
             "setattackstyle",
+            # Infrastructure
+            "page.goto",
+            "'respawn'",
+            '"respawn"',
+            "#respawn",
         ]
     )
+
+
+def is_valid_turn(turn: dict) -> bool:
+    """Filter out garbage turns that would pollute training data."""
+    pp = turn.get("player_position", {})
+    ps = turn.get("player_stats", {})
+    action_type = turn.get("action_type", "")
+
+    # Position (0, 0) = login screen / game not loaded
+    if pp.get("x", 0) == 0 and pp.get("y", 0) == 0:
+        return False
+
+    # Infrastructure actions aren't gameplay
+    if action_type in ("login", "reconnect"):
+        return False
+
+    return True
 
 
 def extract_turns(log_path: Path) -> list[dict]:
@@ -352,18 +677,21 @@ def extract_turns(log_path: Path) -> list[dict]:
 
         # Find the tool_result for this call
         game_state = None
+        ascii_map = ""
         for j in range(obs_idx + 1, min(obs_idx + 15, len(events))):
             e = events[j]
             if e["type"] == "tool_result" and e.get("tool_use_id") == obs_tool_id:
-                raw_gs = parse_game_state(e.get("text", ""))
+                result_text = e.get("text", "")
+                raw_gs = parse_game_state(result_text)
                 game_state = normalize_game_state(raw_gs) if raw_gs else None
+                ascii_map = extract_ascii_map(result_text)
                 break
 
         if game_state is None:
             continue
 
         pp = game_state.get("player_position")
-        if not pp:
+        if not pp or not isinstance(pp, dict):
             continue
 
         # Collect reasoning from thinking/text blocks BEFORE this observe call
@@ -406,11 +734,19 @@ def extract_turns(log_path: Path) -> list[dict]:
         reasoning = "\n".join(reasoning_parts)
 
         ps = game_state.get("player_stats", {})
+        if isinstance(ps, str):
+            try:
+                ps = json.loads(ps)
+            except (json.JSONDecodeError, ValueError):
+                ps = {}
+        if not isinstance(ps, dict):
+            ps = {}
 
         turn = {
             "turn_id": f"{log_path.stem}_t{len(turns):03d}",
             "timestamp": game_state.get("timestamp", 0),
             "game_state": game_state,
+            "ascii_map": ascii_map,
             "reasoning": reasoning,
             "action_code": action_code,
             "action_type": action_type,
@@ -423,18 +759,68 @@ def extract_turns(log_path: Path) -> list[dict]:
             },
             "player_position": {"x": pp.get("x", 0), "y": pp.get("y", 0)},
         }
-        turns.append(turn)
 
-    # Deduplicate: skip consecutive turns with same position + same action_structured
+        if is_valid_turn(turn):
+            turns.append(turn)
+
+        # Scan for Bash progress.json writes between this observe and the next
+        for j in range(obs_idx + 1, next_obs):
+            ev = events[j]
+            if is_memory_write(ev):
+                mem_content = extract_memory_content(ev)
+                if mem_content is None:
+                    continue
+                # Collect reasoning before the Bash call
+                mem_reasoning_parts = []
+                for k in range(max(obs_idx + 1, j - 10), j):
+                    ek = events[k]
+                    if ek["type"] in ("thinking", "text") and ek["role"] == "assistant":
+                        txt = ek.get("text", "").strip()
+                        if txt:
+                            mem_reasoning_parts.append(txt)
+                mem_summary = json.dumps(mem_content, separators=(",", ":"))
+                if len(mem_summary) > 300:
+                    # Truncate but keep parseable
+                    mem_summary = mem_summary[:297] + "..."
+                mem_turn = {
+                    "turn_id": f"{log_path.stem}_t{len(turns):03d}",
+                    "timestamp": game_state.get("timestamp", 0),
+                    "game_state": game_state,
+                    "ascii_map": "",
+                    "reasoning": "\n".join(mem_reasoning_parts) if mem_reasoning_parts else "Saving progress.",
+                    "action_code": ev.get("input", {}).get("command", ""),
+                    "action_type": "update_memory",
+                    "action_structured": f"update_memory({mem_summary})",
+                    "action_target": None,
+                    "player_stats": {
+                        "hp": ps.get("hp", 0),
+                        "max_hp": ps.get("max_hp", 0),
+                        "level": ps.get("level", 1),
+                    },
+                    "player_position": {"x": pp.get("x", 0), "y": pp.get("y", 0)},
+                    "memory_content": mem_content,
+                }
+                turns.append(mem_turn)
+
+    # Deduplicate: skip consecutive turns with same position + same action,
+    # allowing at most 3 repeats before filtering
     deduped = []
+    repeat_count = 0
     for t in turns:
         if deduped:
             prev = deduped[-1]
-            if (
-                prev["player_position"] == t["player_position"]
-                and prev["action_structured"] == t["action_structured"]
-            ):
-                continue
+            same_pos = prev["player_position"] == t["player_position"]
+            same_action = prev["action_structured"] == t["action_structured"]
+            same_reasoning = (
+                prev.get("reasoning", "")[:100] == t.get("reasoning", "")[:100]
+                and len(prev.get("reasoning", "")) > 0
+            )
+            if same_pos and (same_action or same_reasoning):
+                repeat_count += 1
+                if repeat_count >= 3:
+                    continue  # Skip after 3 consecutive repeats
+            else:
+                repeat_count = 0
         deduped.append(t)
 
     return deduped

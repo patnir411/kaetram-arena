@@ -18,13 +18,13 @@ for arg in "$@"; do
   esac
 done
 LOG_DIR="$PROJECT_DIR/logs"
-MAX_TURNS=10000
+MAX_TURNS=150
 PAUSE_BETWEEN=10
 
 mkdir -p "$LOG_DIR" "$PROJECT_DIR/state"
 
 if [ ! -f "$STATE_FILE" ]; then
-  echo '{"sessions":0,"level":1,"xp_estimate":"0","active_quests":[],"completed_quests":[],"active_achievements":[],"completed_achievements":[],"inventory_summary":[],"locations_visited":["mudwich"],"kills_this_session":0,"last_action":"none","next_objective":"accept quests from NPCs","notes":"fresh start"}' > "$STATE_FILE"
+  echo '{"sessions":0,"level":1,"active_quests":[],"completed_quests":[],"inventory_summary":[],"kills_this_session":0,"next_objective":"accept quests from NPCs","notes":"fresh start"}' > "$STATE_FILE"
 fi
 
 SESSION=0
@@ -40,29 +40,31 @@ while true; do
                -e "s|__SERVER_PORT__||g" \
                "$SYSTEM_PROMPT_FILE")
 
+  # Inject game knowledge block (before personality so agent reads world context first)
+  if [ -f "$PROJECT_DIR/prompts/game_knowledge.md" ]; then
+    GFILE="$PROJECT_DIR/prompts/game_knowledge.md"
+  else
+    GFILE=""
+  fi
+
   # Inject personality block
   if [ -n "$PERSONALITY" ] && [ -f "$PROJECT_DIR/prompts/personalities/${PERSONALITY}.md" ]; then
     PFILE="$PROJECT_DIR/prompts/personalities/${PERSONALITY}.md"
   else
     PFILE=""
   fi
+
   SYSTEM=$(python3 -c "
 import sys
 s = sys.stdin.read()
+gfile = '$GFILE'
 pfile = '$PFILE'
+g = open(gfile).read() if gfile else ''
 p = open(pfile).read() if pfile else ''
-sys.stdout.write(s.replace('__PERSONALITY_BLOCK__', p))
+s = s.replace('__GAME_KNOWLEDGE_BLOCK__', g)
+s = s.replace('__PERSONALITY_BLOCK__', p)
+sys.stdout.write(s)
 " <<< "$SYSTEM")
-
-  # All agents get game knowledge
-  if [ -f "$PROJECT_DIR/prompts/game_knowledge.md" ]; then
-    KNOWLEDGE=$(cat "$PROJECT_DIR/prompts/game_knowledge.md")
-    SYSTEM="${SYSTEM}
-
----
-
-${KNOWLEDGE}"
-  fi
 
   # Read previous progress and include in prompt
   PROGRESS=$(cat "$STATE_FILE" 2>/dev/null || echo '{}')

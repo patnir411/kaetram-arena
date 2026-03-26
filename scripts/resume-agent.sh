@@ -75,11 +75,11 @@ fi
 
 echo "=== Resuming Kaetram training run ==="
 if $HAS_PERSONALITY; then
-  [ -n "$N_WARRIOR" ] && [ "$N_WARRIOR" -gt 0 ] && echo "  Warrior:  $N_WARRIOR"
-  [ -n "$N_GATHERER" ] && [ "$N_GATHERER" -gt 0 ] && echo "  Gatherer: $N_GATHERER"
-  [ -n "$N_EXPLORER" ] && [ "$N_EXPLORER" -gt 0 ] && echo "  Explorer: $N_EXPLORER"
-  [ -n "$N_QUESTER" ] && [ "$N_QUESTER" -gt 0 ] && echo "  Quester:  $N_QUESTER"
-  echo "  Total:     $N_AGENTS"
+  [ -n "$N_AGGRESSIVE" ] && [ "$N_AGGRESSIVE" -gt 0 ] && echo "  Aggressive:  $N_AGGRESSIVE"
+  [ -n "$N_METHODICAL" ] && [ "$N_METHODICAL" -gt 0 ] && echo "  Methodical:  $N_METHODICAL"
+  [ -n "$N_CURIOUS" ] && [ "$N_CURIOUS" -gt 0 ] && echo "  Curious:     $N_CURIOUS"
+  [ -n "$N_EFFICIENT" ] && [ "$N_EFFICIENT" -gt 0 ] && echo "  Efficient:   $N_EFFICIENT"
+  echo "  Total:       $N_AGENTS"
 else
   echo "  Agents to resume: $N_AGENTS (detected $DETECTED with state)"
 fi
