@@ -12,7 +12,7 @@ PROJECT_DIR=$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null || pwd)
 **Step 2 — run these checks in parallel:**
 ```bash
 lsof -i :9000 -i :9001 -i :8080 2>/dev/null | grep LISTEN
-ps aux | grep -E "ws_observer\.py|logger\.py|dashboard\.py" | grep -v grep
+ps aux | grep -E "dashboard\.py" | grep -v grep
 ls -la "$PROJECT_DIR/state/game_state.json" 2>/dev/null
 ```
 
@@ -36,10 +36,7 @@ Also check if `state/game_state.json` exists and how old it is (fresh = < 30s).
 # Terminal 2 — Dashboard (optional)
 cd <PROJECT_DIR> && python3 dashboard.py
 
-# Terminal 3 — Dataset logger (optional)
-cd <PROJECT_DIR> && python3 logger.py
-
-# Terminal 4 — Agent loop (MUST be separate terminal — see gotcha below)
+# Terminal 3 — Agent loop (MUST be separate terminal — see gotcha below)
 cd <PROJECT_DIR> && ./play.sh
 ```
 

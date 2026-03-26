@@ -1,0 +1,28 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "modal": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Modal (Kaetram)",
+      "options": {
+        "baseURL": "https://patnir411--kaetram-qwen-serve-inference-serve.modal.run/v1"
+      },
+      "models": {
+        "kaetram": {
+          "name": "Kaetram Qwen3.5-9B",
+          "tool_call": true,
+          "limit": {
+            "context": 32768,
+            "output": 4096
+          }
+        }
+      }
+    }
+  },
+  "mcp": {
+    "playwright": {
+      "type": "local",
+      "command": ["npx", "@playwright/mcp@latest", "--caps", "core,vision", "--viewport-size", "1280x720", "--browser", "chromium", "--no-sandbox"]
+    }
+  }
+}

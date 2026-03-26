@@ -117,7 +117,7 @@ Port allocation: agent N gets server WS port `9001 + N*10` (9001, 9011, 9021, 90
 
 **Resource budget (4 agents on this VM):** ~3.3 GB RAM, ~35% CPU, ~6 GB disk/24h — comfortable on 16 GB / 4 vCPU.
 
-**Database**: MongoDB (`kaetram-mongo` Docker container, port 27017) persists player state. `SKIP_DATABASE=false` in `.env`. Characters survive disconnects/server restarts.
+**Database**: MongoDB (`kaetram-mongo` Docker container, port 27017, db `kaetram_devlopment`) persists player state across 9 collections (`player_info`, `player_skills`, `player_equipment`, `player_inventory`, `player_bank`, `player_quests`, `player_achievements`, `player_statistics`, `player_abilities`). The dashboard reads directly from MongoDB via `pymongo` for authoritative game state (level, HP, mana, skills, quests, equipment, inventory). Requires `pymongo` in the venv.
 
 ### End-to-end data collection pipeline
 
@@ -125,8 +125,6 @@ Port allocation: agent N gets server WS port `9001 + N*10` (9001, 9011, 9021, 90
 # Orchestrate → extract → convert in one script
 ./scripts/collect_sft_data.sh 4 24    # 4 agents, 24 hours
 ```
-
-> **Note:** `ws_observer.py` is deprecated. Game state is extracted directly from the browser via `page.evaluate()` in the agent's observe step.
 
 ---
 
@@ -148,59 +146,74 @@ python3 extract_turns.py --log-dir logs/ --output-dir dataset/extracted/ --no-fr
 python3 extract_turns.py --log-file logs/session_2_20260319_060749.log   # single file
 ```
 
-**Stage 2: Convert to Qwen format** — Transforms extracted turns into Qwen3.5 9B conversation records with system/user/assistant messages, `<think>` reasoning, and structured `<action>` tags. 90/10 train/val split stratified by session.
+**Stage 2: Convert to Qwen format** — Transforms extracted turns into Qwen3.5 9B conversation records with system/user/assistant messages, `<think>` reasoning, and structured `<action>` tags. 90/10 train/val split stratified by session. Supports 3 modes (`--mode single|multi|mixed`) and 2 formats (`--format sft|grpo`).
 
 ```bash
 python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
+python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/ --mode multi --format grpo
 ```
 
 **Action vocabulary** (used in `<action>` tags):
-- `click(x, y)` — click canvas at pixel coordinates (attack, walk, interact)
+- `attack(mob_name)` — target and attack a mob via helper
+- `interact_npc(npc_name)` — walk to and interact with NPC
+- `navigate(x, y)` — multi-step pathfinding to grid coordinates
+- `move(x, y)` — single-step movement to nearby tile
+- `click(x, y)` — click canvas at pixel coordinates (generic fallback)
+- `click_entity(label)` — click a specific entity by label
+- `click_tile(x, y)` — click a specific grid tile
+- `talk_npc(instance_id)` — open dialogue with NPC
+- `warp(location)` — fast travel (Mudwich, Crossroads, Lakesworld)
 - `equip(slot=N)` — equip item from inventory
 - `heal(slot=N)` — consume edible item
-- `warp(location)` — fast travel (Mudwich, Crossroads, Lakesworld)
 - `quest_accept()` — click quest button
 - `set_style(style)` — change attack style (Hack=6, Chop=7, Defensive=3)
+- `stuck_reset()` — reset navigation when stuck
+- `respawn()` — respawn after death
 - `wait(Ns)` — wait for combat/regen
 
-**Verified on existing data:** 558 turns extracted from 54 session logs → 542 train / 16 val Qwen3.5 SFT records.
+**Verified on existing data:** 5,162 turns extracted from 259 session logs (4 agents) → 3,844 train / 1,318 val Qwen3.5 SFT records.
 
 ---
 
 ## CURRENT STATUS
 
-**Last updated:** 2026-03-20
+**Finetune DONE.** Qwen3.5-9B finetuned on 3,844 gameplay turns via Modal H100 (27min). Model loaded in Ollama on RTX 3060 GPU machine.
 
-| PR | Title | Status |
-|----|-------|--------|
-| PR 1 | ws_observer.py + 21 unit tests | merged |
-| PR 2 | logger.py dataset recording | merged |
-| PR 3 | game_state.json prompt injection | merged |
-| PR 4 | Skills system + CLAUDE.md overhaul | merged |
-| PR 5-10 | Dashboard, ws_observer fixes, cleanup | merged |
-| — | Multi-agent SFT pipeline | implemented, ready to run |
-| — | 4-playstyle agent system | implemented (aggressive, methodical, curious, efficient) |
+**Qwen agent harness DONE.** Two modes available:
+- `play_qwen.py` / `play_qwen.sh` — lightweight 2-tool loop (browser_run_code + bash) driving Playwright directly
+- `play_opencode.sh` + `opencode.json` — OpenCode + Playwright MCP with Ollama/Modal endpoint
 
-**Next:** Collect data with personality-diverse agents, then finetune Qwen3.5 9B.
+**World model DONE.** 2.2M param Transformer forward dynamics model trained on gameplay transitions. Used for MCTS planning and GRPO reward shaping. See `world/README.md`.
 
-**Blocked:** Nothing currently blocked.
+**Remote agent setup:**
+- **GCP VM** (`35.224.227.251`): Hosts Kaetram game server (:9001 WS) + client (:9000 HTTP). This is the game world.
+- **GPU VM** (`73.173.11.56:1738` via SSH): Runs finetuned `kaetram` model in Ollama (RTX 3060 12GB) + agent harness via Playwright. This is the agent brain.
+- Agent on GPU VM connects browser to `http://35.224.227.251:9000` and plays via Playwright.
+
+### Remote access
+| Machine | IP | SSH | Purpose |
+|---------|------|------|---------|
+| GCP VM (this) | 35.224.227.251 | patnir41@35.224.227.251 | Game server + client, data collection, training pipeline |
+| GPU VM (3060) | 73.173.11.56 | pnir41@73.173.11.56 -p 1738 | Finetuned model inference, agent harness (OpenCode) |
 
 ---
 
 ## Architecture
 
 ```
+Claude Code agent (data collection):
 play.sh ─────► Claude Code (Sonnet) ─────► Playwright MCP ──► browser @ localhost:9000
                      │                          │                        │
                reads/writes               page.evaluate()         window.game
                state/, prompts/           extracts game state    (Kaetram client)
                      │                          │
-                     │                   returns state as tool result
-                     │                          │
-                     └──────────────────► logger.py ◄── watches screenshot mtime
-                                           writes dataset/session_N/steps.jsonl
+                     └──► logs/session_N_*.log (auto-logged JSONL)
 
-Dashboard reads game state by parsing the latest session log (tool results).
+Qwen agent (finetuned model):
+play_qwen.sh ──► play_qwen.py (2-tool loop) ──► Playwright ──► browser @ <game-server>:9000
+                     │                                                    │
+               Ollama/Modal API                                    window.game
+               (Qwen3.5-9B)                                      (Kaetram client)
 
 Multi-agent mode:
 orchestrate.py ──► N × (GameServer + AgentInstance)
@@ -209,6 +222,20 @@ orchestrate.py ──► N × (GameServer + AgentInstance)
                    dataset/raw/agent_N/logs/session_*.log
                         │
                    extract_turns.py → convert_to_qwen.py → dataset/qwen_sft/
+                        │                                        │
+                   finetune/train_modal.py (SFT)        finetune/train_grpo_modal.py (GRPO)
+                        │                                        │
+                   world/extract_transitions.py → world/train.py → world/mcts.py (planning)
+
+Dashboard reads player state directly from MongoDB (authoritative, fast).
+Falls back to session log parsing if MongoDB is unavailable.
+
+                          ┌─────────────────────┐
+  dashboard/api.py ──────►│  MongoDB (27017)     │──► player stats, skills, quests,
+                          │  kaetram_devlopment  │    equipment, inventory, achievements
+                          └─────────────────────┘
+                                   ▲
+                          kaetram-mongo Docker container
 ```
 
 ## Ports
@@ -220,24 +247,39 @@ orchestrate.py ──► N × (GameServer + AgentInstance)
 | 9001, 9011, 9021, 9031 | Game server WS (multi-agent, one per agent) |
 | 8080 | Dashboard |
 | 8081 | Dashboard WebSocket relay (realtime screenshot push) |
+| 8082 | Qwen dashboard (MJPEG stream) |
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
-| `play.sh` | Single-agent loop — launches Claude Code sessions |
+| `play.sh` | Claude Code agent loop (150 turns/session) |
+| `play_qwen.py` | Qwen agent loop — lightweight 2-tool harness for finetuned model |
+| `play_qwen.sh` | Qwen agent session launcher (system prompt substitution) |
+| `play_opencode.sh` | OpenCode + Playwright MCP agent launcher |
+| `qwen_dashboard.py` | Lightweight MJPEG dashboard for Qwen agent (port 8082) |
+| `opencode.json` | OpenCode provider config (Modal/Ollama endpoints) |
 | `orchestrate.py` | Multi-agent launcher + health monitor |
 | `extract_turns.py` | JSONL log → clean OODA turn extraction |
-| `convert_to_qwen.py` | Turns → Qwen3.5 9B SFT format |
+| `convert_to_qwen.py` | Turns → Qwen3.5 9B SFT/GRPO format (single/multi/mixed modes) |
 | `scripts/collect_sft_data.sh` | End-to-end pipeline wrapper |
-| `prompts/system.md` | Base system prompt with `__PERSONALITY_BLOCK__` placeholder |
+| `prompts/system.md` | Base system prompt with `__PERSONALITY_BLOCK__` and `__GAME_KNOWLEDGE_BLOCK__` placeholders |
 | `prompts/game_knowledge.md` | Game-specific knowledge (mob stats, quest guides, NPC coords) — appended for all agents |
 | `prompts/personalities/*.md` | Playstyle DECIDE overrides (aggressive, methodical, curious, efficient) |
-| `state_extractor.js` | Injected into browser — exposes `window.__extractGameState()` |
-| `logger.py` | Real-time dataset logger (watches screenshot mtime) |
-| `dashboard.py` | Live web dashboard (port 8080) |
-| `state/progress.json` | Cross-session state (written by Claude) |
-| `state/game_state.json` | Legacy — no longer written live. Dashboard reads state from session logs instead. |
+| `state_extractor.js` | Injected into browser — exposes `window.__extractGameState()` + `window.__generateAsciiMap()` |
+| `dashboard.py` | Live web dashboard launcher (port 8080) |
+| `dashboard/db.py` | MongoDB reader — queries `kaetram_devlopment` DB for authoritative player state |
+| `dashboard/api.py` | API endpoints — `/api/game-state`, `/api/agents` (DB-first, log-fallback) |
+| `dashboard/game_state.py` | Game state extraction — DB-based + log-based fallback |
+| `finetune/train_modal.py` | SFT training on Modal (Unsloth + T4/L40S) |
+| `finetune/train_grpo_modal.py` | GRPO reinforcement learning on Modal |
+| `finetune/serve_modal.py` | vLLM serving endpoint (OpenAI-compatible API) |
+| `finetune/SETUP_3060.md` | RTX 3060 local deployment guide |
+| `world/model.py` | Transformer forward dynamics model (2.2M params, combat prediction) |
+| `world/mcts.py` | MCTS planner for multi-step action evaluation |
+| `world/extract_transitions.py` | Extract (state, action, next_state) triples from session logs |
+| `state/progress.json` | Agent-written cross-session scratchpad. Multi-agent: `/tmp/kaetram_agent_N/state/progress.json` |
+| `state/game_state.json` | Auto-extracted from session logs between sessions by play.sh/orchestrate.py |
 | `logs/session_N_*.log` | Claude Code JSONL session logs |
 
 ## Placeholders in `prompts/system.md`
@@ -247,6 +289,7 @@ orchestrate.py ──► N × (GameServer + AgentInstance)
 | `__PROJECT_DIR__` | `play.sh` via sed | repo root |
 | `__USERNAME__` | `play.sh` or `orchestrate.py` | `ClaudeBot` |
 | `__SERVER_PORT__` | `play.sh` or `orchestrate.py` | empty (no override) |
+| `__GAME_KNOWLEDGE_BLOCK__` | `play.sh` or `orchestrate.py` | contents of `prompts/game_knowledge.md` |
 | `__PERSONALITY_BLOCK__` | `play.sh` or `orchestrate.py` | empty (generic DECIDE) |
 
 ## Skills (slash commands)
@@ -287,13 +330,6 @@ Three custom skills live in `.claude/commands/`:
 - `window.game.player` — player instance (gridX, gridY, hitPoints, level, experience, target, etc.)
 - `window.game.entities.entities` — dict of all loaded entities {instance: Entity}
 - `window.__kaetramState` — our injected hooks for combat/XP event tracking (installed during login)
-
-## Tests
-
-```bash
-python3 tests/test_ws_observer.py   # 21 unit tests for ws_observer
-python3 tests/test_logger.py        # simulated 5-turn logger test
-```
 
 ## Storage / teardown
 

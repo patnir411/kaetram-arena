@@ -1,3 +1,5 @@
+.venv/
+
 # Screenshots and session state (generated at runtime)
 state/*.png
 state/session*.json
@@ -20,11 +22,11 @@ logs/
 recordings/
 highlights/
 
-# Dataset frames (large binaries — keep steps.jsonl)
-dataset/*/frames/
-dataset/extracted/
-dataset/qwen_sft/
-dataset/raw/
+# Dataset (generated training data — 1GB+)
+dataset/
+
+# Model checkpoints (large weights)
+world/checkpoints/
 
 # Python
 __pycache__/

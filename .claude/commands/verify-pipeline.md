@@ -11,17 +11,24 @@ PROJECT_DIR=$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null || pwd)
 
 **Step 2 — run all checks:**
 
-**Check A — game_state.json freshness:**
+**Check A — game_state.json freshness (multi-agent sandboxes):**
 ```python
-import json, time, os
-path = f"{PROJECT_DIR}/state/game_state.json"
-if not os.path.exists(path):
-    print("FAIL: game_state.json missing — agent hasn't observed yet")
+import json, time, os, glob
+# Check multi-agent sandboxes first, fall back to single-agent path
+paths = sorted(glob.glob("/tmp/kaetram_agent_*/state/game_state.json"))
+if not paths:
+    single = f"{PROJECT_DIR}/state/game_state.json"
+    if os.path.exists(single):
+        paths = [single]
+if not paths:
+    print("FAIL: no game_state.json found in any agent sandbox")
 else:
-    age = time.time() - os.path.getmtime(path)
-    d = json.load(open(path))
-    entity_count = len(d.get("nearby_entities", []))
-    print(f"{'PASS' if age < 30 else 'STALE'}: game_state.json age={age:.0f}s, entities={entity_count}")
+    for path in paths:
+        age = time.time() - os.path.getmtime(path)
+        d = json.load(open(path))
+        entity_count = len(d.get("nearby_entities", []))
+        agent = os.path.basename(os.path.dirname(os.path.dirname(path)))
+        print(f"{'PASS' if age < 300 else 'STALE'}: {agent} game_state.json age={age:.0f}s, entities={entity_count}")
 ```
 
 
@@ -62,23 +69,15 @@ else:
         print(f"  state.last_combat:   {state.get('last_combat')}")
 ```
 
-**Check E — logger process:**
-```bash
-ps aux | grep "logger\.py" | grep -v grep
-```
-
 **Step 3 — print a final pass/fail table:**
 
 | Check | Result |
 |-------|--------|
 | game_state.json exists | PASS/FAIL |
-| game_state.json < 30s old | PASS/STALE |
+| game_state.json fresh | PASS/STALE |
 | dataset/ has sessions | PASS/FAIL |
 | latest steps.jsonl non-empty | PASS/FAIL |
 | latest record has entity data | PASS/FAIL |
-| logger process running | PASS/FAIL |
 
 **Step 4 — for each FAIL, print the exact fix command:**
 - Missing game_state.json → Agent needs to run and complete an observe step
-- No dataset sessions → `cd <PROJECT_DIR> && python3 logger.py`
-- logger not running → `cd <PROJECT_DIR> && python3 logger.py`
