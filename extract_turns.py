@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """
-extract_turns.py — Post-process Claude JSONL session logs into clean OODA turns.
+extract_turns.py — Post-process session logs into clean OODA turns.
 
-Reads the stream-json output from `claude -p` sessions and extracts
-(game_state, reasoning, action) tuples for SFT training.
+Reads logs from multiple CLI harnesses and extracts (game_state, reasoning, action)
+tuples for SFT training:
+- Claude Code: stream-json with thinking blocks
+- Codex: --json with item.started/item.completed events
+- Qwen Code: stream-json (Gemini CLI fork, same format as Claude)
+- Kimi: extended thinking with --thinking flag, raw output + thinking tokens
 
 Usage:
     python3 extract_turns.py --log-dir logs/ --output-dir dataset/extracted/
@@ -16,9 +20,25 @@ import re
 import sys
 from pathlib import Path
 
+from cli_adapter import detect_log_format
+
 
 def parse_events(log_path: Path) -> list[dict]:
-    """Parse JSONL log into a flat list of typed events."""
+    """Parse JSONL log into a flat list of typed events (auto-detecting format).
+
+    Supports: Claude stream-json, Codex --json, Qwen Code stream-json, Kimi raw output.
+    Qwen Code and Kimi both use Claude-compatible stream-json or similar event structures.
+    """
+    fmt = detect_log_format(log_path)
+    if fmt == "codex":
+        return _parse_codex_events(log_path)
+    # Claude, Qwen Code, and Kimi all use compatible stream-json-like formats
+    # or compatible message structures
+    return _parse_claude_events(log_path)
+
+
+def _parse_claude_events(log_path: Path) -> list[dict]:
+    """Parse Claude Code stream-json log into normalized events."""
     events = []
     for i, line in enumerate(open(log_path)):
         try:
@@ -90,6 +110,65 @@ def parse_events(log_path: Path) -> list[dict]:
                         "timestamp": timestamp,
                     }
                 )
+
+    return events
+
+
+def _parse_codex_events(log_path: Path) -> list[dict]:
+    """Parse Codex --json log into normalized events.
+
+    Codex emits item.started/item.completed events with mcp_tool_call items.
+    We normalize to the same event dicts as Claude:
+    {line, type, role, text/name/input/id, timestamp}
+    """
+    events = []
+
+    for i, line in enumerate(open(log_path)):
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        t = ev.get("type", "")
+        item = ev.get("item", {})
+        item_type = item.get("type", "")
+        timestamp = ev.get("timestamp", ev.get("created_at"))
+
+        # item.started with mcp_tool_call → tool_use event
+        if t == "item.started" and item_type == "mcp_tool_call":
+            tool_name = item.get("tool", "unknown")
+            if "__" in tool_name and not tool_name.startswith("mcp__"):
+                tool_name = f"mcp__{tool_name}"
+            args = item.get("arguments", {})
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except (json.JSONDecodeError, ValueError):
+                    args = {"raw": args}
+            events.append({
+                "line": i, "type": "tool_use", "role": "assistant",
+                "name": tool_name,
+                "input": args if isinstance(args, dict) else {},
+                "id": item.get("id", ""),
+                "timestamp": timestamp,
+            })
+
+        # item.completed with mcp_tool_call → tool_result event
+        elif t == "item.completed" and item_type == "mcp_tool_call":
+            result = item.get("result", {})
+            text_content = ""
+            if isinstance(result, dict):
+                for block in result.get("content", []):
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text_content += block.get("text", "")
+            elif isinstance(result, str):
+                text_content = result
+            events.append({
+                "line": i, "type": "tool_result", "role": "user",
+                "tool_use_id": item.get("id", ""),
+                "text": text_content,
+                "timestamp": timestamp,
+            })
 
     return events
 

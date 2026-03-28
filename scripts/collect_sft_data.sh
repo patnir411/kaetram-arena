@@ -19,12 +19,38 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
 
+# Parse args
 N_AGENTS="${1:-4}"
 HOURS="${2:-}"
+N_CLAUDE=""
+N_CODEX=""
+for arg in "$@"; do
+  case "$arg" in
+    --codex) N_CODEX="-1";;
+    --claude) N_CLAUDE="-1";;
+  esac
+done
+# Also parse --claude N / --codex N with values
+PREV=""
+for arg in "$@"; do
+  if [ "$PREV" = "--claude" ] && [[ "$arg" =~ ^[0-9]+$ ]]; then
+    N_CLAUDE="$arg"
+  elif [ "$PREV" = "--codex" ] && [[ "$arg" =~ ^[0-9]+$ ]]; then
+    N_CODEX="$arg"
+  fi
+  PREV="$arg"
+done
 
 echo "=== Kaetram SFT Data Collection Pipeline ==="
 echo "  Agents: $N_AGENTS"
 echo "  Hours: ${HOURS:-unlimited}"
+if [ -n "$N_CLAUDE" ] && [ -n "$N_CODEX" ]; then
+  echo "  CLI: Mixed (Claude + Codex)"
+elif [ -n "$N_CODEX" ]; then
+  echo "  CLI: Codex"
+else
+  echo "  CLI: Claude Code"
+fi
 echo ""
 
 # Step 1: Check shared client on port 9000
@@ -51,6 +77,8 @@ ORCH_ARGS="--agents $N_AGENTS"
 if [ -n "$HOURS" ]; then
   ORCH_ARGS="$ORCH_ARGS --hours $HOURS"
 fi
+[ -n "$N_CLAUDE" ] && ORCH_ARGS="$ORCH_ARGS --claude $N_CLAUDE"
+[ -n "$N_CODEX" ] && ORCH_ARGS="$ORCH_ARGS --codex $N_CODEX"
 
 python3 orchestrate.py $ORCH_ARGS
 echo ""

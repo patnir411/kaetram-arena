@@ -8,10 +8,16 @@ import json
 import os
 import re
 import glob
+import sys
 import time
 from datetime import datetime
+from pathlib import Path
 
 from dashboard.constants import DATASET_DIR, LOG_DIR
+
+# Import shared format detection
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from cli_adapter import detect_log_format
 
 
 def extract_game_state_from_db(username: str) -> dict | None:
@@ -209,6 +215,83 @@ def parse_tool_result_text(text):
     return None
 
 
+def _extract_tool_result_texts_from_line(obj, fmt):
+    """Extract tool result text strings from a single log line.
+
+    Yields text strings that may contain game state JSON.
+    Handles both Claude and Codex event structures.
+    """
+    if fmt == "claude" or fmt == "unknown":
+        # Claude: {"type": "user", "message": {"content": [{"type": "tool_result", ...}]}}
+        if obj.get("type") != "user":
+            return
+        msg = obj.get("message", {})
+        content = msg.get("content", msg)
+        if not isinstance(content, list):
+            return
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            c = block.get("content", "")
+            if isinstance(c, list):
+                for item in c:
+                    if isinstance(item, dict):
+                        c = item.get("text", "")
+                        break
+                else:
+                    continue
+            if isinstance(c, str):
+                yield c
+
+    if fmt == "codex" or fmt == "unknown":
+        # Primary Codex format: item.completed with mcp_tool_call
+        if obj.get("type") == "item.completed":
+            item = obj.get("item", {})
+            if item.get("type") == "mcp_tool_call":
+                result = item.get("result", {})
+                if isinstance(result, dict):
+                    for block in result.get("content", []):
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text = block.get("text", "")
+                            if isinstance(text, str):
+                                yield text
+                elif isinstance(result, str):
+                    yield result
+
+        # Fallback: top-level output/result string
+        for key in ("output", "result"):
+            val = obj.get(key)
+            if isinstance(val, str) and "player_position" in val:
+                yield val
+
+
+def _merge_parsed_state(composite, quest_by_key, parsed):
+    """Merge a parsed game state dict into the composite state."""
+    for k in MERGE_KEYS:
+        if k not in parsed:
+            continue
+        new_val = parsed[k]
+        old_val = composite.get(k)
+
+        # Special handling: quests merge by key
+        if k == "quests" and isinstance(new_val, list):
+            for q in new_val:
+                if isinstance(q, dict) and "key" in q:
+                    quest_by_key[q["key"]] = q
+            continue
+
+        # For lists (inventory): don't replace objects with strings
+        if (isinstance(new_val, list) and isinstance(old_val, list)
+                and old_val and isinstance(old_val[0], dict)
+                and new_val and isinstance(new_val[0], str)):
+            continue  # keep richer old data
+        # For dicts (player_stats): merge keys, don't replace
+        if isinstance(new_val, dict) and isinstance(old_val, dict):
+            old_val.update(new_val)
+            continue
+        composite[k] = new_val
+
+
 def extract_game_state_from_log(qs=None):
     """Extract composite game state from session log tool results.
 
@@ -216,6 +299,7 @@ def extract_game_state_from_log(qs=None):
     state by merging all parsed tool results — full OBSERVE dumps and
     partial action results alike. Newer values overwrite older ones.
 
+    Supports both Claude and Codex log formats via auto-detection.
     Quest lists are merged by key (deduplication) instead of full replacement.
     """
     agent_id = qs.get("agent", [None])[0] if qs else None
@@ -228,6 +312,10 @@ def extract_game_state_from_log(qs=None):
     if not logs:
         return None
     latest = logs[-1]
+
+    # Detect log format for appropriate extraction
+    fmt = detect_log_format(Path(latest))
+
     composite = {}
     quest_by_key = {}  # Key-based quest dedup
     last_timestamp = None
@@ -247,51 +335,14 @@ def extract_game_state_from_log(qs=None):
                     obj = json.loads(line)
                 except Exception:
                     continue
-                if obj.get("type") != "user":
-                    continue
                 line_ts = obj.get("timestamp")
-                msg = obj.get("message", {})
-                content = msg.get("content", msg)
-                if not isinstance(content, list):
-                    continue
-                for block in content:
-                    if not isinstance(block, dict) or block.get("type") != "tool_result":
-                        continue
-                    c = block.get("content", "")
-                    if isinstance(c, list):
-                        for item in c:
-                            if isinstance(item, dict):
-                                c = item.get("text", "")
-                                break
-                        else:
-                            continue
-                    parsed = parse_tool_result_text(c)
+
+                # Extract tool result texts using format-aware extraction
+                for text in _extract_tool_result_texts_from_line(obj, fmt):
+                    parsed = parse_tool_result_text(text)
                     if not parsed:
                         continue
-                    # Merge: newer overwrites older, but don't downgrade
-                    for k in MERGE_KEYS:
-                        if k not in parsed:
-                            continue
-                        new_val = parsed[k]
-                        old_val = composite.get(k)
-
-                        # Special handling: quests merge by key
-                        if k == "quests" and isinstance(new_val, list):
-                            for q in new_val:
-                                if isinstance(q, dict) and "key" in q:
-                                    quest_by_key[q["key"]] = q
-                            continue
-
-                        # For lists (inventory): don't replace objects with strings
-                        if (isinstance(new_val, list) and isinstance(old_val, list)
-                                and old_val and isinstance(old_val[0], dict)
-                                and new_val and isinstance(new_val[0], str)):
-                            continue  # keep richer old data
-                        # For dicts (player_stats): merge keys, don't replace
-                        if isinstance(new_val, dict) and isinstance(old_val, dict):
-                            old_val.update(new_val)
-                            continue
-                        composite[k] = new_val
+                    _merge_parsed_state(composite, quest_by_key, parsed)
                     last_timestamp = line_ts
     except Exception:
         pass

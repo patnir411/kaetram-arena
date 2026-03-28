@@ -1143,6 +1143,21 @@ async function refreshFast() {
             html += '<div class="agent-card' + modeClass + '" data-agent-id="' + a.id + '" data-mode="' + personality + '" id="agent-card-' + a.id + '" onclick="selectAgent(' + a.id + ')">';
             html += '<div class="agent-card-header"><span class="agent-card-name" style="color:' + modeColor + '">' + esc(a.username) + '</span>';
             html += '<span style="font-size:9px;color:' + modeColor + ';border:1px solid ' + modeColor + ';padding:1px 5px;border-radius:3px;margin-left:6px;letter-spacing:0.5px">' + modeLabel + '</span>';
+            const harness = a.harness || 'claude';
+            const hColors = {
+              claude: 'var(--green)',
+              codex: 'var(--amber)',
+              kimi: '#00BFA5',      // teal
+              'qwen-code': '#FF6B00' // orange
+            };
+            const hLabels = {
+              claude: 'CLAUDE',
+              codex: 'CODEX',
+              kimi: 'KIMI K2',
+              'qwen-code': 'QWEN CODE'
+            };
+            const hColor = hColors[harness] || 'var(--text)';
+            html += '<span style="font-size:8px;color:' + hColor + ';border:1px solid ' + hColor + ';padding:1px 4px;border-radius:3px;margin-left:4px;letter-spacing:0.5px">' + (hLabels[harness] || harness.toUpperCase()) + '</span>';
             html += '<span class="agent-server-dot"></span></div>';
             html += '<div class="agent-info-line" style="font-size:10px;color:var(--text)"></div>';
             html += '<div class="agent-hp-line" style="margin-top:4px"></div>';

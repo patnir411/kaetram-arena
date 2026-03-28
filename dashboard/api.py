@@ -46,8 +46,19 @@ class APIMixin:
 
         # Priority 1: Direct MongoDB query (authoritative, fast)
         agent_id = qs.get("agent", [None])[0] if qs else None
+        # Read username from metadata.json for correct DB lookup (supports Codex agents)
+        username = None
         if agent_id is not None:
-            username = f"claudebot{agent_id}"
+            metadata_file = os.path.join("/tmp", f"kaetram_agent_{agent_id}", "metadata.json")
+            if os.path.isfile(metadata_file):
+                try:
+                    with open(metadata_file) as mf:
+                        meta = json.load(mf)
+                    username = meta.get("username", "").lower()
+                except Exception:
+                    pass
+            if not username:
+                username = f"claudebot{agent_id}"
         else:
             username = "claudebot0"  # default single-agent
         db_state = extract_game_state_from_db(username)
@@ -324,20 +335,32 @@ class APIMixin:
             if not os.path.isdir(sandbox):
                 continue
             state_dir = os.path.join(sandbox, "state")
-            agent = {"id": i, "username": f"ClaudeBot{i}", "server_port": BASE_SERVER_PORT + i * PORT_STRIDE}
+            agent = {"id": i, "username": f"Agent{i}", "server_port": BASE_SERVER_PORT + i * PORT_STRIDE}
 
             metadata_file = os.path.join(sandbox, "metadata.json")
+            default_models = {
+                "claude": "sonnet",
+                "codex": "gpt-5.4",
+                "kimi": "kimi-k2",
+                "qwen-code": "qwen3-coder",
+            }
             if os.path.isfile(metadata_file):
                 try:
                     with open(metadata_file) as mf:
                         meta = json.load(mf)
                     agent["mode"] = meta.get("personality", meta.get("mode", "efficient"))
+                    agent["harness"] = meta.get("harness", "claude")
+                    agent["harness_model"] = meta.get("model") or default_models.get(agent["harness"], "")
                     if meta.get("username"):
                         agent["username"] = meta["username"]
                 except Exception:
                     agent["mode"] = "efficient"
+                    agent["harness"] = "claude"
+                    agent["harness_model"] = default_models.get("claude", "")
             else:
                 agent["mode"] = "efficient"
+                agent["harness"] = "claude"
+                agent["harness_model"] = default_models.get("claude", "")
 
             if agent["mode"] == "qwen":
                 continue
