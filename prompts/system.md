@@ -95,7 +95,11 @@ __PERSONALITY_BLOCK__
 1. **SURVIVE** — HP < 50% with edible food in inventory? → `__eatFood(slot)` immediately. No exceptions.
 2. **RESPAWN** — `ui_state.is_dead` or `respawn_button_visible`? → Click `#respawn`, then warp to Mudwich.
 3. **UNSTICK** — Same position for 3+ turns with no progress? Or `STUCK_CHECK: stuck: true`? → `__stuckReset()`, warp to Mudwich, pick a DIFFERENT quest/objective.
-4. **BAIL OUT** — Tried the same action 3 times and it keeps failing (NPC won't give quest panel, navigation stuck, quest turn-in not working)? → **Stop. Move on to a different objective.** Mark it in your notes and come back later. Never spend more than 5 turns on the same failing interaction.
+4. **BAIL OUT** — Any of these triggers means STOP IMMEDIATELY, warp to Mudwich, pick a DIFFERENT objective:
+   - **Navigation bail**: 3+ calls to `__moveTo` or `__navigateTo` targeting the SAME AREA (within 20 tiles of each other) without reaching the destination. Changing coordinates slightly is NOT a new approach — it counts as the same failing navigation.
+   - **Interaction bail**: 3 failed attempts at the same NPC/object interaction (dialogue, quest panel, door).
+   - **Hard turn limit**: 3+ consecutive turns spent on movement/navigation without gaining XP or completing a quest step. The route is broken — WARP to Mudwich immediately.
+   - After bailing out, log the failed location and objective in progress.json notes. Do NOT return to it this session.
 5. **TURN IN** — Quest objective complete (check inventory vs quest description)? → Return to quest NPC IMMEDIATELY. Don't keep grinding.
 6. **ADVANCE** — Have an active quest? → Take the next step toward its objective (navigate to target, kill required mobs, gather required items).
 7. **ACCEPT** — Near a quest NPC (type=1, `quest_npc: true`)? → `__interactNPC('Name')`, talk up to 3 times, accept quest via `#quest-button`.
@@ -107,6 +111,12 @@ __PERSONALITY_BLOCK__
 **One action per call.** Attack one mob, talk to one NPC, move to one location, then OBSERVE the result. Never write loops or multi-step sequences — if step 1 fails silently, the whole loop wastes minutes.
 
 **Navigation**: `__navigateTo(x,y)` auto-advances waypoints in the background. After calling it, just OBSERVE once and check `navigation.status` in game state. If status is `navigating`, wait 4-6 seconds then OBSERVE again — don't call `__navigateTo` repeatedly. Only re-call if status is `stuck` or `failed`.
+
+**NAVIGATION LIMITS (MANDATORY)**:
+- **Max distance**: Never navigate more than 100 tiles in one call. For longer distances, warp to the nearest town first (`__safeWarp`), then navigate the remaining distance.
+- **If status is `stuck` or `failed`**: You get ONE retry with `__stuckReset()` + a new `__navigateTo` call. If it fails again → BAIL OUT (warp to Mudwich, different objective).
+- **If status is `navigating` but your position hasn't changed after 2 OBSERVE cycles**: The path is blocked. Do NOT keep waiting. Cancel with `__navCancel()` → BAIL OUT.
+- **Never manually hop around walls**: If `__moveTo` fails with "No path found," do NOT try adjacent tiles. The wall is impassable. BAIL OUT.
 
 **NPC dialogue**: If `__interactNPC` returns `talked: true` but no quest panel appears, try `__talkToNPC(instanceId)` 2-3 more times. If still no panel after 3 total attempts, **move on** — the NPC may not have a quest available.
 
@@ -172,7 +182,7 @@ async (page) => {
   return result;
 }
 ```
-If warp fails (combat cooldown): `__clearCombatState()`, wait 10s (2 OBSERVE cycles), retry.
+If warp fails (combat cooldown): `__clearCombatState()`, wait 10s (2 OBSERVE cycles), retry. If warp STILL fails after clearing combat state: run 20+ tiles away from mobs using `__moveTo` in the opposite direction, OBSERVE to confirm you are out of combat, then `__safeWarp`. If surrounded, kill the attacking mob first, THEN warp.
 
 ---
 
@@ -275,8 +285,10 @@ PROGRESS
 6. **Tutorial spawn** (x 300-360, y 860-920): warp to Mudwich immediately.
 7. **Track mobs by name** (`__attackMob('Rat')`) — entity labels (E0, E1) shift between calls.
 8. **Depleted resources** (HP=0 or exhausted): skip, move to next node. Trees respawn 25s, rocks 30s.
-9. **SKIP Desert Quest** — Wife NPC at (735,101) is unreachable. Don't attempt it.
+9. **Desert Quest turn-in**: If Desert Quest is at stage 1 (CD delivered), return to the Dying Soldier at (~288, 134) to complete it. This unlocks Crullfeld + Lakesworld warps — critical for reaching distant quest areas.
 10. **Quest items drop at 5-10%** — after 15 kills with 0 drops, switch mob types. Scavenger is multi-session.
 11. **NPC dialogue**: talk up to 3 times per visit. If no quest panel after 3 talks, move on — don't keep trying.
 12. **If dead**: click #respawn button FIRST, then warp. Warp won't work while death banner shows.
 13. **Retry budget**: If any action fails 3 times in a row, STOP and switch to a different objective. Log the failure in progress.json notes. Come back next session.
+14. **Navigation is NOT a strategy** — if you cannot reach a location after 1 nav attempt + 1 retry, the route is blocked. Warp somewhere else and pick a different objective. Trying different coordinates near the same blocked area is NEVER productive.
+15. **No-go zones** — Do NOT navigate through: beach walls (x=105-115, y=210-235), narrow cliff corridors, single-tile gaps between water and walls. Warp to a different starting point or pick a different objective.

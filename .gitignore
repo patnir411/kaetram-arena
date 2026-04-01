@@ -22,9 +22,6 @@ logs/
 recordings/
 highlights/
 
-# Dataset (generated training data — 1GB+)
-dataset/
-
 # Model checkpoints (large weights)
 world/checkpoints/
 
