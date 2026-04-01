@@ -1,0 +1,121 @@
+# Training Data — State & Structure
+
+## What This Is
+
+Raw session logs from 4 autonomous Claude agents playing Kaetram (a 2D MMORPG). Used for knowledge distillation to train a smaller Qwen model to play the game.
+
+Each session log captures everything: the game state the agent saw, its internal reasoning (extended thinking blocks), and every action it took. This is teacher data — we're compressing Claude's gameplay knowledge into a smaller model.
+
+---
+
+## The 4 Personalities
+
+Each agent has a fixed personality that shapes how it reasons and plays. This is the scientific knob for data diversity — same game, 4 distinct approaches.
+
+| Agent | Personality | Playstyle |
+|-------|-------------|-----------|
+| agent_0 | **AGGRESSIVE** | Rushes combat, targets hard mobs, pushes into new zones early |
+| agent_1 | **METHODICAL** | Over-prepares, builds skills, checks inventory before every move |
+| agent_2 | **CURIOUS** | Talks to every NPC, enters every building, maps the world |
+| agent_3 | **EFFICIENT** | Shortest path through quest chain, fast-travels constantly, no wasted moves |
+
+Personalities are injected via `prompts/personalities/{personality}.md` into the system prompt at session start by `orchestrate.py`.
+
+---
+
+## Data Layout
+
+```
+dataset/
+├── raw/
+│   ├── agent_0/logs/         ← AGGRESSIVE session logs
+│   ├── agent_1/logs/         ← METHODICAL session logs
+│   ├── agent_2/logs/         ← CURIOUS session logs
+│   ├── agent_3/logs/         ← EFFICIENT session logs
+│   └── backlog/              ← Top pre-personality sessions (Mar 19-21), kept for reference
+│       ├── agent_0_aggressive/
+│       ├── agent_1_methodical/
+│       ├── agent_2_curious/
+│       └── agent_3_efficient/
+├── extracted/                ← OODA turns extracted from raw logs (generated, not committed)
+├── qwen_sft_v4/              ← Final training records (generated, not committed)
+└── world_model/              ← Forward dynamics model data (committed)
+```
+
+Raw logs and generated data live on the GCP VM only (`35.224.227.251`). Not committed to git.
+
+---
+
+## Session Metadata
+
+Every session log has a sidecar metadata file written alongside it:
+
+```
+session_10_20260328_081546.log         ← gameplay log
+session_10_20260328_081546.meta.json   ← who wrote it
+```
+
+Example metadata:
+```json
+{
+  "agent_id": 0,
+  "personality": "aggressive",
+  "harness": "claude",
+  "model": "claude-sonnet-4-6",
+  "username": "ClaudeBot0",
+  "session": 10,
+  "timestamp": "20260328_081546",
+  "log_file": "session_10_20260328_081546.log"
+}
+```
+
+Written automatically by `orchestrate.py` at session start. Use these to filter sessions without reading log content.
+
+---
+
+## What's Kept and Why
+
+**Active training data: March 28 – present**
+The personality system was finalized on March 22 and prompts were dialed in by March 28 ("best run yet" commit). All training data comes from this period onward — confirmed personalities, structured actions, clean reasoning.
+
+**Backlogged (not used for training): March 19–21**
+Pre-personality marathon sessions. Agents reached level 99-135 with deep reasoning (5,000+ word thinking blocks). Kept as reference in case game knowledge depth is ever needed. Not used for distillation because actions were raw pixel clicks and there's no personality differentiation.
+
+**Deleted: March 22–27**
+Personality system being built and broken mid-run. Prompt changes mid-collection, March 26 full outage day. Removed entirely.
+
+---
+
+## Current Dataset Stats (as of April 1, 2026)
+
+| | Value |
+|---|---|
+| Active sessions per agent | 56–72 |
+| Total active sessions | 253 |
+| Extracted turns | ~2,189 |
+| Training records (qwen_sft_v4) | 1,233 train / 158 val |
+| Action vocab (top) | `__navigateTo`, `__attackMob`, `__moveTo`, `__safeWarp` |
+| Structured action rate | ~88% |
+
+Dataset is growing. Rebuild with `scripts/collect_sft_data.sh` or manually:
+```bash
+python3 extract_turns.py --log-dir dataset/raw/agent_N/logs/ --output-dir dataset/extracted/agent_N/
+python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft_v4/ --mode mixed --format sft
+```
+
+---
+
+## Pipeline
+
+```
+raw logs (session_*.log)
+    ↓  extract_turns.py
+dataset/extracted/agent_N/turns.jsonl       ← (game_state, reasoning, action) triples
+    ↓  convert_to_qwen.py
+dataset/qwen_sft_v4/train.json              ← conversation records for SFT
+dataset/qwen_sft_v4/val.json
+    ↓  finetune/train_modal.py
+Qwen3.5-9B finetuned model
+```
+
+Each training record: system prompt (game rules) + user message (game state + ASCII map) + assistant message (`<think>` reasoning block + structured action call).

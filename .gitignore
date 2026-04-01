@@ -27,3 +27,8 @@ __pycache__/
 *.pyc
 tests/state/
 logs/
+
+# Training data (generated, stays on VM — do not commit)
+dataset/extracted*/
+dataset/qwen_sft*/
+dataset/raw/

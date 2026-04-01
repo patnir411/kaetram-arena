@@ -254,6 +254,19 @@ class AgentInstance:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         log_file = self.log_dir / f"session_{self.session}_{timestamp}.log"
 
+        # Write sidecar metadata alongside the session log for auditing/filtering
+        sidecar = self.log_dir / f"session_{self.session}_{timestamp}.meta.json"
+        sidecar.write_text(json.dumps({
+            "agent_id": self.agent_id,
+            "personality": self.personality,
+            "harness": self.adapter.name,
+            "model": self.adapter.model,
+            "username": self.username,
+            "session": self.session,
+            "timestamp": timestamp,
+            "log_file": log_file.name,
+        }, indent=2))
+
         # Clear stale screenshots from previous session so dashboard doesn't show old frames
         state_dir = self.sandbox_dir / "state"
         for f in ("screenshot.png", "live_screen.png"):
