@@ -38,7 +38,7 @@ dataset/
 │       ├── agent_2_curious/
 │       └── agent_3_efficient/
 ├── extracted/                ← OODA turns extracted from raw logs (generated, not committed)
-├── qwen_sft_v4/              ← Final training records (generated, not committed)
+├── qwen_sft/              ← Final training records (generated, not committed)
 └── world_model/              ← Forward dynamics model data (committed)
 ```
 
@@ -93,14 +93,14 @@ Personality system being built and broken mid-run. Prompt changes mid-collection
 | Active sessions per agent | 56–72 |
 | Total active sessions | 253 |
 | Extracted turns | ~2,189 |
-| Training records (qwen_sft_v4) | 1,233 train / 158 val |
+| Training records (qwen_sft) | 1,233 train / 158 val |
 | Action vocab (top) | `__navigateTo`, `__attackMob`, `__moveTo`, `__safeWarp` |
 | Structured action rate | ~88% |
 
 Dataset is growing. Rebuild with `scripts/collect_sft_data.sh` or manually:
 ```bash
 python3 extract_turns.py --log-dir dataset/raw/agent_N/logs/ --output-dir dataset/extracted/agent_N/
-python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft_v4/ --mode mixed --format sft
+python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/ --mode mixed --format sft
 ```
 
 ---
@@ -112,8 +112,8 @@ raw logs (session_*.log)
     ↓  extract_turns.py
 dataset/extracted/agent_N/turns.jsonl       ← (game_state, reasoning, action) triples
     ↓  convert_to_qwen.py
-dataset/qwen_sft_v4/train.json              ← conversation records for SFT
-dataset/qwen_sft_v4/val.json
+dataset/qwen_sft/train.json              ← conversation records for SFT
+dataset/qwen_sft/val.json
     ↓  finetune/train_modal.py
 Qwen3.5-9B finetuned model
 ```

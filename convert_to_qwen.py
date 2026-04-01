@@ -16,7 +16,7 @@ And two output formats:
 
 Usage:
     python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
-    python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft_v3/ --mode mixed --window-size 5
+    python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/ --mode mixed --window-size 5
     python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_grpo/ --format grpo
 """
 

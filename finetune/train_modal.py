@@ -304,8 +304,8 @@ def main():
     import os
 
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    train_path = os.path.join(project_dir, "dataset", "qwen_sft_v3", "train.json")
-    val_path = os.path.join(project_dir, "dataset", "qwen_sft_v3", "val.json")
+    train_path = os.path.join(project_dir, "dataset", "qwen_sft", "train.json")
+    val_path = os.path.join(project_dir, "dataset", "qwen_sft", "val.json")
 
     if not os.path.exists(train_path):
         raise FileNotFoundError(f"Training data not found: {train_path}")
