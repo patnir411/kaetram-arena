@@ -590,6 +590,23 @@ class Orchestrator:
                         f"stale 15min, restarted → session #{agent.session}"
                     )
 
+            # If all agents are rate-limited with a distant reset, shut down
+            rate_limit_times = []
+            for agent in self.agents:
+                rl = getattr(agent, "_rate_limit_until", 0)
+                if rl > time.time():
+                    rate_limit_times.append(rl)
+            if len(rate_limit_times) == len(self.agents) and rate_limit_times:
+                min_wait = min(rate_limit_times) - time.time()
+                if min_wait > 7200:  # more than 2 hours
+                    wait_h = int(min_wait / 3600)
+                    print(
+                        f"\n[!!] All {len(self.agents)} agents are rate-limited. "
+                        f"Earliest reset in ~{wait_h}h. Shutting down to avoid idle waste."
+                    )
+                    self.running = False
+                    break
+
             # Periodic status
             if time.time() - last_status > status_interval:
                 self.print_status()

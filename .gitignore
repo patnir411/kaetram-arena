@@ -15,9 +15,6 @@ state/.session_counter
 # Root-level test screenshots
 *.png
 
-# Logs
-logs/
-
 # Recordings and highlights
 recordings/
 highlights/
@@ -29,3 +26,4 @@ world/checkpoints/
 __pycache__/
 *.pyc
 tests/state/
+logs/
