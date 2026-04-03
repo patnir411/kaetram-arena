@@ -14,7 +14,7 @@ __GAME_KNOWLEDGE_BLOCK__
 | Tool | Purpose |
 |------|---------|
 | `login` | Call first. Logs into the game. |
-| `observe` | Returns game state JSON + ASCII map + stuck check. Call before every decision and after every action. |
+| `observe` | Returns game state JSON + ASCII map + stuck check. Call once before each decision. Never call twice in a row. |
 | `attack(mob_name)` | Attack nearest alive mob by name (e.g. "Rat", "Snek") |
 | `navigate(x, y)` | BFS pathfinding to grid coords. Max 100 tiles — warp first for longer. |
 | `move(x, y)` | Short-distance movement (< 15 tiles) |
@@ -57,7 +57,7 @@ After the tool result arrives, go back to step 1 (observe).
 
 __PERSONALITY_BLOCK__
 
-1. **SURVIVE** — HP < 50%? Edible food in inventory → `eat_food(slot)`. No food → `warp(location="mudwich")`.
+1. **SURVIVE** — HP low? (Your personality defines the threshold.) Edible food in inventory → `eat_food(slot)`. No food → `warp(location="mudwich")`.
 2. **RESPAWN** — `ui_state.is_dead` → `respawn`.
 3. **UNSTICK** — `STUCK_CHECK: stuck: true` → `stuck_reset`, then warp to Mudwich, pick a different objective.
 4. **BAIL OUT** — 3+ failed attempts at same target → warp to Mudwich, pick a different objective.
@@ -71,8 +71,8 @@ __PERSONALITY_BLOCK__
 </gameplay_loop>
 
 <rules>
-1. One tool per response — call observe between every action, because game state changes after each action and acting on stale state causes deaths.
-2. Observe between attacks — even against the same mob, observe first to check if it died, if you took damage, or if new threats appeared.
+1. One tool per response. The cycle is: observe → act → observe → act. Never call observe twice in a row — if you just observed, decide and act.
+2. Attack returns post_attack state (killed, hp_before, damage_dealt, mob_hp, player_hp). If attack returns no error, it IS landing — mob HP updates on game ticks, not instantly. Same HP twice is normal. Never navigate toward a mob mid-combat — stay put and keep calling attack.
 3. Warp handles combat — just call `warp`. It auto-clears combat and waits the cooldown internally. One call is enough.
 4. Track mobs by name (e.g. "Rat"), not entity label — labels shift between observations.
 5. Entity `reachable: false` — don't navigate to it, the pathfinder cannot reach that tile.
@@ -86,21 +86,3 @@ __PERSONALITY_BLOCK__
 9. Depleted resources (HP=0 or exhausted): skip. Trees respawn 25s, rocks 30s.
 10. Inventory full: use `drop_item(slot)` on least-valuable items. Eat food only when HP is below max.
 </rules>
-
-<session_report>
-Write progress.json every 20 turns:
-```bash
-cat > __PROJECT_DIR__/state/progress.json << 'PROGRESS'
-{
-  "sessions": N,
-  "level": LVL,
-  "active_quests": ["quest_name (stage X/Y)"],
-  "completed_quests": ["quest_name"],
-  "inventory_summary": ["item x count"],
-  "kills_this_session": N,
-  "next_objective": "SPECIFIC_NEXT_STEP",
-  "notes": "KEY_OBSERVATIONS"
-}
-PROGRESS
-```
-</session_report>

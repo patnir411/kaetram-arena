@@ -82,13 +82,33 @@ def parse_tool_calls_from_text(text: str) -> list[dict]:
     import re
     calls = []
 
-    # Pattern 1: <tool_call> tags
-    for m in re.finditer(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL):
-        try:
-            tc = json.loads(m.group(1))
-            calls.append(tc)
-        except json.JSONDecodeError:
-            pass
+    # Pattern 1a: Qwen3.5 XML format: <tool_call><function=name><parameter=key>value</parameter></function></tool_call>
+    for m in re.finditer(r"<tool_call>\s*<function=(\w+)>(.*?)</function>\s*</tool_call>", text, re.DOTALL):
+        fn_name = m.group(1)
+        params_text = m.group(2)
+        args = {}
+        for pm in re.finditer(r"<parameter=(\w+)>\s*(.*?)\s*</parameter>", params_text, re.DOTALL):
+            args[pm.group(1)] = pm.group(2)
+        calls.append({"name": fn_name, "arguments": args})
+
+    # Pattern 1b: Qwen3.5 shorthand: <tool_call><browser_run_code>code</browser_run_code></tool_call>
+    if not calls:
+        for m in re.finditer(r"<tool_call>\s*<(browser_run_code|Bash)>(.*?)</\1>\s*</tool_call>", text, re.DOTALL):
+            fn_name = m.group(1)
+            inner = m.group(2).strip()
+            if fn_name == "browser_run_code":
+                calls.append({"name": fn_name, "arguments": {"code": inner}})
+            else:
+                calls.append({"name": fn_name, "arguments": {"command": inner}})
+
+    # Pattern 1c: JSON inside <tool_call> tags
+    if not calls:
+        for m in re.finditer(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL):
+            try:
+                tc = json.loads(m.group(1))
+                calls.append(tc)
+            except json.JSONDecodeError:
+                pass
 
     # Pattern 2: ✿TOOL_CALL✿ format
     for m in re.finditer(r"✿TOOL_CALL✿\s*(.*?)(?=✿|$)", text, re.DOTALL):
@@ -286,34 +306,38 @@ def run_agent(args):
     # The model must output <tool_call> tags in its text response.
     tool_instructions = """
 
-## HOW TO USE TOOLS — READ THIS CAREFULLY
+## HOW TO USE TOOLS
 
-You have exactly TWO tools. You MUST call them using <tool_call> XML tags. Do NOT use any other format.
+You have TWO tools. Call them using <tool_call> XML tags.
 
-### Tool 1: browser_run_code
+### Tool 1: browser_run_code (USE THIS 95% OF THE TIME)
 Executes JavaScript in the game browser. This is your ONLY way to interact with the game.
 
-<tool_call>
-{"name": "browser_run_code", "arguments": {"code": "return window.__latestGameState"}}
-</tool_call>
+### Tool 2: Bash (USE SPARINGLY — only every 20+ turns)
+Write progress.json. Do NOT use Bash for anything else. Do NOT call Bash multiple times in a row.
 
-### Tool 2: Bash
-Executes shell commands. Use ONLY for writing progress.json.
+### GAMEPLAY LOOP (follow this exactly)
+1. OBSERVE: `return JSON.stringify(window.__latestGameState)` — do this first every few turns
+2. DECIDE: Based on game state, pick ONE action
+3. ACT: Call the appropriate helper function
 
-<tool_call>
-{"name": "Bash", "arguments": {"command": "cat > state/progress.json << 'EOF'\n{}\nEOF"}}
-</tool_call>
+### HELPER FUNCTIONS (use these, not raw JS)
+- `return window.__attackMob('Rat')` — attack nearest mob by name
+- `return window.__navigateTo(188, 157)` — pathfind to coordinates
+- `return window.__moveTo(x, y)` — short move (<15 tiles)
+- `return window.__interactNPC('Villager')` — walk to and talk to NPC
+- `return window.__talkToNPC('1-12345')` — advance NPC dialogue (use instance id)
+- `return window.__safeWarp(0)` — warp (0=Mudwich, 1=Crossroads, 2=Lakesworld)
+- `return window.__eatFood(slot)` — eat food at inventory slot
+- `return window.__clickTile(x, y)` — click a grid tile
+- `return window.__stuckReset()` — reset if stuck
 
 ### RULES
 - EVERY response MUST contain exactly ONE <tool_call> block
-- The tool name is EXACTLY "browser_run_code" or "Bash" — no prefixes, no MCP__, no mcp__
-- Do NOT use Node.js, require(), or any external libraries
-- Do NOT describe what you want to do — just call the tool
-- Do NOT use page.goto(), page.click(), or Playwright API — use browser_run_code with JavaScript that runs INSIDE the page
-- To navigate: browser_run_code with code "window.location.href = 'http://localhost:9000'"
-- To read state: browser_run_code with code "return JSON.stringify(window.__latestGameState)"
-- To attack: browser_run_code with code "return window.__attackMob('Rat')"
-- To login: browser_run_code with the login code from your system instructions"""
+- ALWAYS use browser_run_code for game actions — Bash is ONLY for progress.json
+- If you call Bash more than once in 5 turns, STOP and use browser_run_code instead
+- Do NOT use page.goto(), page.click(), or Playwright API
+- Do NOT call __login() — login is handled automatically"""
 
     system_prompt = system_prompt + tool_instructions
 
@@ -330,14 +354,90 @@ Executes shell commands. Use ONLY for writing progress.json.
             headless=True,
             args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
-        page = browser.new_page(viewport={"width": 1280, "height": 720})
+        context = browser.new_context(viewport={"width": 1280, "height": 720})
 
-        # Navigate to game immediately so the model doesn't have to
-        print("Navigating to game client...")
+        # Inject state_extractor.js (provides __latestGameState, __attackMob, etc.)
+        extractor_path = os.path.join(args.project_dir, "state_extractor.js")
+        if os.path.exists(extractor_path):
+            context.add_init_script(path=extractor_path)
+            print(f"Injected {extractor_path}")
+
+        # WebSocket port override for multi-agent isolation
+        if args.server_port:
+            context.add_init_script(f"""(() => {{
+                const PORT = '{args.server_port}';
+                const _WS = window.WebSocket;
+                window.WebSocket = function(url, protocols) {{
+                    url = url.replace(/\\/\\/[^:/]+/, '//localhost');
+                    url = url.replace(/:9001(?=\\/|$)/, ':' + PORT);
+                    return protocols ? new _WS(url, protocols) : new _WS(url);
+                }};
+                window.WebSocket.prototype = _WS.prototype;
+                window.WebSocket.CONNECTING = 0; window.WebSocket.OPEN = 1;
+                window.WebSocket.CLOSING = 2; window.WebSocket.CLOSED = 3;
+            }})()""")
+            print(f"WebSocket port override: {args.server_port}")
+
+        page = context.new_page()
+
+        # Navigate to game and auto-login
+        username = os.environ.get("KAETRAM_USERNAME", "QwenBot")
+        print(f"Navigating to game client, logging in as {username}...")
         page.goto("http://localhost:9000", wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(3000)
+
+        # Login flow (same as mcp_game_server.py)
+        page.locator("#login-name-input").fill(username)
+        page.locator("#login-password-input").fill("password123")
+        page.locator("#login").click()
+        page.wait_for_timeout(4000)
+
+        # Check if we need to register (account doesn't exist)
+        still_on_login = page.evaluate("""() => {
+            const el = document.getElementById('load-character');
+            if (!el) return false;
+            const s = window.getComputedStyle(el);
+            return s.display !== 'none' && s.opacity !== '0';
+        }""")
+        if still_on_login:
+            page.evaluate(f"""(username) => {{
+                document.getElementById('new-account').click();
+                setTimeout(() => {{
+                    const set = (el, val) => {{
+                        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+                            .set.call(el, val);
+                        el.dispatchEvent(new Event('input', {{bubbles: true}}));
+                    }};
+                    set(document.getElementById('register-name-input'), username);
+                    set(document.getElementById('register-password-input'), 'password123');
+                    set(document.getElementById('register-password-confirmation-input'), 'password123');
+                    set(document.getElementById('register-email-input'), username + '@test.com');
+                    setTimeout(() => document.getElementById('play').click(), 300);
+                }}, 500);
+            }}""", username)
+            page.wait_for_timeout(8000)
+
+        page.wait_for_timeout(2000)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(1000)
+
+        # Verify game loaded
+        game_ready = False
+        for _attempt in range(3):
+            game_ready = page.evaluate(
+                "() => !!(window.game && window.game.player && typeof window.game.player.gridX === 'number')"
+            )
+            if game_ready:
+                break
+            page.wait_for_timeout(3000)
+
+        if not game_ready:
+            print(f"Login FAILED for {username} — game did not load")
+            browser.close()
+            return
+
         page.screenshot(path=str(state_dir / "live_screen.png"))
-        print("Game client loaded.")
+        print(f"Logged in as {username}, game loaded.")
 
         turn = 0
         consecutive_errors = 0
@@ -345,7 +445,7 @@ Executes shell commands. Use ONLY for writing progress.json.
         while turn < args.max_turns:
             turn += 1
 
-            # Screenshot before each turn
+            # Screenshot for dashboard MJPEG stream
             try:
                 page.screenshot(path=str(state_dir / "live_screen.png"))
             except Exception:
@@ -415,7 +515,7 @@ Executes shell commands. Use ONLY for writing progress.json.
                         print(f"  [{turn}] Model stopped (no tool call). Continuing...")
                         time.sleep(2)
 
-            # Take screenshot for dashboard after each tool dispatch round
+            # Screenshot after tool dispatch
             try:
                 page.screenshot(path=str(state_dir / "live_screen.png"))
             except Exception:
@@ -451,6 +551,8 @@ def main():
     parser.add_argument("--user-prompt", default=None, help="Initial user message")
     parser.add_argument("--sandbox", default="/tmp/kaetram_agent_4", help="Sandbox directory")
     parser.add_argument("--max-turns", type=int, default=300, help="Max conversation turns")
+    parser.add_argument("--server-port", default="", help="Game server WebSocket port (e.g. 9031)")
+    parser.add_argument("--project-dir", default=os.path.dirname(os.path.abspath(__file__)), help="Project directory (for state_extractor.js)")
     args = parser.parse_args()
     run_agent(args)
 

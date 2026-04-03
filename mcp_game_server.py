@@ -255,10 +255,54 @@ async def attack(ctx: Context, mob_name: str) -> str:
         mob_name: Name of mob to attack (e.g. 'Rat', 'Snek', 'Goblin')
     """
     page = await _page(ctx)
+
+    # Snapshot mob HP before attacking
+    hp_before = await page.evaluate("""(name) => {
+        const g = window.game;
+        if (!g || !g.player) return null;
+        const nl = name.toLowerCase();
+        for (const e of Object.values(g.entities.entities || {})) {
+            if (e.type === 3 && (e.hitPoints || 0) > 0 &&
+                (e.name || '').toLowerCase().includes(nl))
+                return e.hitPoints;
+        }
+        return null;
+    }""", mob_name)
+
     result = await page.evaluate(
         "(name) => JSON.stringify(window.__attackMob(name))", mob_name
     )
-    await page.wait_for_timeout(6000)
+    await page.wait_for_timeout(2500)
+
+    # Post-attack state: check if mob died, damage dealt, player HP
+    post = await page.evaluate("""() => {
+        const p = window.game && window.game.player;
+        if (!p) return {};
+        const t = p.target;
+        return {
+            killed: !t || (t.hitPoints !== undefined && t.hitPoints <= 0),
+            mob_hp: t ? (t.hitPoints || 0) : 0,
+            mob_name: t ? (t.name || '') : null,
+            player_hp: p.hitPoints || 0,
+            player_max_hp: p.maxHitPoints || 0,
+        };
+    }""")
+    # Add damage tracking
+    if isinstance(post, dict) and hp_before is not None:
+        post["hp_before"] = hp_before
+        hp_after = post.get("mob_hp", 0)
+        post["damage_dealt"] = max(0, hp_before - hp_after)
+        if post["damage_dealt"] == 0 and not post.get("killed"):
+            post["note"] = "Attack landed but game tick has not updated HP yet. Keep attacking — do not move."
+
+    # Merge post-attack state into result
+    try:
+        parsed = json.loads(result) if isinstance(result, str) else result
+        if isinstance(parsed, dict):
+            parsed["post_attack"] = post
+            return json.dumps(parsed)
+    except Exception:
+        pass
     return result
 
 
@@ -294,6 +338,19 @@ async def navigate(ctx: Context, x: int, y: int) -> str:
         "([x,y]) => JSON.stringify(window.__navigateTo(x, y))", [x, y]
     )
     await page.wait_for_timeout(4000)
+
+    # Warn if BFS failed and linear fallback is being used
+    try:
+        parsed = json.loads(result) if isinstance(result, str) else result
+        if isinstance(parsed, dict) and parsed.get("pathfinding") == "linear_fallback":
+            parsed["warning"] = (
+                "BFS pathfinding failed — using approximate straight-line route. "
+                "High chance of getting stuck on walls. Consider warping closer first, "
+                "or navigating in shorter hops (< 80 tiles)."
+            )
+            return json.dumps(parsed)
+    except Exception:
+        pass
     return result
 
 
@@ -841,6 +898,7 @@ async def stuck_reset(ctx: Context) -> str:
     page = await _page(ctx)
     await page.evaluate("() => window.__stuckReset()")
     return "Stuck state reset"
+
 
 
 @mcp.tool()

@@ -36,6 +36,7 @@ checkpoint_vol = modal.Volume.from_name("kaetram-model-vol", create_if_missing=T
 # Container image — Unsloth + deps, pinned versions matching Modal's official example
 train_image = (
     modal.Image.debian_slim(python_version="3.11")
+    .apt_install("cmake", "build-essential")
     .uv_pip_install(
         "accelerate>=1.9.0",
         "datasets>=3.6.0",
@@ -46,6 +47,7 @@ train_image = (
         "trl>=0.19.1",
         "unsloth[cu128-torch270]>=2025.7.8",
         "unsloth_zoo>=2025.7.10",
+        "llama-cpp-python",  # Pre-install for GGUF export (avoids interactive prompt)
     )
     .env({"HF_HOME": "/model_cache", "TOKENIZERS_PARALLELISM": "false"})
 )
@@ -65,7 +67,7 @@ with train_image.imports():
 # ---------------------------------------------------------------------------
 
 MODEL_ID = "unsloth/Qwen3.5-9B"  # Unsloth-optimized, Apache 2.0
-MAX_SEQ_LEN = 32768  # Round 3: 32k for multi-turn windows (was 2048)
+MAX_SEQ_LEN = 16384  # Round 4: 16k (P99=14.3K after chat template, down from 32K)
 LORA_R = 64       # Round 2: 4x more capacity (was 16)
 LORA_ALPHA = 64   # alpha = r recommended for Qwen3.5
 LORA_TARGETS = [
@@ -128,7 +130,18 @@ def load_kaetram_dataset(train_bytes: bytes, val_bytes: bytes, tokenizer):
 
                 # Handle tool_calls (assistant messages calling browser_run_code/Bash)
                 if "tool_calls" in msg:
-                    m["tool_calls"] = msg["tool_calls"]
+                    # Ensure arguments is a dict (Qwen3.5 chat template calls .items())
+                    tool_calls = []
+                    for tc in msg["tool_calls"]:
+                        tc = dict(tc)
+                        if "function" in tc:
+                            func = dict(tc["function"])
+                            args = func.get("arguments", {})
+                            if isinstance(args, str):
+                                func["arguments"] = json.loads(args)
+                            tc["function"] = func
+                        tool_calls.append(tc)
+                    m["tool_calls"] = tool_calls
 
                 # Handle tool results
                 if "tool_call_id" in msg:

@@ -8,3 +8,9 @@ Decision tree modifiers:
 - After accepting a quest, advance it before exploring further.
 - Talk to every NPC you encounter — accept ALL quests offered.
 - Zone rotation: after 30 turns in the same area, move to the next unexplored zone.
+
+<example_decision personality="curious">
+ORIENT: No active quests, at Mudwich (188, 157). Forester NPC at distance 12.
+DECIDE: Quest NPC visible — per CURIOUS style, interact immediately.
+ACT: interact_npc(npc_name="Forester")
+</example_decision>

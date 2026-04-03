@@ -696,7 +696,7 @@ def build_assistant_message(turn: dict, include_thinking: bool = True) -> dict:
             "type": "function",
             "function": {
                 "name": "Bash",
-                "arguments": json.dumps({"command": command}),
+                "arguments": {"command": command},
             },
         }]
     else:
@@ -707,7 +707,7 @@ def build_assistant_message(turn: dict, include_thinking: bool = True) -> dict:
             "type": "function",
             "function": {
                 "name": "browser_run_code",
-                "arguments": json.dumps({"code": js_code}),
+                "arguments": {"code": js_code},
             },
         }]
 
@@ -1143,7 +1143,8 @@ def main():
                     func = tc.get("function", {})
                     tool_name = func.get("name", "unknown")
                     if tool_name == "browser_run_code":
-                        args = json.loads(func.get("arguments", "{}"))
+                        raw_args = func.get("arguments", {})
+                        args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                         code = args.get("code", "")
                         # Extract helper function name from JS
                         m = re.search(r"window\.(__\w+)\(", code)

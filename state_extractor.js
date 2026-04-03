@@ -898,7 +898,7 @@
     }
 
     // PRIMARY: Use BFS pathfinding for wall-aware waypoints
-    var bfsMaxRadius = Math.min(Math.max(totalDist, 30), 80);
+    var bfsMaxRadius = Math.min(Math.max(totalDist, 30), 150);
     var bfsSample = Math.max(8, Math.min(15, Math.round(totalDist / 6)));
     var waypoints = _bfsPath(startX, startY, targetX, targetY, bfsMaxRadius, bfsSample);
     var usedBFS = !!(waypoints && waypoints.length > 0);
@@ -1085,7 +1085,7 @@
   };
 
   // ── Stuck detection — automatic position tracking + XP awareness ──
-  window.__stuckState = { positions: [], maxSize: 10, threshold: 5, radius: 3, lastXP: 0, lastLevel: 0 };
+  window.__stuckState = { positions: [], maxSize: 10, threshold: 3, radius: 3, lastXP: 0, lastLevel: 0 };
 
   window.__stuckCheck = function () {
     var game = window.game;
@@ -1244,7 +1244,7 @@
                   p.disableAction = false;
                   if (!p.moving && !p.hasPath()) { p.go(wp.x, wp.y); }
                 }
-              } else if (nav.stuckCount >= 4) {
+              } else if (nav.stuckCount >= 2) {
                 nav.active = false;
                 nav.status = 'stuck';
                 nav._stuckReason = 'wall';

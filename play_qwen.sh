@@ -73,21 +73,29 @@ open('$SYSTEM_TMP', 'w').write(text)
 
   PROGRESS=$(cat "$STATE_FILE" 2>/dev/null || echo '{}')
 
-  PROMPT="IMPORTANT: Do NOT search for files or explore the filesystem. Your ONLY job is to play the game via the browser. Start IMMEDIATELY with the login code block in your system instructions.
+  PROMPT="You are already logged in. Start playing NOW.
 
-Session #${SESSION}. Your previous progress: ${PROGRESS}
+Session #${SESSION}. Previous progress: ${PROGRESS}
 
-Follow your system instructions exactly. Login, then run the OBSERVE-ACT loop: kill mobs, progress quests, explore. Write progress.json before session ends."
+Your FIRST action must be: return JSON.stringify(window.__latestGameState)
+Then: attack mobs, navigate to NPCs, accept quests. Use browser_run_code for ALL game actions. Do NOT use Bash except to save progress every 20+ turns."
 
   # Run harness
   source "$PROJECT_DIR/.venv/bin/activate" 2>/dev/null || true
-  python3 "$PROJECT_DIR/play_qwen.py" \
+  EXTRA_ARGS=""
+  if [ -n "$SERVER_PORT" ]; then
+    EXTRA_ARGS="--server-port $SERVER_PORT"
+  fi
+
+  KAETRAM_USERNAME="$USERNAME" python3 "$PROJECT_DIR/play_qwen.py" \
     --endpoint "$ENDPOINT" \
     --model kaetram \
     --system-prompt "$SYSTEM_TMP" \
     --user-prompt "$PROMPT" \
     --sandbox "$SANDBOX" \
     --max-turns "$MAX_TURNS" \
+    --project-dir "$PROJECT_DIR" \
+    $EXTRA_ARGS \
     || true
 
   rm -f "$SYSTEM_TMP"

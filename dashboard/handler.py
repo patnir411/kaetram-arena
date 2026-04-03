@@ -70,6 +70,8 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
             elif path == "/api/raw":
                 which = qs.get("file", [None])[0]
                 self.send_raw_file(which, qs)
+            elif path == "/report.json":
+                self.send_report_json()
             elif path.startswith("/stream/"):
                 self.send_mjpeg_stream()
             elif path.startswith("/screenshots/"):
@@ -84,6 +86,41 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
                 self.wfile.write(f"Error: {e}".encode())
             except Exception:
                 pass
+
+    # ── Report JSON (for Claude web fetch) ──
+
+    def send_report_json(self):
+        report_path = "/tmp/kaetram-export/report.json"
+        # Auto-regenerate if stale (>5 min old) or missing
+        try:
+            import time as _t
+            needs_regen = not os.path.exists(report_path) or (_t.time() - os.path.getmtime(report_path)) > 300
+        except Exception:
+            needs_regen = True
+        if needs_regen:
+            try:
+                import subprocess
+                project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                venv_py = os.path.join(project_dir, ".venv", "bin", "python3")
+                script = os.path.join(project_dir, "scripts", "export_report.py")
+                subprocess.run([venv_py, script], timeout=60, capture_output=True)
+            except Exception:
+                pass
+        try:
+            with open(report_path, "rb") as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            fname = "kaetram_report_" + time.strftime("%Y-%m-%d") + ".json"
+            self.send_header("Content-Disposition", f"attachment; filename={fname}")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(data)
+        except FileNotFoundError:
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"Report generation failed.")
 
     # ── Screenshot serving ──
 

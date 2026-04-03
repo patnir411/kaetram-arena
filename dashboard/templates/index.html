@@ -277,6 +277,7 @@
     <div class="header-links">
       <a href="http://__GAME_HOST__:9000" target="_blank">Play Game</a>
       <a href="/api/live">API</a>
+      <a href="/report.json" download="kaetram_report.json" style="background:#10b981;color:#000;padding:4px 10px;border-radius:4px;text-decoration:none;font-weight:bold;">Download Report</a>
     </div>
   </div>
 </header>
@@ -416,9 +417,9 @@
           <div class="qt-text" id="qwen-think-text">Waiting for agent...</div>
         </div>
         <div class="qwen-actions" id="qwen-action-log"></div>
-        <div class="qwen-mem">
-          <div class="qm-label">MEMORY (progress.json)</div>
-          <div class="qm-text" id="qwen-mem-text">No memory yet</div>
+        <div class="qwen-mem" style="display:none">
+          <div class="qm-label"></div>
+          <div class="qm-text" id="qwen-mem-text"></div>
         </div>
       </div>
     </div>
@@ -1163,7 +1164,7 @@ async function refreshFast() {
           // Full rebuild — only when agents are added/removed
           let html = '';
           for (const a of agents) {
-            const personality = a.mode || 'efficient';
+            const personality = a.mode || 'aggressive';
             const modeClass = ' mode-' + personality;
             const modeColor = PERSONALITY_COLORS[personality] || 'var(--green)';
             const modeLabel = PERSONALITY_LABELS[personality] || personality.toUpperCase();
@@ -1209,7 +1210,7 @@ async function refreshFast() {
           for (const cls of ['mode-aggressive', 'mode-methodical', 'mode-curious', 'mode-efficient', 'mode-qwen', 'mode-blind']) {
             card.classList.remove(cls);
           }
-          const personality = a.mode || 'efficient';
+          const personality = a.mode || 'aggressive';
           card.classList.add('mode-' + personality);
 
           const ps = (a.game_state || {}).player_stats || {};

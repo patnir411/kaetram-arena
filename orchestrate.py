@@ -59,17 +59,7 @@ NVM_SH = Path.home() / ".nvm" / "nvm.sh"
 SYSTEM_PROMPT_FILE = PROJECT_DIR / "prompts" / "system.md"
 GAME_KNOWLEDGE_FILE = PROJECT_DIR / "prompts" / "game_knowledge.md"
 PERSONALITY_DIR = PROJECT_DIR / "prompts" / "personalities"
-VALID_PERSONALITIES = ("aggressive", "methodical", "curious", "efficient")
-STATE_TEMPLATE = {
-    "sessions": 0,
-    "level": 1,
-    "active_quests": [],
-    "completed_quests": [],
-    "inventory_summary": [],
-    "kills_this_session": 0,
-    "next_objective": "accept quests from NPCs",
-    "notes": "fresh start",
-}
+VALID_PERSONALITIES = ("aggressive", "methodical", "curious")
 
 # Port allocation: agent N gets server WS on 9001 + N*10
 BASE_SERVER_PORT = 9001
@@ -151,7 +141,7 @@ class AgentInstance:
     sandbox_dir: Path
     log_dir: Path
     adapter: CLIAdapter
-    personality: str = "efficient"    # "aggressive", "methodical", "curious", "efficient"
+    personality: str = "aggressive"    # "aggressive", "methodical", "curious"
     process: subprocess.Popen | None = None
     session: int = 0
     max_turns: int = 150
@@ -171,11 +161,6 @@ class AgentInstance:
             port=str(self.server_port),
             username=self.username,
         )
-
-        # Initialize progress.json
-        state_file = self.sandbox_dir / "state" / "progress.json"
-        if not state_file.exists():
-            state_file.write_text(json.dumps(STATE_TEMPLATE))
 
         # Write personality metadata for dashboard
         metadata = {
@@ -237,17 +222,10 @@ class AgentInstance:
 
     def _build_user_prompt(self) -> str:
         """Build the user prompt for a session."""
-        state_file = self.sandbox_dir / "state" / "progress.json"
-        try:
-            progress = state_file.read_text()
-        except OSError:
-            progress = "{}"
-
         playstyle_hint = {
             "aggressive": "You play AGGRESSIVE — fight hard mobs, push into new zones, attempt bosses. Combat is your priority.",
             "methodical": "You play METHODICAL — prepare thoroughly, gather resources, craft items, build skills before advancing.",
             "curious": "You play CURIOUS — talk to every NPC, enter every building, discover hidden paths, accept all quests.",
-            "efficient": "You play EFFICIENT — shortest path through quest chain, minimal waste, turn in immediately.",
         }.get(self.personality, "")
 
         game_state_block = ""
@@ -265,10 +243,10 @@ class AgentInstance:
             "IMPORTANT: Do NOT search for files, read documentation, or explore the filesystem. "
             "Your ONLY job is to play the game via the browser. "
             "Start IMMEDIATELY with the login code block in your system instructions.\n\n"
-            f"Session #{self.session}. Your previous progress: {progress}\n"
+            f"Session #{self.session}.\n"
             f"{game_state_block}\n"
             "Follow your system instructions exactly. Load tools, then login, "
-            "then run the OBSERVE-ACT loop. Write progress.json before session ends."
+            "then run the OBSERVE-ACT loop."
         )
 
     def start_session(self):
@@ -741,7 +719,7 @@ class Orchestrator:
             prefix_map = {"codex": "CodexBot", "kimi": "KimiBot", "qwen-code": "QwenBot"}
             bot_prefix = prefix_map.get(harness, "ClaudeBot")
 
-            personality = assignments[i] if i < len(assignments) else "efficient"
+            personality = assignments[i] if i < len(assignments) else "aggressive"
             sandbox = Path(f"/tmp/kaetram_agent_{i}")
             log_dir = PROJECT_DIR / "dataset" / "raw" / f"agent_{i}" / "logs"
             agent = AgentInstance(
@@ -937,9 +915,6 @@ def main():
         "--curious", type=int, default=0, help="Number of curious-playstyle agents"
     )
     parser.add_argument(
-        "--efficient", type=int, default=0, help="Number of efficient-playstyle agents"
-    )
-    parser.add_argument(
         "--claude", type=int, nargs="?", const=-1, default=0,
         help="Number of Claude agents (bare --claude = all agents)"
     )
@@ -969,7 +944,6 @@ def main():
         "aggressive": args.aggressive,
         "methodical": args.methodical,
         "curious": args.curious,
-        "efficient": args.efficient,
     }
     explicit_total = sum(personality_counts.values())
 

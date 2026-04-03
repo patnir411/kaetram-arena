@@ -353,8 +353,9 @@ class MongoReader:
                 difficulty = qdef.get("difficulty", "")
 
                 # Match server logic: isFinished() = stage >= stageCount
+                # Agents skip the tutorial via warp — mark it as done
                 started = stage > 0
-                finished = stage >= stage_count
+                finished = stage >= stage_count or key == "tutorial"
 
                 if finished:
                     completed += 1

@@ -237,23 +237,53 @@ def extract_memory_content(event: dict) -> dict | None:
 
 
 def is_observe(event: dict) -> bool:
-    """Check if a tool_use event is an observe step (reads __latestGameState)."""
+    """Check if a tool_use event is an observe step (reads game state)."""
     if event["type"] != "tool_use":
         return False
-    if "browser_run_code" not in event.get("name", ""):
-        return False
-    code = event.get("input", {}).get("code", "")
-    return "__latestGameState" in code or "__extractGameState" in code
+    name = event.get("name", "")
+    # MCP server observe tool
+    if name == "mcp__kaetram__observe":
+        return True
+    # Legacy browser_run_code with game state read
+    if "browser_run_code" in name:
+        code = event.get("input", {}).get("code", "")
+        return "__latestGameState" in code or "__extractGameState" in code
+    return False
+
+
+# MCP action tool names → action types
+MCP_ACTION_TOOLS = {
+    "mcp__kaetram__attack": "attack",
+    "mcp__kaetram__navigate": "navigate",
+    "mcp__kaetram__move": "move",
+    "mcp__kaetram__interact_npc": "interact_npc",
+    "mcp__kaetram__talk_npc": "talk_npc",
+    "mcp__kaetram__warp": "warp",
+    "mcp__kaetram__click_tile": "click_tile",
+    "mcp__kaetram__click_entity": "click_entity",
+    "mcp__kaetram__equip_item": "equip",
+    "mcp__kaetram__eat_food": "heal",
+    "mcp__kaetram__set_attack_style": "set_style",
+    "mcp__kaetram__stuck_reset": "stuck_reset",
+    "mcp__kaetram__cancel_nav": "nav_cancel",
+    "mcp__kaetram__respawn": "respawn",
+    "mcp__kaetram__quest_action": "quest_accept",
+}
 
 
 def is_browser_action(event: dict) -> bool:
-    """Check if a tool_use event is a browser action (not an observe)."""
+    """Check if a tool_use event is a game action (not an observe)."""
     if event["type"] != "tool_use":
         return False
-    if "browser_run_code" not in event.get("name", ""):
-        return False
-    code = event.get("input", {}).get("code", "")
-    return "__latestGameState" not in code and "__extractGameState" not in code
+    name = event.get("name", "")
+    # MCP server action tools
+    if name in MCP_ACTION_TOOLS:
+        return True
+    # Legacy browser_run_code action
+    if "browser_run_code" in name:
+        code = event.get("input", {}).get("code", "")
+        return "__latestGameState" not in code and "__extractGameState" not in code
+    return False
 
 
 def parse_game_state(text: str) -> dict | None:
@@ -294,6 +324,18 @@ def parse_game_state(text: str) -> dict | None:
                 if isinstance(inner, dict):
                     return inner
             if isinstance(obj, dict):
+                # MCP tool result wrapper: {"result": "{...JSON...}\n\nASCII_MAP:..."}
+                if "result" in obj and isinstance(obj["result"], str):
+                    result_str = obj["result"]
+                    # Strip ASCII_MAP suffix before parsing JSON
+                    if "\n\nASCII_MAP:" in result_str:
+                        result_str = result_str.split("\n\nASCII_MAP:")[0]
+                    try:
+                        inner = json.loads(result_str)
+                        if isinstance(inner, dict):
+                            return inner
+                    except (json.JSONDecodeError, TypeError):
+                        pass
                 return obj
         except (json.JSONDecodeError, TypeError):
             continue
@@ -314,12 +356,22 @@ def parse_game_state(text: str) -> dict | None:
 
 def extract_ascii_map(text: str) -> str:
     """Extract the ASCII map section from tool_result text."""
-    if "ASCII_MAP:" not in text:
+    # For MCP results, ASCII_MAP may be inside {"result": "...\\n\\nASCII_MAP:..."}
+    search_text = text
+    if "ASCII_MAP:" not in search_text:
+        # Try parsing as JSON wrapper and checking the result string
+        try:
+            obj = json.loads(text)
+            if isinstance(obj, dict) and "result" in obj and isinstance(obj["result"], str):
+                search_text = obj["result"]
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if "ASCII_MAP:" not in search_text:
         return ""
-    idx = text.find("ASCII_MAP:")
+    idx = search_text.find("ASCII_MAP:")
     if idx < 0:
         return ""
-    ascii_section = text[idx + len("ASCII_MAP:"):].strip()
+    ascii_section = search_text[idx + len("ASCII_MAP:"):].strip()
     # Trim at STUCK_CHECK if present
     stuck_idx = ascii_section.find("STUCK_CHECK:")
     if stuck_idx >= 0:
@@ -327,12 +379,17 @@ def extract_ascii_map(text: str) -> str:
     return ascii_section
 
 
-def classify_action(code: str) -> str:
-    """Classify browser action JS code into a named action type.
+def classify_action(code: str, tool_name: str = "") -> str:
+    """Classify action into a named action type.
 
+    Supports both MCP tool names and legacy browser_run_code JS patterns.
     Helper functions are checked FIRST because they internally contain
     .click() calls that would otherwise match the generic 'click' pattern.
     """
+    # MCP tool name → action type (fast path)
+    if tool_name in MCP_ACTION_TOOLS:
+        return MCP_ACTION_TOOLS[tool_name]
+
     code_lower = code.lower()
 
     # --- Helper function patterns (highest priority) ---
@@ -412,10 +469,48 @@ def extract_action_target(code: str) -> dict | None:
     return target if target else None
 
 
-def structured_action(action_type: str, action_code: str) -> str:
-    """Convert raw JS action code into a structured action string for SFT."""
+def structured_action(action_type: str, action_code: str, tool_input: dict | None = None) -> str:
+    """Convert action into a structured action string for SFT.
 
-    # --- Helper function actions ---
+    Supports both MCP tool inputs (structured JSON) and legacy JS code (regex).
+    """
+    # --- MCP tool input path (structured JSON) ---
+    if tool_input is not None:
+        if action_type == "attack":
+            return f"attack({tool_input.get('mob_name', tool_input.get('target', '?'))})"
+        if action_type == "interact_npc":
+            return f"interact_npc({tool_input.get('npc_name', '?')})"
+        if action_type == "navigate":
+            return f"navigate({tool_input.get('x', '?')}, {tool_input.get('y', '?')})"
+        if action_type == "move":
+            return f"move({tool_input.get('x', '?')}, {tool_input.get('y', '?')})"
+        if action_type == "click_entity":
+            return f"click_entity({tool_input.get('label', tool_input.get('entity', '?'))})"
+        if action_type == "click_tile":
+            return f"click_tile({tool_input.get('x', '?')}, {tool_input.get('y', '?')})"
+        if action_type == "talk_npc":
+            return f"talk_npc({tool_input.get('instance_id', tool_input.get('npc_id', '?'))})"
+        if action_type == "warp":
+            loc = tool_input.get("location", "?")
+            return f"warp({loc.capitalize() if isinstance(loc, str) else loc})"
+        if action_type == "equip":
+            return f"equip(slot={tool_input.get('slot', '?')})"
+        if action_type == "heal":
+            return f"heal(slot={tool_input.get('slot', '?')})"
+        if action_type == "set_style":
+            style = tool_input.get("style", "?")
+            return f"set_style({style.capitalize() if isinstance(style, str) else style})"
+        if action_type == "quest_accept":
+            return "quest_accept()"
+        if action_type == "respawn":
+            return "respawn()"
+        if action_type == "stuck_reset":
+            return "stuck_reset()"
+        if action_type == "nav_cancel":
+            return "nav_cancel()"
+        return f"{action_type}({json.dumps(tool_input)})"
+
+    # --- Legacy JS code path (regex parsing) ---
     if action_type == "attack":
         m = re.search(r"__attackMob\(['\"]([^'\"]+)['\"]", action_code)
         name = m.group(1) if m else "?"
@@ -677,8 +772,11 @@ def normalize_game_state(gs: dict) -> dict | None:
     return normalized
 
 
-def has_action_code(code: str) -> bool:
-    """Check if browser_run_code contains actual game actions (not just state reading)."""
+def has_action_code(code: str, tool_name: str = "") -> bool:
+    """Check if event contains actual game actions (not just state reading)."""
+    # MCP tool actions are always actions (never combined with observe)
+    if tool_name in MCP_ACTION_TOOLS:
+        return True
     code_lower = code.lower()
     return any(
         k in code_lower
@@ -789,8 +887,10 @@ def extract_turns(log_path: Path) -> list[dict]:
         next_obs = observe_indices[oi_pos + 1] if oi_pos + 1 < len(observe_indices) else len(events)
 
         # Determine the action: either embedded in the observe code or a separate call
+        action_tool_name = ""
+        action_tool_input = None
         if has_action_code(obs_code):
-            # Combined observe+action call
+            # Combined observe+action call (legacy browser_run_code)
             action_code = obs_code
         else:
             # Pure observe — look for a standalone action before the next observe
@@ -802,14 +902,16 @@ def extract_turns(log_path: Path) -> list[dict]:
                     if t:
                         reasoning_parts.append(t)
                 elif is_browser_action(ev):
+                    action_tool_name = ev.get("name", "")
+                    action_tool_input = ev.get("input", {})
                     action_code = ev.get("input", {}).get("code", "")
                     break
 
-            if not action_code:
+            if not action_code and not action_tool_name:
                 continue  # observe-only turn, skip
 
-        action_type = classify_action(action_code)
-        action_target = extract_action_target(action_code)
+        action_type = classify_action(action_code or "", action_tool_name)
+        action_target = extract_action_target(action_code or "")
         reasoning = "\n".join(reasoning_parts)
 
         ps = game_state.get("player_stats", {})
@@ -827,10 +929,10 @@ def extract_turns(log_path: Path) -> list[dict]:
             "game_state": game_state,
             "ascii_map": ascii_map,
             "reasoning": reasoning,
-            "action_code": action_code,
+            "action_code": action_code or json.dumps(action_tool_input or {}),
             "action_type": action_type,
-            "action_structured": structured_action(action_type, action_code),
-            "action_target": extract_action_target(action_code),
+            "action_structured": structured_action(action_type, action_code or "", action_tool_input),
+            "action_target": action_target,
             "player_stats": {
                 "hp": ps.get("hp", 0),
                 "max_hp": ps.get("max_hp", 0),

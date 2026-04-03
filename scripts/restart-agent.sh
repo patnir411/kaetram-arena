@@ -40,7 +40,6 @@ while [[ $# -gt 0 ]]; do
     --aggressive)  N_AGGRESSIVE="$2"; shift 2;;
     --methodical)  N_METHODICAL="$2"; shift 2;;
     --curious)     N_CURIOUS="$2"; shift 2;;
-    --efficient)   N_EFFICIENT="$2"; shift 2;;
     --hours)       HOURS="$2"; shift 2;;
     --max-budget-usd) MAX_BUDGET="$2"; shift 2;;
     --claude)
@@ -83,7 +82,7 @@ done
 HAS_PERSONALITY=false
 PERSONALITY_ARGS=""
 TOTAL_AGENTS=0
-for p in aggressive methodical curious efficient; do
+for p in aggressive methodical curious; do
   eval "count=\$N_$(echo $p | tr '[:lower:]' '[:upper:]')"
   if [ -n "$count" ] && [ "$count" -gt 0 ]; then
     HAS_PERSONALITY=true

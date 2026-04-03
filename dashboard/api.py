@@ -28,16 +28,7 @@ class APIMixin:
     """API endpoint methods mixed into DashboardHandler."""
 
     def send_json_state(self, qs=None):
-        state_dir = self._resolve_state_dir(qs)
-        state_file = os.path.join(state_dir, "progress.json")
-        data = {}
-        if os.path.isfile(state_file):
-            try:
-                with open(state_file) as fh:
-                    data = json.load(fh)
-            except Exception:
-                pass
-        self._send_json(data)
+        self._send_json({})
 
     def send_game_state(self, qs=None):
         state_dir = self._resolve_state_dir(qs)
@@ -207,7 +198,6 @@ class APIMixin:
     def send_raw_file(self, which, qs=None):
         state_dir = self._resolve_state_dir(qs)
         allowed = {
-            "progress": os.path.join(state_dir, "progress.json"),
             "game_state": os.path.join(state_dir, "game_state.json"),
             "session_log": os.path.join(PROJECT_DIR, "session_log.md"),
             "claude_md": os.path.join(PROJECT_DIR, "CLAUDE.md"),
@@ -334,6 +324,9 @@ class APIMixin:
             sandbox = os.path.join("/tmp", f"kaetram_agent_{i}")
             if not os.path.isdir(sandbox):
                 continue
+            # Only show agents that were launched by orchestrator (have metadata.json)
+            if not os.path.isfile(os.path.join(sandbox, "metadata.json")):
+                continue
             state_dir = os.path.join(sandbox, "state")
             agent = {"id": i, "username": f"Agent{i}", "server_port": BASE_SERVER_PORT + i * PORT_STRIDE}
 
@@ -364,14 +357,6 @@ class APIMixin:
 
             if agent["mode"] == "qwen":
                 continue
-
-            progress_file = os.path.join(state_dir, "progress.json")
-            if os.path.isfile(progress_file):
-                try:
-                    with open(progress_file) as fh:
-                        agent["progress"] = json.load(fh)
-                except Exception:
-                    agent["progress"] = {}
 
             for ss_name in ("live_screen.png", "screenshot.png"):
                 ss = os.path.join(state_dir, ss_name)
@@ -436,14 +421,6 @@ class APIMixin:
         if os.path.isfile(gs_path):
             try:
                 result["game_state"] = json.load(open(gs_path))
-            except Exception:
-                pass
-
-        # Memory
-        mem_path = os.path.join(state_dir, "progress.json")
-        if os.path.isfile(mem_path):
-            try:
-                result["memory"] = json.load(open(mem_path))
             except Exception:
                 pass
 

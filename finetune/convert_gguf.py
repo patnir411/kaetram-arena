@@ -18,16 +18,22 @@ image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git", "cmake", "build-essential")
     .run_commands(
-        "git clone --depth 1 https://github.com/ggerganov/llama.cpp /llama.cpp",
+        "git clone --depth 1 https://github.com/ggml-org/llama.cpp /llama.cpp",
         "cd /llama.cpp && cmake -B build && cmake --build build -j$(nproc) --target llama-quantize",
-        "pip install -r /llama.cpp/requirements.txt",
+        "pip install -r /llama.cpp/requirements/requirements-convert_hf_to_gguf.txt",
+    )
+    .uv_pip_install(
+        "transformers>=5.0.0",
+        "torch>=2.7.0",
+        "sentencepiece",
+        "protobuf",
     )
     .env({"HF_HOME": "/model_cache"})
 )
 
-MODEL_DIR = "/checkpoints/kaetram-qwen3.5-9b/gguf"
-F16_FILE = "/checkpoints/kaetram-qwen3.5-9b/kaetram-f16.gguf"
-OUTPUT_FILE = "/checkpoints/kaetram-qwen3.5-9b/kaetram-q4_k_m.gguf"
+MODEL_DIR = "/checkpoints/kaetram-qwen3.5-9b-r4-multiturn/gguf"
+F16_FILE = "/checkpoints/kaetram-qwen3.5-9b-r4-multiturn/kaetram-f16.gguf"
+OUTPUT_FILE = "/checkpoints/kaetram-qwen3.5-9b-r4-multiturn/kaetram-q4_k_m.gguf"
 
 
 @app.function(
@@ -81,9 +87,9 @@ def convert():
     checkpoint_vol.commit()
 
     print(f"\nDownload with:")
-    print(f"  modal volume get kaetram-model-vol /checkpoints/kaetram-qwen3.5-9b/kaetram-q4_k_m.gguf ./kaetram-q4_k_m.gguf")
+    print(f"  modal volume get kaetram-model-vol /kaetram-qwen3.5-9b-r4-multiturn/kaetram-q4_k_m.gguf ./kaetram-r4-q4_k_m.gguf")
     print(f"\nThen on your RTX 3060:")
-    print(f"  ollama create kaetram -f <(echo 'FROM ./kaetram-q4_k_m.gguf')")
+    print(f"  ollama create kaetram -f <(echo 'FROM ./kaetram-r4-q4_k_m.gguf')")
     print(f"  ollama run kaetram")
     return size_gb
 
