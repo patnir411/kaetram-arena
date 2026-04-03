@@ -344,7 +344,12 @@ def format_reasoning(reasoning: str) -> str:
 
 
 def score_turn(turn: dict) -> float:
-    """Score a turn from 0.0-1.0 for training data quality."""
+    """Score a turn from 0.0-1.0 for training data quality.
+
+    Checks state completeness, action quality, reasoning quality,
+    and penalizes known-bad patterns (stuck loops, hallucinations,
+    reasoning-action misalignment).
+    """
     score = 0.0
     gs = turn.get("game_state", {})
     ps = gs.get("player_stats", {})
@@ -373,29 +378,71 @@ def score_turn(turn: dict) -> float:
     # Action quality (0.0 - 0.3)
     action_type = turn.get("action_type", "")
     high_value = ("attack", "interact_npc", "navigate", "quest_accept", "talk_npc")
-    medium_value = ("heal", "equip", "warp", "move", "click_entity", "click_tile", "set_style")
+    medium_value = ("heal", "equip", "warp", "move", "click_entity", "set_style")
+    low_value = ("click_tile", "click")
     if action_type in high_value:
         score += 0.2
     elif action_type in medium_value:
         score += 0.15
-    elif action_type == "click" and "?, ?" not in turn.get("action_structured", ""):
-        score += 0.1
+    elif action_type in low_value:
+        score += 0.05  # fallback actions are weak training signal
     elif action_type in ("respawn",):
         score += 0.1  # Recovery is useful training data
 
     # Reasoning quality (0.0 - 0.3)
     reasoning = turn.get("reasoning", "")
-    if len(reasoning) > 50:
-        score += 0.1
-    if len(reasoning) > 200:
-        score += 0.1
-    if any(kw in reasoning.lower() for kw in ["quest", "kill", "heal", "navigate", "explore", "attack", "npc", "equip"]):
-        score += 0.1
+    reasoning_lower = reasoning.lower()
+    if 30 < len(reasoning) < 1500:
+        score += 0.1  # Good length — not empty, not rambling
+    if len(reasoning) > 80:
+        score += 0.05
+    game_keywords = ["quest", "kill", "heal", "navigate", "explore", "attack",
+                     "npc", "equip", "hp", "level", "mob", "warp", "food", "inventory"]
+    keyword_hits = sum(1 for kw in game_keywords if kw in reasoning_lower)
+    if keyword_hits >= 2:
+        score += 0.1  # reasoning references game concepts
+    elif keyword_hits >= 1:
+        score += 0.05
 
-    # Penalties
+    # Reasoning-action alignment bonus (0.0 - 0.05)
+    action_str = turn.get("action_structured", "").lower()
+    alignment_map = {
+        "attack": ["attack", "kill", "fight", "mob", "combat", "damage"],
+        "heal": ["heal", "food", "hp", "health", "eat", "low hp"],
+        "navigate": ["navigate", "walk", "go to", "head to", "move to"],
+        "warp": ["warp", "teleport", "fast travel", "mudwich", "crossroads", "lakesworld"],
+        "interact_npc": ["npc", "talk", "quest", "interact", "dialogue"],
+        "equip": ["equip", "weapon", "armor", "gear", "sword", "axe"],
+        "respawn": ["dead", "died", "respawn", "death"],
+    }
+    if action_type in alignment_map:
+        if any(kw in reasoning_lower for kw in alignment_map[action_type]):
+            score += 0.05
+
+    # === Penalties ===
+
+    # Login screen (position 0,0)
     pp = turn.get("player_position", {})
     if pp.get("x", 0) == 0 and pp.get("y", 0) == 0:
         score -= 0.5
+
+    # Empty or near-empty reasoning
+    if len(reasoning.strip()) < 10:
+        score -= 0.15
+
+    # Reasoning-action MISMATCH penalty
+    # e.g., reasoning says "heal" but action is "attack"
+    mismatch_pairs = [
+        (["heal", "eat food", "low hp", "need to heal"], "attack"),
+        (["attack", "kill", "fight"], "warp"),
+    ]
+    for keywords, bad_action in mismatch_pairs:
+        if action_type == bad_action and any(kw in reasoning_lower for kw in keywords):
+            # Only penalize if the keyword is a STRONG signal (appears multiple times
+            # or is the primary intent), not just mentioned in passing
+            strong_hits = sum(1 for kw in keywords if kw in reasoning_lower)
+            if strong_hits >= 2:
+                score -= 0.1
 
     return max(0.0, min(1.0, score))
 
