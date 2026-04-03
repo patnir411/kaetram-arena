@@ -55,8 +55,9 @@ with train_image.imports():
     import unsloth  # noqa: F401,I001
     import datasets
     import torch
-    from transformers import TrainingArguments
+    from transformers import TrainingArguments, DataCollatorForLanguageModeling
     from trl import SFTTrainer
+    from trl.trainer import DataCollatorForCompletionOnlyLM
     from unsloth import FastLanguageModel
 
 # ---------------------------------------------------------------------------
@@ -72,20 +73,25 @@ LORA_TARGETS = [
     "gate_proj", "up_proj", "down_proj",
 ]
 
-# Training — Round 3: multi-turn SFT with memory
+# Training — Round 4: loss masking (Structured Agent Distillation, arxiv 2505.13820)
 BATCH_SIZE = 1    # Round 3: halved for 32k context (was 2)
 GRAD_ACCUM = 16   # effective batch = 16 (was 8)
 LR = 1e-4         # Round 2: more conservative (was 2e-4), less overfitting
 WARMUP_RATIO = 0.05
 WEIGHT_DECAY = 0.01
 MAX_STEPS = -1  # -1 = use num_train_epochs
-EPOCHS = 2      # Round 2: 2 epochs (was 1), dataset is medium-sized
+EPOCHS = 3      # Round 4: 3 epochs — scaling laws say up to 4 epochs useful before diminishing returns
 SAVE_STEPS = 150
 EVAL_STEPS = 75
 LOGGING_STEPS = 10
 
+# Loss masking: zero loss on input tokens, optional up-weight on action tokens
+# This is the single highest-impact training improvement per the literature
+MASK_INPUT_TOKENS = True  # zero loss on system/user messages (game state JSON)
+ACTION_TOKEN_WEIGHT = 3.0  # weight <action> tokens 3x vs <think> tokens
+
 # Output
-EXPERIMENT_NAME = "kaetram-qwen3.5-9b-r3-multiturn"
+EXPERIMENT_NAME = "kaetram-qwen3.5-9b-r4-lossmasked"
 GGUF_QUANT = "q4_k_m"  # fits in 12GB VRAM (RTX 3060) with room for context
 
 
@@ -230,18 +236,40 @@ def train(train_data: bytes, val_data: bytes):
         seed=42,
     )
 
+    # Loss masking: only compute loss on assistant responses, not input context
+    # This implements Structured Agent Distillation (arxiv 2505.13820):
+    # zero gradient on game state tokens, only train on <think> and <action> tokens
+    data_collator = None
+    if MASK_INPUT_TOKENS:
+        # DataCollatorForCompletionOnlyLM masks all tokens before the response template
+        # Qwen3.5 uses "<|im_start|>assistant" to mark assistant turns
+        response_template = "<|im_start|>assistant"
+        print(f"Loss masking enabled — zeroing loss on tokens before '{response_template}'")
+        try:
+            data_collator = DataCollatorForCompletionOnlyLM(
+                response_template=response_template,
+                tokenizer=tokenizer,
+            )
+            print("DataCollatorForCompletionOnlyLM initialized successfully")
+        except Exception as e:
+            print(f"WARNING: Loss masking failed ({e}), falling back to standard loss")
+            data_collator = None
+
     # Trainer
     print("Initializing SFTTrainer...")
-    trainer = SFTTrainer(
+    trainer_kwargs = dict(
         model=model,
         tokenizer=tokenizer,
         train_dataset=train_ds,
         eval_dataset=val_ds,
         dataset_text_field="text",
         max_seq_length=MAX_SEQ_LEN,
-        packing=False,  # Round 2: no packing — avoids mixing unrelated turns in same sequence
+        packing=False,  # no packing — avoids mixing unrelated turns in same sequence
         args=training_args,
     )
+    if data_collator is not None:
+        trainer_kwargs["data_collator"] = data_collator
+    trainer = SFTTrainer(**trainer_kwargs)
 
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -275,6 +303,8 @@ def train(train_data: bytes, val_data: bytes):
         "lora_alpha": LORA_ALPHA,
         "gguf_quant": GGUF_QUANT,
         "max_seq_len": MAX_SEQ_LEN,
+        "loss_masking": MASK_INPUT_TOKENS,
+        "action_token_weight": ACTION_TOKEN_WEIGHT,
     }
     with open(f"{output_dir}/training_metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)

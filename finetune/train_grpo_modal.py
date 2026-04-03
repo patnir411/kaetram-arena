@@ -86,7 +86,7 @@ SAVE_STEPS = 100
 # Output
 EXPERIMENT_NAME = "kaetram-qwen3.5-9b-grpo"
 GGUF_QUANT = "q4_k_m"
-SFT_CHECKPOINT = "kaetram-qwen3.5-9b-r3-multiturn"  # default SFT starting point
+SFT_CHECKPOINT = "kaetram-qwen3.5-9b-r4-lossmasked"  # default SFT starting point
 
 
 # ---------------------------------------------------------------------------
