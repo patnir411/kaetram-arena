@@ -147,16 +147,17 @@ Run each in its own terminal:
 
 Port allocation: agent N gets server WS port `9001 + N*10` (9001, 9011, 9021, 9031). All agents share the static client on port 9000. Each agent logs in as `ClaudeBotN`.
 
-**Agent playstyles:** Each agent gets a playstyle that defines its DECIDE priorities in `system.md`. Playstyle files in `prompts/personalities/` are injected via the `__PERSONALITY_BLOCK__` placeholder. All agents get `game_knowledge.md` appended. Dashboard shows playstyle badges (red=AGGRESSIVE, amber=METHODICAL, blue=CURIOUS, purple=EFFICIENT). Default (no flags): round-robin assignment. Each agent's sandbox gets a `metadata.json` with its playstyle.
+**Agent playstyles:** Each agent gets a playstyle that defines its DECIDE priorities in `system.md`. Playstyle files in `prompts/personalities/` are injected via the `__PERSONALITY_BLOCK__` placeholder. All agents get `game_knowledge.md` appended. Dashboard shows playstyle badges (red=AGGRESSIVE, amber=METHODICAL, blue=CURIOUS). Active collection uses 3 agents. Each agent's sandbox gets a `metadata.json` with its playstyle.
 
 | Flag | Playstyle | Color | Approach |
 |------|-----------|-------|----------|
-| `--aggressive` | Aggressive | Red | Takes risks, pushes combat zones, attempts bosses early |
-| `--methodical` | Methodical | Amber | Over-prepares, builds skills, crafts before advancing |
-| `--curious` | Curious | Blue | Talks to every NPC, enters every building, discovers paths |
-| `--efficient` | Efficient | Purple | Shortest path through quest chain, no wasted turns |
+| `--aggressive` | Aggressive | Red | HP threshold 30%, attacks above-level mobs, pushes new zones early |
+| `--methodical` | Methodical | Amber | HP threshold 60%, needs 2+ food before quest mobs, infrastructure quest order |
+| `--curious` | Curious | Blue | NPC-first, enters every building, zone rotation every 30 turns |
 
-**Resource budget (4 agents on this VM):** ~3.3 GB RAM, ~35% CPU, ~6 GB disk/24h — comfortable on 16 GB / 4 vCPU.
+**Note:** EFFICIENT personality deprecated (April 3). Active: agent_0=AGGRESSIVE, agent_1=METHODICAL, agent_2=CURIOUS.
+
+**Resource budget (3 agents on this VM):** ~2.5 GB RAM, ~27% CPU, ~4.5 GB disk/24h — comfortable on 16 GB / 4 vCPU.
 
 **Database**: MongoDB (`kaetram-mongo` Docker container, port 27017, db `kaetram_devlopment`) persists player state across 9 collections (`player_info`, `player_skills`, `player_equipment`, `player_inventory`, `player_bank`, `player_quests`, `player_achievements`, `player_statistics`, `player_abilities`). The dashboard reads directly from MongoDB via `pymongo` for authoritative game state (level, HP, mana, skills, quests, equipment, inventory). Requires `pymongo` in the venv.
 
@@ -218,7 +219,11 @@ python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
 
 ## CURRENT STATUS
 
-**Finetune DONE.** Qwen3.5-9B finetuned on 3,844 gameplay turns via Modal H100 (27min). Model loaded in Ollama on RTX 3060 GPU machine.
+**Data collection ACTIVE.** 3 agents running (AGGRESSIVE, METHODICAL, CURIOUS) on GCP VM. ~190 sessions, 289MB. Training job running on Modal in parallel.
+
+**Personalities finalized (April 3).** Dropped EFFICIENT after audit. 3 orthogonal axes confirmed working in logs: combat approach / HP-gated preparation / exploration-first. Next: let agents run, rebuild qwen_sft, evaluate distilled model quality.
+
+**Finetune v1 DONE.** Qwen3.5-9B finetuned on 3,844 gameplay turns via Modal H100 (27min). Model loaded in Ollama on RTX 3060 GPU machine. New training run in progress with updated MCP-format logs.
 
 **Qwen agent harness DONE.** Three modes available:
 - `QwenCodeAdapter` in `cli_adapter.py` — wraps the `qwen` CLI (a Claude Code / Gemini CLI fork). Uses Playwright MCP, `stream-json` output, `--yolo` mode. Same architecture as Claude/Kimi/Codex adapters. Used by `orchestrate.py` and `play.sh --qwen-code`. **This is NOT the finetuned model** — it calls the Qwen Code CLI which hits the Qwen API.

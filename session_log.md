@@ -3,6 +3,21 @@ _Keep under 30 lines. Update at end of every session. Most recent first._
 
 ---
 
+## 2026-04-03 — Data Audit + Personality Finalization
+
+**Deep audit of all agent logs (189 sessions, 289MB on VM):**
+- Confirmed MCP architecture working: 100% semantic tool calls, avg 88 actions/session, 37K thinking chars/session
+- Agents at level 70-73, fighting real mid-game content (Bandits, Cow Warriors, Scary Skeletons)
+- Attack fix: `post_attack` field added — agent can now confirm damage dealt, eliminates click_tile fallback in combat
+
+**Personalities finalized — dropping to 3:**
+- EFFICIENT (agent_3) dropped: 45% click_tile rate, lowest level (37), broken behavior
+- METHODICAL prompt rewritten: hard rules (HP < 60% eat first, 2+ food before quest mobs), no more catch-22 prep loop
+- Active: AGGRESSIVE (agent_0), METHODICAL (agent_1), CURIOUS (agent_2)
+- 3 orthogonal decision axes: combat approach / HP-gated preparation / exploration-first
+
+**Current state:** 3 agents running, training job kicked off on Modal in parallel.
+
 ## 2026-04-02 — NPC Interaction Fix + Prompt Rewrite
 
 **Critical bugs fixed:**

@@ -2,22 +2,23 @@
 
 ## What This Is
 
-Raw session logs from 4 autonomous Claude agents playing Kaetram (a 2D MMORPG). Used for knowledge distillation to train a smaller Qwen model to play the game.
+Raw session logs from 3 autonomous Claude agents playing Kaetram (a 2D MMORPG). Used for knowledge distillation to train a smaller Qwen model to play the game.
 
 Each session log captures everything: the game state the agent saw, its internal reasoning (extended thinking blocks), and every action it took. This is teacher data — we're compressing Claude's gameplay knowledge into a smaller model.
 
 ---
 
-## The 4 Personalities
+## The 3 Personalities
 
-Each agent has a fixed personality that shapes how it reasons and plays. This is the scientific knob for data diversity — same game, 4 distinct approaches.
+Each agent has a fixed personality that shapes how it reasons and plays. This is the scientific knob for data diversity — same game, 3 orthogonal decision-making axes.
 
 | Agent | Personality | Playstyle |
 |-------|-------------|-----------|
-| agent_0 | **AGGRESSIVE** | Rushes combat, targets hard mobs, pushes into new zones early |
-| agent_1 | **METHODICAL** | Over-prepares, builds skills, checks inventory before every move |
-| agent_2 | **CURIOUS** | Talks to every NPC, enters every building, maps the world |
-| agent_3 | **EFFICIENT** | Shortest path through quest chain, fast-travels constantly, no wasted moves |
+| agent_0 | **AGGRESSIVE** | Rushes combat, targets hard mobs, low HP threshold (30%), pushes new zones early |
+| agent_1 | **METHODICAL** | HP-gated decisions (60% threshold), needs 2+ food before quest mobs, infrastructure quest order |
+| agent_2 | **CURIOUS** | NPC-first, enters every building, zone rotation every 30 turns, minimum combat between exploration |
+
+**Why 3 not 4:** EFFICIENT (agent_3) was dropped after audit — produced 45% click_tile fallback rate and lowest level progression of any agent. The 3 remaining personalities cover orthogonal decision axes: *what to fight* (AGGRESSIVE), *when to act* (METHODICAL), *where to go* (CURIOUS).
 
 Personalities are injected via `prompts/personalities/{personality}.md` into the system prompt at session start by `orchestrate.py`.
 
@@ -28,17 +29,17 @@ Personalities are injected via `prompts/personalities/{personality}.md` into the
 ```
 dataset/
 ├── raw/
-│   ├── agent_0/logs/         ← AGGRESSIVE session logs
-│   ├── agent_1/logs/         ← METHODICAL session logs
-│   ├── agent_2/logs/         ← CURIOUS session logs
-│   ├── agent_3/logs/         ← EFFICIENT session logs
+│   ├── agent_0/logs/         ← AGGRESSIVE session logs (active)
+│   ├── agent_1/logs/         ← METHODICAL session logs (active)
+│   ├── agent_2/logs/         ← CURIOUS session logs (active)
+│   ├── agent_3/logs/         ← legacy EFFICIENT logs (kept, not used for training)
 │   └── backlog/              ← Top pre-personality sessions (Mar 19-21), kept for reference
 │       ├── agent_0_aggressive/
 │       ├── agent_1_methodical/
 │       ├── agent_2_curious/
 │       └── agent_3_efficient/
 ├── extracted/                ← OODA turns extracted from raw logs (generated, not committed)
-├── qwen_sft/              ← Final training records (generated, not committed)
+├── qwen_sft/                 ← Final training records (generated, not committed)
 └── world_model/              ← Forward dynamics model data (committed)
 ```
 
@@ -75,8 +76,8 @@ Written automatically by `orchestrate.py` at session start. Use these to filter 
 
 ## What's Kept and Why
 
-**Active training data: March 28 – present**
-The personality system was finalized on March 22 and prompts were dialed in by March 28 ("best run yet" commit). All training data comes from this period onward — confirmed personalities, structured actions, clean reasoning.
+**Active training data: March 28 – present (agents 0-2 only)**
+The personality system was finalized on March 22 and prompts were dialed in by March 28. All training data comes from this period onward — confirmed personalities, MCP-based structured actions, clean reasoning. Only agents 0-2 (AGGRESSIVE, METHODICAL, CURIOUS) are used for training. Agent_3's legacy EFFICIENT logs are kept on disk but excluded from the pipeline.
 
 **Backlogged (not used for training): March 19–21**
 Pre-personality marathon sessions. Agents reached level 99-135 with deep reasoning (5,000+ word thinking blocks). Kept as reference in case game knowledge depth is ever needed. Not used for distillation because actions were raw pixel clicks and there's no personality differentiation.
@@ -86,22 +87,26 @@ Personality system being built and broken mid-run. Prompt changes mid-collection
 
 ---
 
-## Current Dataset Stats (as of April 2, 2026)
+## Current Dataset Stats (as of April 3, 2026)
 
 | | Value |
 |---|---|
-| Active sessions per agent | 75–95 |
-| Total active sessions | ~365+ |
-| Extracted turns | ~2,189 (needs re-extraction for new sessions) |
-| Training records (qwen_sft) | needs rebuild |
-| Action vocab (MCP tools) | `observe`, `attack`, `navigate`, `interact_npc`, `warp`, `eat_food`, `equip_item` |
-| Architecture | Custom FastMCP server (18 typed tools), not Playwright MCP |
+| Active agents | 3 (AGGRESSIVE, METHODICAL, CURIOUS) |
+| Active sessions (agents 0-2) | ~190 |
+| Total raw data on VM | ~289MB |
+| Avg actions per session | 88 (all semantic MCP tool calls) |
+| Avg thinking chars per session | 37,000 |
+| Agent levels reached | 57–73 (real mid-game content) |
+| Training records (qwen_sft) | needs rebuild from current logs |
+| Architecture | Custom FastMCP server (`mcp_game_server.py`), 18 typed tools |
 
 Dataset is growing. Rebuild with `scripts/collect_sft_data.sh` or manually:
 ```bash
 python3 extract_turns.py --log-dir dataset/raw/agent_N/logs/ --output-dir dataset/extracted/agent_N/
 python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/ --mode mixed --format sft
 ```
+
+Only run extraction on agents 0-2. Skip agent_3.
 
 ---
 
@@ -118,4 +123,4 @@ dataset/qwen_sft/val.json
 Qwen3.5-9B finetuned model
 ```
 
-Each training record: system prompt (game rules) + user message (game state + ASCII map) + assistant message (`<think>` reasoning block + structured action call).
+Each training record: system prompt (game rules) + user message (game state) + assistant message (`<think>` reasoning block + structured MCP tool call).
