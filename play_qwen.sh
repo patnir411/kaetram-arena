@@ -77,8 +77,8 @@ open('$SYSTEM_TMP', 'w').write(text)
 
 Session #${SESSION}. Previous progress: ${PROGRESS}
 
-Your FIRST action must be: return JSON.stringify(window.__latestGameState)
-Then: attack mobs, navigate to NPCs, accept quests. Use browser_run_code for ALL game actions. Do NOT use Bash except to save progress every 20+ turns."
+Your FIRST action: call observe() to get the game state.
+Then: attack mobs, navigate to NPCs, accept quests. Use native game tools (attack, navigate, interact_npc, etc.) — one tool call per response."
 
   # Run harness
   source "$PROJECT_DIR/.venv/bin/activate" 2>/dev/null || true
