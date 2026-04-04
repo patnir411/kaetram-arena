@@ -945,10 +945,17 @@ def turn_to_conversation(turn: dict, personality: str | None = None, min_score: 
     return {"messages": msgs, "tools": TOOL_DEFINITIONS}
 
 
+# Agents excluded from training — EFFICIENT dropped April 3 (45% click_tile, lowest levels)
+EXCLUDED_AGENTS = {"agent_3", "agent_4"}
+
+
 def load_turns(input_dir: Path) -> list[tuple[str, dict]]:
     """Load all turns from extracted dataset directory. Returns (session_name, turn) pairs."""
     all_turns = []
     for jsonl in sorted(input_dir.rglob("turns.jsonl")):
+        # Skip excluded agents (e.g., agent_3/efficient, agent_4/codex)
+        if any(excluded in str(jsonl) for excluded in EXCLUDED_AGENTS):
+            continue
         session = jsonl.parent.name
         for line in open(jsonl):
             try:
@@ -963,6 +970,8 @@ def load_turns_by_session(input_dir: Path) -> dict[str, list[dict]]:
     """Load turns grouped by session, preserving chronological order."""
     sessions = {}
     for jsonl in sorted(input_dir.rglob("turns.jsonl")):
+        if any(excluded in str(jsonl) for excluded in EXCLUDED_AGENTS):
+            continue
         session = jsonl.parent.name
         turns = []
         for line in open(jsonl):
