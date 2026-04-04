@@ -590,30 +590,58 @@ def structured_action_to_js(action: str) -> str:
     return f"return '{name}: unknown'"
 
 
-def synthesize_tool_result(action: str) -> str:
-    """Generate a brief tool result string for the action (training data only)."""
-    m = re.match(r"(\w+)\(", action)
+def synthesize_tool_result(action: str, turn: dict | None = None) -> str:
+    """Generate a JSON tool result matching the real MCP server output format.
+
+    Uses actual game state from the turn when available to produce realistic
+    results, reducing train/inference mismatch.
+    """
+    m = re.match(r"(\w+)\((.*)\)", action, re.DOTALL)
     name = m.group(1) if m else "unknown"
-    results = {
-        "attack": "Targeting mob, auto-attacking",
-        "interact_npc": "Walking to NPC, initiating dialogue",
-        "talk_npc": "Advancing dialogue",
-        "navigate": "Pathfinding started",
-        "move": "Moving to target",
-        "click": "Clicked canvas",
-        "click_entity": "Clicked entity",
-        "click_tile": "Clicked tile",
-        "warp": "Warping...",
-        "heal": "Consumed food, healing",
-        "equip": "Item equipped",
-        "quest_accept": "Quest accepted",
-        "set_style": "Attack style changed",
-        "wait": "Waited",
-        "respawn": "Respawning...",
-        "stuck_reset": "Reset, warping to safety",
-        "nav_cancel": "Navigation cancelled",
-    }
-    return results.get(name, "OK")
+    args_str = m.group(2).strip() if m else ""
+    args = [a.strip().strip("'\"") for a in re.split(r",\s*", args_str)] if args_str else []
+
+    gs = (turn or {}).get("game_state", {})
+    pp = gs.get("player_position", {})
+    ps = gs.get("player_stats", {})
+
+    if name == "attack" and args:
+        mob_name = args[0]
+        return json.dumps({"attacking": mob_name, "distance": 2,
+                          "player_pos": pp, "status": "engaging"})
+    if name == "interact_npc" and args:
+        return json.dumps({"arrived": True, "npc": args[0],
+                          "dialogue_lines": 1, "quest_opened": False})
+    if name == "talk_npc":
+        return json.dumps({"dialogue": ["..."], "has_more": False})
+    if name == "navigate" and len(args) >= 2:
+        return json.dumps({"status": "walking", "target": {"x": int(args[0]), "y": int(args[1])},
+                          "from": pp})
+    if name == "move" and len(args) >= 2:
+        return json.dumps({"status": "arrived", "position": {"x": int(args[0]), "y": int(args[1])}})
+    if name == "warp" and args:
+        return json.dumps({"warped_to": args[0], "status": "arrived"})
+    if name == "heal" and args:
+        hp = _safe_int(ps.get("hp"))
+        return json.dumps({"healed": True, "hp_before": hp, "hp_after": min(hp + 20, _safe_int(ps.get("max_hp", 100)))})
+    if name == "equip":
+        return json.dumps({"equipped": True})
+    if name == "click_tile" and len(args) >= 2:
+        return json.dumps({"clicked": {"x": int(args[0]), "y": int(args[1])}})
+    if name == "quest_accept":
+        return json.dumps({"quest_accepted": True})
+    if name == "set_style" and args:
+        return json.dumps({"style": args[0], "applied": True})
+    if name == "respawn":
+        return json.dumps({"respawned": True, "position": {"x": 188, "y": 157}})
+    if name == "stuck_reset":
+        return json.dumps({"reset": True, "warping": True})
+    if name == "nav_cancel":
+        return json.dumps({"cancelled": True})
+    if name == "wait":
+        return json.dumps({"waited": True})
+
+    return json.dumps({"result": "ok"})
 
 
 def build_user_message(turn: dict, prev_turn: dict | None = None, memory: dict | None = None) -> str:
@@ -761,7 +789,7 @@ def build_tool_result_message(turn: dict) -> dict:
     if tc_result is None:
         return None
     tool_name, _ = tc_result
-    result = synthesize_tool_result(action)
+    result = synthesize_tool_result(action, turn=turn)
     return {"role": "tool", "content": result, "tool_call_id": call_id, "name": tool_name}
 
 
@@ -946,7 +974,14 @@ def turn_to_conversation(turn: dict, personality: str | None = None, min_score: 
 
 
 # Agents excluded from training — EFFICIENT dropped April 3 (45% click_tile, lowest levels)
+# Uses path segments (not substrings) to avoid false matches like "agent_40"
 EXCLUDED_AGENTS = {"agent_3", "agent_4"}
+
+
+def _is_excluded_agent(path: Path) -> bool:
+    """Check if a path belongs to an excluded agent using path segments, not substrings."""
+    parts = path.parts
+    return any(agent in parts for agent in EXCLUDED_AGENTS)
 
 
 def load_turns(input_dir: Path) -> list[tuple[str, dict]]:
@@ -954,7 +989,7 @@ def load_turns(input_dir: Path) -> list[tuple[str, dict]]:
     all_turns = []
     for jsonl in sorted(input_dir.rglob("turns.jsonl")):
         # Skip excluded agents (e.g., agent_3/efficient, agent_4/codex)
-        if any(excluded in str(jsonl) for excluded in EXCLUDED_AGENTS):
+        if _is_excluded_agent(jsonl):
             continue
         session = jsonl.parent.name
         for line in open(jsonl):
@@ -970,7 +1005,7 @@ def load_turns_by_session(input_dir: Path) -> dict[str, list[dict]]:
     """Load turns grouped by session, preserving chronological order."""
     sessions = {}
     for jsonl in sorted(input_dir.rglob("turns.jsonl")):
-        if any(excluded in str(jsonl) for excluded in EXCLUDED_AGENTS):
+        if _is_excluded_agent(jsonl):
             continue
         session = jsonl.parent.name
         turns = []
