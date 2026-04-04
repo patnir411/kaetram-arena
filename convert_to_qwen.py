@@ -797,10 +797,15 @@ def build_multi_turn_records(
 
         # Filter out bad turns
         valid_window = []
-        for t in window:
+        for i_w, t in enumerate(window):
             if is_desert_quest_waste(t):
                 continue
             if min_score > 0 and score_turn(t) < min_score:
+                continue
+            # Skip click_tile in non-last positions — these teach the model to
+            # click tiles blindly without reasoning (only last turn gets <think>)
+            is_last_in_window = (i_w == len(window) - 1)
+            if t.get("action_type") == "click_tile" and not is_last_in_window:
                 continue
             valid_window.append(t)
 
