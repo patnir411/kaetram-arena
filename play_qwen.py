@@ -530,9 +530,23 @@ Write progress.json. Do NOT use Bash for anything else. Do NOT call Bash multipl
                 pass
 
             # Context window management: trim old messages if too many
+            # Trim at message group boundaries to avoid orphaning tool_call/tool_result pairs
             if len(messages) > 60:
-                # Keep system + last 40 messages
-                messages = messages[:1] + messages[-40:]
+                # Find a safe cut point: scan backwards from the target trim point
+                # and land on a message that starts a new group (user or assistant without
+                # a preceding tool_call that needs its result)
+                target_keep = 40
+                cut_idx = len(messages) - target_keep
+                # Walk forward from cut_idx to find a 'user' or 'assistant' message
+                # that isn't a 'tool' result (which would be orphaned without its tool_call)
+                while cut_idx < len(messages) - 10:
+                    role = messages[cut_idx].get("role", "")
+                    if role in ("user", "system"):
+                        break  # safe to start here
+                    if role == "assistant" and "tool_call_id" not in messages[cut_idx]:
+                        break  # assistant message (not a tool result) is safe
+                    cut_idx += 1
+                messages = messages[:1] + messages[cut_idx:]
 
         print(f"\nSession complete: {turn} turns, log: {log_file}")
         browser.close()
