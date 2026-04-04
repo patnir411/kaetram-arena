@@ -137,48 +137,50 @@ async def login(ctx: Context) -> str:
     await page.locator("#login-name-input").fill(username)
     await page.locator("#login-password-input").fill("password123")
     await page.locator("#login").click()
-    await page.wait_for_timeout(4000)
 
-    # Check if we need to register (account doesn't exist)
-    still_on_login = await page.evaluate("""() => {
-        const el = document.getElementById('load-character');
-        if (!el) return false;
-        const s = window.getComputedStyle(el);
-        return s.display !== 'none' && s.opacity !== '0';
-    }""")
-
-    if still_on_login:
-        await page.evaluate("""(username) => {
-            document.getElementById('new-account').click();
-            setTimeout(() => {
-                const set = (el, val) => {
-                    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
-                        .set.call(el, val);
-                    el.dispatchEvent(new Event('input', {bubbles: true}));
-                };
-                set(document.getElementById('register-name-input'), username);
-                set(document.getElementById('register-password-input'), 'password123');
-                set(document.getElementById('register-password-confirmation-input'), 'password123');
-                set(document.getElementById('register-email-input'), username + '@test.com');
-                setTimeout(() => document.getElementById('play').click(), 300);
-            }, 500);
-        }""", username)
-        await page.wait_for_timeout(8000)
-
-    await page.wait_for_timeout(2000)
-    await page.keyboard.press("Escape")
-    await page.wait_for_timeout(1000)
-
-    # Verify the game actually loaded (retry up to 3 times)
-    # Note: gridX can be 0 at spawn, so just check player object exists
+    # Wait for game to load — body.className transitions from 'intro' to 'game'
+    # Login takes ~4-6s for server to respond and menu to fade out.
     game_ready = False
-    for _attempt in range(3):
-        game_ready = await page.evaluate(
-            "() => !!(window.game && window.game.player && typeof window.game.player.gridX === 'number')"
-        )
-        if game_ready:
+    for _attempt in range(12):
+        await page.wait_for_timeout(1000)
+        result = await page.evaluate("""() => {
+            if (document.body.className === 'game') return 'in_game';
+            // Still on intro — check if we need to register (no account yet)
+            const lc = document.getElementById('load-character');
+            if (lc && window.getComputedStyle(lc).opacity !== '0') return 'needs_login';
+            return 'waiting';
+        }""")
+        log(f"[mcp] login attempt {_attempt+1}: {result}")
+        if result == 'in_game':
+            game_ready = True
             break
-        await page.wait_for_timeout(3000)
+        if result == 'needs_login' and _attempt >= 5:
+            # After 5s, still on login screen — account doesn't exist, register
+            log(f"[mcp] Registering new account for {username}")
+            await page.evaluate("""(username) => {
+                document.getElementById('new-account').click();
+                setTimeout(() => {
+                    const set = (el, val) => {
+                        if (!el) return;
+                        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+                            .set.call(el, val);
+                        el.dispatchEvent(new Event('input', {bubbles: true}));
+                    };
+                    set(document.getElementById('register-name-input'), username);
+                    set(document.getElementById('register-password-input'), 'password123');
+                    set(document.getElementById('register-password-confirmation-input'), 'password123');
+                    set(document.getElementById('register-email-input'), username + '@test.com');
+                    setTimeout(() => document.getElementById('play').click(), 500);
+                }, 500);
+            }""", username)
+            # Wait for registration to complete
+            for _r in range(10):
+                await page.wait_for_timeout(1000)
+                r2 = await page.evaluate("() => document.body.className")
+                if r2 == 'game':
+                    game_ready = True
+                    break
+            break
 
     if not game_ready:
         log(f"[mcp] Login failed for {username} — game did not load")

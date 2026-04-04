@@ -4,17 +4,17 @@ Modal finetune script for Qwen3.5-9B on Kaetram gameplay data.
 Uses Unsloth for 2x faster training + 70% less memory. bf16 LoRA (NOT QLoRA —
 4-bit is not recommended for Qwen3.5 due to quantization differences).
 
-Exports directly to GGUF Q4_K_M for local inference on RTX 3060 12GB.
+Exports merged safetensors for SGLang serving on Modal.
 
 Usage:
     # First time: authenticate with Modal
     modal setup
 
-    # Run finetuning (uses L40S GPU, ~$1-3 total)
+    # Run finetuning (uses H100 GPU, ~$6-8 total)
     modal run finetune/train_modal.py
 
-    # Download the GGUF after training
-    modal volume get kaetram-model-vol /checkpoints/kaetram-qwen3.5-9b ./kaetram-model
+    # Deploy serving endpoint
+    modal deploy finetune/serve_modal.py
 """
 
 import pathlib
@@ -33,10 +33,14 @@ app = modal.App("kaetram-qwen-finetune")
 model_cache_vol = modal.Volume.from_name("kaetram-model-cache", create_if_missing=True)
 checkpoint_vol = modal.Volume.from_name("kaetram-model-vol", create_if_missing=True)
 
-# Container image — Unsloth + deps, pinned versions matching Modal's official example
+# Container image — CUDA devel base for flash-attn compilation (Qwen3.5 is a unified VLM,
+# Unsloth routes through vision.py which needs FA2 compiled with nvcc)
 train_image = (
-    modal.Image.debian_slim(python_version="3.11")
-    .apt_install("cmake", "build-essential")
+    modal.Image.from_registry(
+        "nvidia/cuda:12.6.3-devel-ubuntu22.04",
+        add_python="3.11",
+    )
+    .apt_install("cmake", "build-essential", "git")
     .uv_pip_install(
         "accelerate>=1.9.0",
         "datasets>=3.6.0",
@@ -47,8 +51,9 @@ train_image = (
         "trl>=0.19.1",
         "unsloth[cu128-torch270]>=2025.7.8",
         "unsloth_zoo>=2025.7.10",
-        # llama-cpp-python removed — GGUF export not needed for Modal serving (SGLang uses safetensors)
     )
+    # flash-attn must be installed AFTER torch (build dependency, needs nvcc from CUDA devel)
+    .run_commands("pip install flash-attn --no-build-isolation")
     .env({"HF_HOME": "/model_cache", "TOKENIZERS_PARALLELISM": "false"})
 )
 
@@ -65,7 +70,7 @@ with train_image.imports():
 # ---------------------------------------------------------------------------
 
 MODEL_ID = "unsloth/Qwen3.5-9B"  # Unsloth-optimized, Apache 2.0
-MAX_SEQ_LEN = 16384  # Round 4: 16k (P99=14.3K after chat template, down from 32K)
+MAX_SEQ_LEN = 8192   # Round 6: halved from 16k (median=3.6k, P90=12.7k — 8k covers ~90%)
 LORA_R = 64       # Round 2: 4x more capacity (was 16)
 LORA_ALPHA = 64   # alpha = r recommended for Qwen3.5
 LORA_TARGETS = [
@@ -73,45 +78,55 @@ LORA_TARGETS = [
     "gate_proj", "up_proj", "down_proj",
 ]
 
-# Training — Round 4: loss masking (Structured Agent Distillation, arxiv 2505.13820)
-BATCH_SIZE = 1    # Round 3: halved for 32k context (was 2)
-GRAD_ACCUM = 16   # effective batch = 16 (was 8)
-LR = 1e-4         # Round 2: more conservative (was 2e-4), less overfitting
+# Training
+BATCH_SIZE = 2    # Round 6: doubled (8k context fits batch=2 on H100 80GB)
+GRAD_ACCUM = 8    # effective batch = 16 (2 * 8)
+LR = 1e-4
 WARMUP_RATIO = 0.05
 WEIGHT_DECAY = 0.01
 MAX_STEPS = -1  # -1 = use num_train_epochs
-EPOCHS = 2      # 2 epochs — 3 risks overfitting with r=64 LoRA on ~3.2K records
-SAVE_STEPS = 150
-EVAL_STEPS = 75
+EPOCHS = 1      # Round 6: 1 epoch — standard SFT, loss converges within epoch 1
+SAVE_STEPS = 50
+EVAL_STEPS = 50
 LOGGING_STEPS = 10
 
 # Loss masking: zero loss on input tokens (Structured Agent Distillation, arxiv 2505.13820)
-# DataCollatorForCompletionOnlyLM masks all tokens before the response template
 # Only trains on assistant responses (<think> reasoning + tool calls)
 MASK_INPUT_TOKENS = True
 
 # Output
-EXPERIMENT_NAME = "kaetram-qwen3.5-9b-r5-mcp-tools"
-GGUF_QUANT = "q4_k_m"  # fits in 12GB VRAM (RTX 3060) with room for context
+EXPERIMENT_NAME = "kaetram-qwen3.5-9b-r6-optimized"
 
 
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
 
-def load_kaetram_dataset(train_bytes: bytes, val_bytes: bytes, tokenizer):
-    """Load our Kaetram SFT data and format with the chat template.
+def load_kaetram_dataset(train_bytes: bytes, val_bytes: bytes, metadata_bytes: bytes, tokenizer):
+    """Load Kaetram SFT data and format with the chat template.
 
-    Handles tool_calls (browser_run_code, Bash) and tool result messages
-    from the v3 training data format.
+    Records contain only gameplay messages (no system prompt or tools).
+    System prompt and tool definitions are injected from metadata.
     """
     import json
+
+    metadata = json.loads(metadata_bytes)
+    system_prompt = metadata["system_prompt"]
+    tool_definitions = metadata["tools"]
+    personality_suffixes = metadata.get("personality_suffixes", {})
 
     def parse_and_format(raw_bytes):
         records = json.loads(raw_bytes)
         rows = []
         for rec in records:
-            messages = []
+            # Reconstruct system message with personality
+            personality = rec.get("personality")
+            sys_content = system_prompt
+            if personality and personality in personality_suffixes:
+                sys_content += personality_suffixes[personality]
+
+            messages = [{"role": "system", "content": sys_content}]
+
             for msg in rec["messages"]:
                 m = {"role": msg["role"]}
 
@@ -126,9 +141,8 @@ def load_kaetram_dataset(train_bytes: bytes, val_bytes: bytes, tokenizer):
                 elif content is None and "tool_calls" not in msg:
                     m["content"] = ""
 
-                # Handle tool_calls (assistant messages calling browser_run_code/Bash)
+                # Handle tool_calls (assistant messages calling MCP tools)
                 if "tool_calls" in msg:
-                    # Ensure arguments is a dict (Qwen3.5 chat template calls .items())
                     tool_calls = []
                     for tc in msg["tool_calls"]:
                         tc = dict(tc)
@@ -149,19 +163,15 @@ def load_kaetram_dataset(train_bytes: bytes, val_bytes: bytes, tokenizer):
 
                 messages.append(m)
 
-            # Get tool definitions if present
-            tools = rec.get("tools")
-
             # Apply chat template with tools
             try:
                 formatted = tokenizer.apply_chat_template(
                     messages,
-                    tools=tools,
+                    tools=tool_definitions,
                     tokenize=False,
                     add_generation_prompt=False,
                 )
             except TypeError:
-                # Fallback: some tokenizers don't accept tools parameter
                 formatted = tokenizer.apply_chat_template(
                     messages,
                     tokenize=False,
@@ -181,19 +191,20 @@ def load_kaetram_dataset(train_bytes: bytes, val_bytes: bytes, tokenizer):
 
 @app.function(
     image=train_image,
-    gpu="H100",  # 80GB VRAM — bf16 LoRA on 9B fits easily, ~3-4x faster than L40S
-    timeout=24 * 3600,  # 24 hours — multi-turn 16k sequences need time
+    gpu="H100",  # 80GB VRAM — bf16 LoRA on 9B fits easily
+    timeout=6 * 3600,  # 6 hours (generous buffer for ~2-3h expected)
     volumes={
         "/model_cache": model_cache_vol,
         "/checkpoints": checkpoint_vol,
     },
 )
-def train(train_data: bytes, val_data: bytes):
+def train(train_data: bytes, val_data: bytes, metadata: bytes):
     """Run Unsloth bf16 LoRA finetune and save merged safetensors."""
     import json
 
     print(f"Training data: {len(train_data):,} bytes")
     print(f"Validation data: {len(val_data):,} bytes")
+    print(f"Metadata: {len(metadata):,} bytes")
 
     # Load model with Unsloth — bf16, NOT 4-bit (QLoRA not recommended for Qwen3.5)
     print(f"Loading {MODEL_ID}...")
@@ -219,12 +230,10 @@ def train(train_data: bytes, val_data: bytes):
 
     # Load and format dataset
     print("Loading dataset...")
-    train_ds, val_ds = load_kaetram_dataset(train_data, val_data, tokenizer)
+    train_ds, val_ds = load_kaetram_dataset(train_data, val_data, metadata, tokenizer)
     print(f"Train: {len(train_ds)} records, Val: {len(val_ds)} records")
 
-    # SFTConfig with completion_only_loss (replaces DataCollatorForCompletionOnlyLM removed in TRL 0.20)
-    # This implements Structured Agent Distillation (arxiv 2505.13820):
-    # zero gradient on game state tokens, only train on <think> and <action> tokens
+    # SFTConfig with completion_only_loss (Structured Agent Distillation, arxiv 2505.13820)
     output_dir = f"/checkpoints/{EXPERIMENT_NAME}"
     print(f"Loss masking: completion_only_loss={MASK_INPUT_TOKENS}")
     sft_config = SFTConfig(
@@ -325,25 +334,34 @@ def main():
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     train_path = os.path.join(project_dir, "dataset", "qwen_sft", "train.json")
     val_path = os.path.join(project_dir, "dataset", "qwen_sft", "val.json")
+    metadata_path = os.path.join(project_dir, "dataset", "qwen_sft", "metadata.json")
 
     if not os.path.exists(train_path):
         raise FileNotFoundError(f"Training data not found: {train_path}")
+    if not os.path.exists(metadata_path):
+        raise FileNotFoundError(
+            f"Metadata not found: {metadata_path}\n"
+            "Run: python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/"
+        )
 
     print(f"Uploading training data...")
     with open(train_path, "rb") as f:
         train_data = f.read()
     with open(val_path, "rb") as f:
         val_data = f.read()
+    with open(metadata_path, "rb") as f:
+        metadata = f.read()
 
     print(f"  Train: {len(train_data):,} bytes")
     print(f"  Val:   {len(val_data):,} bytes")
+    print(f"  Metadata: {len(metadata):,} bytes")
     print(f"  Model: {MODEL_ID}")
     print(f"  Method: bf16 LoRA (r={LORA_R}, alpha={LORA_ALPHA})")
     print(f"  Export: merged safetensors (for Modal SGLang serving)")
     print(f"  Max seq len: {MAX_SEQ_LEN}")
     print(f"Launching on Modal H100...")
 
-    metrics = train.remote(train_data, val_data)
+    metrics = train.remote(train_data, val_data, metadata)
 
     print(f"\n{'='*60}")
     print("TRAINING COMPLETE")

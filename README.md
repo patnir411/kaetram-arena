@@ -9,7 +9,7 @@ An autonomous AI agent that plays [Kaetram](https://github.com/Kaetram/Kaetram-O
 - Records every action as a `(game_state, reasoning, action)` tuple
 - Runs indefinitely in sessions — each session picks up where the last left off
 - Supports multi-agent mode: run N agents in parallel for scaled data collection
-- 4 agent playstyles (aggressive, methodical, curious, efficient) for diverse training data
+- 3 agent playstyles (aggressive, methodical, curious) for diverse training data
 
 ## Architecture
 

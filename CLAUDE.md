@@ -219,7 +219,7 @@ python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
 
 ## CURRENT STATUS
 
-**Data collection ACTIVE.** 3 agents running (AGGRESSIVE, METHODICAL, CURIOUS) on GCP VM. ~190 sessions, 289MB. Training job running on Modal in parallel.
+**Data collection ACTIVE.** 3 agents running (AGGRESSIVE, METHODICAL, CURIOUS) on GCP VM. ~530 sessions collected across multiple runs. Training job running on Modal in parallel.
 
 **Personalities finalized (April 3).** Dropped EFFICIENT after audit. 3 orthogonal axes confirmed working in logs: combat approach / HP-gated preparation / exploration-first. Next: let agents run, rebuild qwen_sft, evaluate distilled model quality.
 
@@ -251,7 +251,7 @@ python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
 Custom MCP Server (current):
   Claude CLI ──► mcp_game_server.py (FastMCP) ──► Playwright Python ──► browser
                    │                                    │
-              16 typed tools                     page.evaluate()
+              18 typed tools                     page.evaluate()
               (observe, attack,                  calls window.__helperFn()
                navigate, warp...)                from state_extractor.js
                    │

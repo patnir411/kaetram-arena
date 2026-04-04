@@ -10,9 +10,7 @@ Complete all quests. Organized by phase.
 
 **Anvil's Echoes** — Blacksmith (~199, 169)
 - Stage 1: Talk to Blacksmith. He tells you about his lost hammer.
-- Stage 2: The hammer is through the door at **(201, 168)** right next to the Blacksmith. Walk onto the door tile to enter the cave at (439, 887). Find the hammer inside.
-- Do NOT "explore south coast" — the hammer is through the door next to him.
-- If the door won't open, talk to the Blacksmith again to advance the quest stage.
+- Stage 2: Talk to Blacksmith again to complete the quest.
 - Reward: Smithing Boots + 420 Smithing XP
 
 **Scavenger** — Village Girl (~136, 146) → Old Lady via door at (147, 113)

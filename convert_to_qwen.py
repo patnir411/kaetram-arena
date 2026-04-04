@@ -845,9 +845,7 @@ def build_multi_turn_records(
         if memory is None:
             memory = DEFAULT_MEMORY
 
-        messages = [
-            {"role": "system", "content": sys_prompt},
-        ]
+        messages = []
 
         for i, turn in enumerate(valid_window):
             prev = valid_window[i - 1] if i > 0 else None
@@ -869,7 +867,7 @@ def build_multi_turn_records(
             if tool_result is not None:
                 messages.append(tool_result)
 
-        records.append({"messages": messages, "tools": TOOL_DEFINITIONS})
+        records.append({"messages": messages, "personality": personality})
 
     return records
 
@@ -953,24 +951,19 @@ def turn_to_conversation(turn: dict, personality: str | None = None, min_score: 
 
     user_text = build_user_message(turn)
 
-    sys_prompt = SYSTEM_PROMPT
-    if personality and personality in PERSONALITY_SUFFIXES:
-        sys_prompt += PERSONALITY_SUFFIXES[personality]
-
     asst_msg = build_assistant_message(turn, include_thinking=True)
     if asst_msg is None:
         return None  # Skip update_memory turns
 
     tool_result = build_tool_result_message(turn)
     msgs = [
-        {"role": "system", "content": sys_prompt},
         {"role": "user", "content": user_text},
         asst_msg,
     ]
     if tool_result is not None:
         msgs.append(tool_result)
 
-    return {"messages": msgs, "tools": TOOL_DEFINITIONS}
+    return {"messages": msgs, "personality": personality}
 
 
 # Agents excluded from training — EFFICIENT dropped April 3 (45% click_tile, lowest levels)
@@ -1202,6 +1195,16 @@ def main():
         n_val = max(1, int(len(all_records) * args.val_ratio))
         val = all_records[:n_val]
         train = all_records[n_val:]
+
+    # Write metadata (system prompt + tools, injected at training time)
+    metadata_path = args.output / "metadata.json"
+    metadata = {
+        "system_prompt": SYSTEM_PROMPT,
+        "tools": TOOL_DEFINITIONS,
+        "personality_suffixes": PERSONALITY_SUFFIXES,
+    }
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=2)
 
     # Write output
     train_path = args.output / "train.json"

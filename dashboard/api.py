@@ -224,8 +224,15 @@ class APIMixin:
             if result.returncode == 0:
                 mode = "multi"
                 for j in range(MAX_AGENTS):
-                    if os.path.isdir(os.path.join("/tmp", f"kaetram_agent_{j}")):
-                        agent_count += 1
+                    meta_file = os.path.join("/tmp", f"kaetram_agent_{j}", "metadata.json")
+                    if os.path.isfile(meta_file):
+                        try:
+                            with open(meta_file) as mf:
+                                meta = json.load(mf)
+                            if meta.get("personality") != "qwen":
+                                agent_count += 1
+                        except Exception:
+                            pass
         except Exception:
             pass
         if mode == "none":
