@@ -3,6 +3,22 @@ _Keep under 30 lines. Update at end of every session. Most recent first._
 
 ---
 
+## 2026-04-04 — Research Deep Dive + Training Pipeline Hardening
+
+**39-paper research survey** across SFT distillation, GRPO/RL, game agents, data quality. Created 10 Linear issues (KAE-10 to KAE-19) with prioritized roadmap. Key papers: Structured Agent Distillation (loss masking), ORAK (3-stream SFT), Tree-GRPO, KTO, LIMA.
+
+**6 PRs merged (#15-#20):**
+- Loss masking via `completion_only_loss=True` — stops training on game state tokens
+- Quality scoring upgrade — reasoning-action alignment, mismatch penalties
+- click_tile filter — removed 913 blind no-reasoning click_tiles from multi-turn windows (37.9% → 4.7%)
+- Agent 3/4 code-level exclusion — `EXCLUDED_AGENTS` set + raw data deleted from VM
+- play_qwen.py crash fix — safe context trimming at message group boundaries
+- Realistic JSON tool results — replaces fake "Targeting mob" strings
+
+**Final dataset:** 3,216 train / 328 val. click_tile 4.7%, attack 27.8%, navigate 25.9%. Verified by Codex. Ready to train.
+
+---
+
 ## 2026-04-03 — Data Audit + Personality Finalization
 
 **Deep audit of all agent logs (189 sessions, 289MB on VM):**
