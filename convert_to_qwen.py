@@ -378,7 +378,8 @@ def score_turn(turn: dict) -> float:
     # Action quality (0.0 - 0.3)
     action_type = turn.get("action_type", "")
     high_value = ("attack", "interact_npc", "navigate", "quest_accept", "talk_npc")
-    medium_value = ("heal", "equip", "warp", "move", "click_entity", "set_style")
+    medium_value = ("heal", "equip", "warp", "move", "click_entity", "set_style",
+                    "wait", "stuck_reset", "nav_cancel", "update_memory")
     low_value = ("click_tile", "click")
     if action_type in high_value:
         score += 0.2
