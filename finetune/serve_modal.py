@@ -56,9 +56,9 @@ serve_image = (
 # ---------------------------------------------------------------------------
 
 BASE_MODEL_ID = "Qwen/Qwen3.5-9B"  # HF model ID (not Unsloth wrapper)
-SFT_EXPERIMENT = "kaetram-qwen3.5-9b-r4-lossmasked"
+SFT_EXPERIMENT = "kaetram-qwen3.5-9b-r5-mcp-tools"
 GRPO_EXPERIMENT = "kaetram-qwen3.5-9b-grpo"
-MERGED_MODEL_DIR = "/model_cache/kaetram-merged-r4"
+MERGED_MODEL_DIR = "/model_cache/kaetram-merged-r5"
 
 # vLLM settings
 MAX_MODEL_LEN = 32768  # A100 40GB fits 9B bf16 (18GB) + 32k KV cache (~12GB)
