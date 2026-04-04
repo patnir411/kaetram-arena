@@ -80,7 +80,7 @@ LR = 1e-4         # Round 2: more conservative (was 2e-4), less overfitting
 WARMUP_RATIO = 0.05
 WEIGHT_DECAY = 0.01
 MAX_STEPS = -1  # -1 = use num_train_epochs
-EPOCHS = 3      # Round 4: 3 epochs — scaling laws say up to 4 epochs useful before diminishing returns
+EPOCHS = 2      # 2 epochs — 3 risks overfitting with r=64 LoRA on ~3.2K records
 SAVE_STEPS = 150
 EVAL_STEPS = 75
 LOGGING_STEPS = 10
@@ -182,14 +182,14 @@ def load_kaetram_dataset(train_bytes: bytes, val_bytes: bytes, tokenizer):
 @app.function(
     image=train_image,
     gpu="H100",  # 80GB VRAM — bf16 LoRA on 9B fits easily, ~3-4x faster than L40S
-    timeout=4 * 3600,  # 4 hours max
+    timeout=24 * 3600,  # 24 hours — multi-turn 16k sequences need time
     volumes={
         "/model_cache": model_cache_vol,
         "/checkpoints": checkpoint_vol,
     },
 )
 def train(train_data: bytes, val_data: bytes):
-    """Run Unsloth bf16 LoRA finetune and export GGUF."""
+    """Run Unsloth bf16 LoRA finetune and save merged safetensors."""
     import json
 
     print(f"Training data: {len(train_data):,} bytes")
