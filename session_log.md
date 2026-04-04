@@ -7,15 +7,20 @@ _Keep under 30 lines. Update at end of every session. Most recent first._
 
 **39-paper research survey** across SFT distillation, GRPO/RL, game agents, data quality. Created 10 Linear issues (KAE-10 to KAE-19) with prioritized roadmap. Key papers: Structured Agent Distillation (loss masking), ORAK (3-stream SFT), Tree-GRPO, KTO, LIMA.
 
-**6 PRs merged (#15-#20):**
+**8 PRs merged (#15-#22):**
 - Loss masking via `completion_only_loss=True` — stops training on game state tokens
 - Quality scoring upgrade — reasoning-action alignment, mismatch penalties
 - click_tile filter — removed 913 blind no-reasoning click_tiles from multi-turn windows (37.9% → 4.7%)
 - Agent 3/4 code-level exclusion — `EXCLUDED_AGENTS` set + raw data deleted from VM
 - play_qwen.py crash fix — safe context trimming at message group boundaries
 - Realistic JSON tool results — replaces fake "Targeting mob" strings
+- Native MCP tool dispatch in play_qwen.py — model calls attack(Rat) directly, dispatch maps to JS helpers
+- Prompt alignment in play_qwen.py + play_qwen.sh — lists native tools, not browser_run_code
+- Modal timeout bumped to 24h, epochs reduced to 2 (overfitting risk with r=64 on 3.2K records)
+- serve_modal.py updated to r5-mcp-tools checkpoint
 
-**Final dataset:** 3,216 train / 328 val. click_tile 4.7%, attack 27.8%, navigate 25.9%. Verified by Codex. Ready to train.
+**Final dataset:** 3,216 train / 328 val. click_tile 4.7%, attack 27.8%, navigate 25.9%.
+**Training launched:** Modal H100, 402 steps, ~3 min/step, ETA ~22h. Auto-chain in tmux `post-train` — deploys model + runs Qwen 300 turns + stops serve after.
 
 ---
 
