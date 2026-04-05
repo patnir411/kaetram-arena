@@ -317,11 +317,31 @@ def prune_game_state(state: dict) -> dict:
     return pruned
 
 
-def format_reasoning(reasoning: str) -> str:
-    """Clean up reasoning text for the assistant message."""
+def format_reasoning(reasoning: str, max_chars: int = 500) -> str:
+    """Clean up and trim reasoning text for the assistant message.
+
+    Keeps reasoning concise to prevent the model from learning to ramble.
+    Prioritizes the last few sentences (the decision) over early context.
+    """
     # Remove empty lines and excessive whitespace
     lines = [l.strip() for l in reasoning.split("\n") if l.strip()]
-    return " ".join(lines)
+    text = " ".join(lines)
+
+    if len(text) <= max_chars:
+        return text
+
+    # Split into sentences and keep from the end (decision is usually last)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    # Always keep the last 2-3 sentences (the actual decision)
+    kept = []
+    char_count = 0
+    for s in reversed(sentences):
+        if char_count + len(s) > max_chars and kept:
+            break
+        kept.insert(0, s)
+        char_count += len(s) + 1
+
+    return " ".join(kept)
 
 
 def score_turn(turn: dict) -> float:
@@ -840,6 +860,16 @@ def build_multi_turn_records(
         if len(valid_window) < 2:
             continue
 
+        # Skip repetitive windows — same action 3+ times in a row teaches spam
+        actions = [t.get("action_type", "") for t in valid_window]
+        is_repetitive = False
+        for i_a in range(len(actions) - 2):
+            if actions[i_a] and actions[i_a] == actions[i_a + 1] == actions[i_a + 2]:
+                is_repetitive = True
+                break
+        if is_repetitive:
+            continue
+
         # Find memory context for the first turn
         memory = find_latest_memory(session_turns, start)
         if memory is None:
@@ -947,6 +977,12 @@ def turn_to_conversation(turn: dict, personality: str | None = None, min_score: 
         return None
 
     if min_score > 0 and score_turn(turn) < min_score:
+        return None
+
+    # Skip click_tile with weak reasoning in single-turn mode too
+    action_type = turn.get("action_type", "")
+    reasoning = turn.get("reasoning", "")
+    if action_type == "click_tile" and len(reasoning.strip()) < 30:
         return None
 
     user_text = build_user_message(turn)
