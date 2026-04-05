@@ -416,10 +416,12 @@ Call tools using <tool_call> XML tags. One tool call per response.
 
     system_prompt = system_prompt + tool_instructions
 
-    # Build initial messages
+    # Build initial messages — always include a user message (SGLang 500s on system-only)
     messages = [{"role": "system", "content": system_prompt}]
     if args.user_prompt:
         messages.append({"role": "user", "content": args.user_prompt})
+    else:
+        messages.append({"role": "user", "content": "You are logged in. Start playing now. Call observe() first to see the game state."})
 
     print(f"Harness started: {args.max_turns} max turns, endpoint={args.endpoint}")
     print(f"Log: {log_file}")
