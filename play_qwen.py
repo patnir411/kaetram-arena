@@ -266,6 +266,10 @@ def _dispatch(page, fn_name: str, fn_args: dict, turn: int) -> str:
             print(f"  [{turn}] {fn_name}({fn_args})")
             try:
                 result = page.evaluate(js)
+                # If result is already a string (e.g. observe() returns JSON string),
+                # return it directly to avoid double-encoding
+                if isinstance(result, str):
+                    return result
                 return json.dumps(result) if result is not None else "ok"
             except Exception as e:
                 return f"Error: {e}"
