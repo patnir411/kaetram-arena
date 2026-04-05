@@ -192,7 +192,7 @@ def load_kaetram_dataset(train_bytes: bytes, val_bytes: bytes, metadata_bytes: b
 @app.function(
     image=train_image,
     gpu="H100",  # 80GB VRAM — bf16 LoRA on 9B fits easily
-    timeout=6 * 3600,  # 6 hours (generous buffer for ~2-3h expected)
+    timeout=8 * 3600,  # 8 hours (R6 took ~6.5h at 1:50/step)
     volumes={
         "/model_cache": model_cache_vol,
         "/checkpoints": checkpoint_vol,
@@ -320,6 +320,84 @@ def train(train_data: bytes, val_data: bytes, metadata: bytes):
     print(f"\nDeploy serving endpoint:")
     print(f"  modal deploy finetune/serve_modal.py")
     return metrics
+
+
+# ---------------------------------------------------------------------------
+# Merge checkpoint adapter into deployable model
+# ---------------------------------------------------------------------------
+
+@app.function(
+    image=train_image,
+    gpu="H100",
+    timeout=1800,  # 30 min — merge is fast
+    volumes={
+        "/model_cache": model_cache_vol,
+        "/checkpoints": checkpoint_vol,
+    },
+)
+def merge_checkpoint(checkpoint_name: str):
+    """Load a training checkpoint and merge adapter into full model using Unsloth."""
+    import json
+    import os
+
+    checkpoint_dir = f"/checkpoints/{EXPERIMENT_NAME}/{checkpoint_name}"
+    output_dir = f"/checkpoints/{EXPERIMENT_NAME}"
+
+    if not os.path.exists(checkpoint_dir):
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_dir}")
+
+    print(f"Loading base model {MODEL_ID} with Unsloth...")
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name=MODEL_ID,
+        max_seq_length=MAX_SEQ_LEN,
+        load_in_4bit=False,
+        load_in_16bit=True,
+    )
+
+    # Apply LoRA config (needed so Unsloth knows the adapter structure)
+    model = FastLanguageModel.get_peft_model(
+        model,
+        r=LORA_R,
+        target_modules=LORA_TARGETS,
+        lora_alpha=LORA_ALPHA,
+        lora_dropout=0,
+        bias="none",
+        use_gradient_checkpointing="unsloth",
+        random_state=42,
+    )
+
+    # Load checkpoint weights into the adapter
+    print(f"Loading adapter weights from {checkpoint_dir}...")
+    from peft import set_peft_model_state_dict
+    import safetensors.torch
+    adapter_weights = {}
+    for f in os.listdir(checkpoint_dir):
+        if f.endswith(".safetensors"):
+            w = safetensors.torch.load_file(os.path.join(checkpoint_dir, f))
+            adapter_weights.update(w)
+    if adapter_weights:
+        set_peft_model_state_dict(model, adapter_weights)
+        print(f"  Loaded {len(adapter_weights)} weight tensors")
+    else:
+        raise FileNotFoundError(f"No .safetensors files in {checkpoint_dir}")
+
+    # Save adapter copy
+    adapter_dir = f"{output_dir}/adapter"
+    print(f"Saving adapter to {adapter_dir}...")
+    model.save_pretrained(adapter_dir)
+    tokenizer.save_pretrained(adapter_dir)
+
+    # Merge using Unsloth (handles VLM architecture correctly)
+    merged_dir = f"{output_dir}/merged"
+    print(f"Merging with Unsloth and saving to {merged_dir}...")
+    model.save_pretrained_merged(merged_dir, tokenizer, save_method="merged_16bit")
+
+    checkpoint_vol.commit()
+
+    print(f"\nDone! Merged model saved:")
+    print(f"  Adapter:  {adapter_dir}")
+    print(f"  Merged:   {merged_dir}")
+    print(f"\nDeploy: modal deploy finetune/serve_modal.py")
 
 
 # ---------------------------------------------------------------------------
