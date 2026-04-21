@@ -24,7 +24,7 @@ DATASET_DIR = os.path.join(PROJECT_DIR, "dataset")
 # Multi-agent constants (must match orchestrate.py)
 BASE_SERVER_PORT = 9001
 PORT_STRIDE = 10
-MAX_AGENTS = 8
+MAX_AGENTS = 3
 WS_PORT = 8081
 SCREENSHOT_POLL_INTERVAL = 0.25  # seconds between mtime checks (4 FPS for live stream feel)
 SCREENSHOT_MAX_AGE = 60  # seconds — screenshots older than this are considered stale
