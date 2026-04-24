@@ -36,6 +36,7 @@ NPCS: dict[str, tuple[int, int]] = {
     "beachnpc":           (121, 231),   # Bubba — crabs achievement
     "sponge":             (52, 310),    # Sea Activities
     "picklenpc":          (691, 838),   # Sea Activities — Sea Cucumber
+    "picklemob":          (858, 815),   # Sea Activities — picklemob boss (reachability tests use this)
     "rick":               (1088, 833),  # Rick's Roll
     "rickgf":             (455, 924),   # Lena — delivery
 
@@ -82,6 +83,7 @@ NPC_DISPLAY_NAMES: dict[str, str] = {
     "herbalist": "Herby Mc. Herb",
     "sponge": "Sponge",
     "picklenpc": "Sea Cucumber",
+    "picklemob": "Sea Cucumber",
     "bluebikinigirlnpc": "Pretzel",
     "ancientmanumentnpc": "Ancient Monument",
     "beachnpc": "Bubba",

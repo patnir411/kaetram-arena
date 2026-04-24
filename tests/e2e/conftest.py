@@ -96,3 +96,11 @@ def unique_username(request) -> str:
     UUID4 hex[:6] keeps well under that."""
     slug = uuid.uuid4().hex[:6]
     return f"E2EBot_{slug}"
+
+
+@pytest.fixture
+def test_username(request) -> str:
+    """Alias used by tests ported from KaetramGPU. Same contract as
+    `unique_username` — unique per test, A-Za-z0-9_, <= 16 chars."""
+    slug = uuid.uuid4().hex[:6]
+    return f"TestBot_{slug}"
