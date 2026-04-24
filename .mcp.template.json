@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "linear": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.linear.app/mcp"]
+    },
+    "kaetram": {
+      "command": "__VENV_PYTHON__",
+      "args": ["__PROJECT_DIR__/mcp_game_server.py"],
+      "env": {
+        "KAETRAM_PORT": "__SERVER_PORT__",
+        "KAETRAM_USERNAME": "__USERNAME__",
+        "KAETRAM_EXTRACTOR": "__PROJECT_DIR__/state_extractor.js",
+        "KAETRAM_SCREENSHOT_DIR": "__SCREENSHOT_DIR__"
+      }
+    }
+  }
+}
