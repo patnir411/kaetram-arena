@@ -116,13 +116,30 @@ research/
 
 ### Harness Flags
 
-**Production-ready:** `--claude`, `--codex`, `--gemini` are fully integrated end-to-end (MCP, dashboard, health checks, log parsing, data isolation). Kimi and Qwen Code are WIP.
+**Production-ready:** `--claude`, `--codex`, `--gemini`, `--opencode` are fully integrated end-to-end (MCP, dashboard, health checks, log parsing, data isolation). Kimi and Qwen Code are WIP.
 
 - `--claude` → Sonnet (Claude Code) — primary data collection harness
 - `--codex` → GPT-5.4 (OpenAI Codex) — uses stop hook for turn continuation
 - `--gemini` → Gemini 2.5 Flash (Google Gemini CLI) — uses maxSessionTurns in settings.json
+- `--opencode` → local Ollama via OpenCode CLI — reads `opencode.json` (resolved from `opencode.template.json`) + `AGENTS.md` from sandbox CWD. Model defaults to `ollama/kaetram`; override with `OPENCODE_MODEL=provider/model`. Provider registered in `opencode.template.json` points at local Ollama on :11434 — run `ollama serve` first.
 - `--kimi` → Kimi K2 — WIP
 - `--qwen-code` → Qwen3-Coder — WIP
+
+### Personality archetypes (data-factory policies)
+
+The three personality prompts map to concrete gameplay-capability axes, not
+vibes. Each archetype produces a distinct tool-use signature so
+outcome-filtered trajectories cover complementary capabilities for SFT/KTO.
+
+| Flag | File | Axis | Signature tools |
+|---|---|---|---|
+| `--completionist` | `prompts/personalities/completionist.md` | progression | `interact_npc`, `query_quest`, `gather`, `craft_item` |
+| `--grinder` | `prompts/personalities/grinder.md` | combat / leveling | `attack`, `loot`, `equip_item`, `eat_food` |
+| `--explorer_tinkerer` (or `--explorer`) | `prompts/personalities/explorer_tinkerer.md` | world + systems coverage | `navigate`, `interact_npc` (non-quest too), `buy_item`, `craft_item` (novel), `warp` |
+
+Legacy vibe flags are kept as aliases so existing `scripts/restart-agent.sh`
+invocations keep working: `--aggressive → grinder`, `--methodical →
+completionist`, `--curious → explorer_tinkerer`, `--efficient → completionist`.
 
 ### Quick start (multi-agent)
 
@@ -130,16 +147,16 @@ research/
 # Default: 3 Claude agents, 24h
 ./scripts/restart-agent.sh 3 0
 
-# 3 Codex agents with personalities
-./scripts/restart-agent.sh --codex 3 --aggressive 1 --methodical 1 --curious 1 --hours 3
+# 3 Codex agents with mixed archetypes
+./scripts/restart-agent.sh --codex 3 --grinder 1 --completionist 1 --explorer 1 --hours 3
 
 # 3 Gemini agents
-./scripts/restart-agent.sh --gemini 3 --aggressive 1 --methodical 1 --curious 1 --hours 1
+./scripts/restart-agent.sh --gemini 3 --grinder 1 --completionist 1 --explorer 1 --hours 1
 
 # Mixed harnesses
 ./scripts/restart-agent.sh --claude 1 --codex 1 --gemini 1 --hours 0
 
-# With personalities
+# With legacy vibe flags (aliased — still works)
 ./scripts/restart-agent.sh --aggressive 2 --curious 2 --hours 24
 
 # Resume without reset

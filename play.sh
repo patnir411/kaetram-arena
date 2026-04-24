@@ -14,16 +14,27 @@ CODEX_MODEL="gpt-5.4"
 GEMINI_MODEL="gemini-3-flash-preview"
 KIMI_MODEL="kimi-k2"
 QWEN_CODE_MODEL="qwen3-coder"
+OPENCODE_MODEL="${OPENCODE_MODEL:-ollama/kaetram}"
 for arg in "$@"; do
   case "$arg" in
-    --aggressive)  PERSONALITY="aggressive";;
-    --methodical)  PERSONALITY="methodical";;
-    --curious)     PERSONALITY="curious";;
-    --efficient)   PERSONALITY="efficient";;
+    # Capability-focused archetypes (canonical)
+    --completionist)        PERSONALITY="completionist";;
+    --grinder)              PERSONALITY="grinder";;
+    --explorer_tinkerer)    PERSONALITY="explorer_tinkerer";;
+    --explorer)             PERSONALITY="explorer_tinkerer";;  # short form
+    # Legacy vibe flags — aliased for backward compatibility with scripts/*.sh
+    # aggressive → grinder (combat-first),
+    # curious → explorer_tinkerer (explore-everything),
+    # methodical → completionist (progression-over-advance).
+    --aggressive)  PERSONALITY="grinder";;
+    --methodical)  PERSONALITY="completionist";;
+    --curious)     PERSONALITY="explorer_tinkerer";;
+    --efficient)   PERSONALITY="completionist";;  # efficient was an unused alias
     --codex)       HARNESS="codex";;
     --gemini)      HARNESS="gemini";;
     --kimi)        HARNESS="kimi";;
     --qwen-code)   HARNESS="qwen-code";;
+    --opencode)    HARNESS="opencode";;
   esac
 done
 LOG_DIR="$PROJECT_DIR/logs"
@@ -37,6 +48,7 @@ case "$HARNESS" in
   gemini)   BOT_USERNAME="GeminiBot";;
   kimi)     BOT_USERNAME="KimiBot";;
   qwen-code) BOT_USERNAME="QwenBot";;
+  opencode) BOT_USERNAME="OpenCodeBot";;
   *)        BOT_USERNAME="ClaudeBot";;
 esac
 
@@ -69,6 +81,13 @@ case "$HARNESS" in
       exit 1
     fi
     echo "Using Qwen Code CLI (model: $QWEN_CODE_MODEL)"
+    ;;
+  opencode)
+    if ! command -v opencode &>/dev/null; then
+      echo "ERROR: opencode CLI not found. Install with: npm install -g opencode"
+      exit 1
+    fi
+    echo "Using OpenCode CLI (model: $OPENCODE_MODEL)"
     ;;
   *)
     echo "Using Claude Code CLI (model: $CLAUDE_MODEL)"
@@ -268,7 +287,7 @@ GEMINIJSON
       sed -e "s|__VENV_PYTHON__|${PROJECT_DIR}/.venv/bin/python3|g" \
           -e "s|__PROJECT_DIR__|${PROJECT_DIR}|g" \
           -e "s|__SCREENSHOT_DIR__|${SANDBOX}/state|g" \
-          "$PROJECT_DIR/.mcp.json" > "$SANDBOX/.mcp.json"
+          "$PROJECT_DIR/.mcp.template.json" > "$SANDBOX/.mcp.json"
 
       # Increased timeout for thinking: ~60s per turn
       TIMEOUT_SECS=$((MAX_TURNS * 60))
@@ -286,13 +305,43 @@ GEMINIJSON
       sed -e "s|__VENV_PYTHON__|${PROJECT_DIR}/.venv/bin/python3|g" \
           -e "s|__PROJECT_DIR__|${PROJECT_DIR}|g" \
           -e "s|__SCREENSHOT_DIR__|${SANDBOX}/state|g" \
-          "$PROJECT_DIR/.mcp.json" > "$SANDBOX/.mcp.json"
+          "$PROJECT_DIR/.mcp.template.json" > "$SANDBOX/.mcp.json"
 
       (cd "$SANDBOX" && qwen -p "$PROMPT" \
         --model "$QWEN_CODE_MODEL" \
         --yolo \
         --output-format stream-json \
         --append-system-prompt "$SYSTEM") \
+        2>&1 | tee "$LOG_FILE" || true
+      ;;
+
+    opencode)
+      # OpenCode: resolve opencode.template.json into the sandbox (its CWD-based
+      # config lookup) so opencode picks up the kaetram MCP server with the
+      # right venv + project paths. System prompt goes in AGENTS.md (opencode's
+      # equivalent of claude's CLAUDE.md / codex's AGENTS.md). KAETRAM_* env
+      # vars inherit via the child shell — we export inline rather than
+      # hardcoding in the template, same pattern the Modal Qwen provider uses.
+      sed -e "s|__VENV_PYTHON__|${PROJECT_DIR}/.venv/bin/python3|g" \
+          -e "s|__PROJECT_DIR__|${PROJECT_DIR}|g" \
+          "$PROJECT_DIR/opencode.template.json" > "$SANDBOX/opencode.json"
+      echo "$SYSTEM" > "$SANDBOX/AGENTS.md"
+
+      mkdir -p "$SANDBOX/state"
+      # opencode run is one-shot per invocation; the outer `while true` loop
+      # drives session cadence like every other harness. Turn budget shaped
+      # like qwen-code / kimi (local Ollama inference is comparable speed).
+      TIMEOUT_SECS=$((MAX_TURNS * 45))
+      (cd "$SANDBOX" && \
+        KAETRAM_USERNAME="$BOT_USERNAME" \
+        KAETRAM_EXTRACTOR="$PROJECT_DIR/state_extractor.js" \
+        KAETRAM_SCREENSHOT_DIR="$SANDBOX/state" \
+        timeout "${TIMEOUT_SECS}s" opencode run \
+          --model "$OPENCODE_MODEL" \
+          --format json \
+          --dangerously-skip-permissions \
+          --dir "$SANDBOX" \
+          "$PROMPT") \
         2>&1 | tee "$LOG_FILE" || true
       ;;
 
@@ -303,7 +352,7 @@ GEMINIJSON
           -e "s|__SCREENSHOT_DIR__|${SANDBOX}/state|g" \
           -e "s|__SERVER_PORT__||g" \
           -e "s|__USERNAME__|${BOT_USERNAME}|g" \
-          "$PROJECT_DIR/.mcp.json" > "$SANDBOX/.mcp.json"
+          "$PROJECT_DIR/.mcp.template.json" > "$SANDBOX/.mcp.json"
       (cd "$SANDBOX" && claude -p "$PROMPT" \
         --model "$CLAUDE_MODEL" \
         --max-turns "$MAX_TURNS" \

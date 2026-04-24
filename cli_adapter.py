@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).parent
-MCP_JSON = PROJECT_DIR / ".mcp.json"
+MCP_JSON = PROJECT_DIR / ".mcp.template.json"
 
 # Disallowed tools for the game agent (prevent filesystem exploration;
 # agent should only use mcp__kaetram__* tools).
@@ -608,11 +608,104 @@ class KimiAdapter(CLIAdapter):
         return None
 
 
+class OpenCodeAdapter(CLIAdapter):
+    """Adapter for OpenCode CLI (opencode run).
+
+    OpenCode ships its own config schema (opencode.json) and reads system
+    prompts from AGENTS.md in the run directory — same convention as Codex.
+    Output format is --format json (not stream-json); each line is a JSON
+    event with `type` and nested `part` / `message.content` shapes.
+
+    Model must be given in provider/model form (e.g. ollama/kaetram). The
+    default Ollama provider is defined in opencode.template.json; override
+    via OPENCODE_MODEL env var.
+    """
+
+    def __init__(self, model: str = "ollama/kaetram"):
+        super().__init__(model)
+
+    @property
+    def name(self) -> str:
+        return "opencode"
+
+    def setup_sandbox(self, sandbox_dir: Path, system_prompt: str | None = None,
+                      port: str = "", username: str = "ClaudeBot") -> None:
+        # Resolve opencode.template.json into the sandbox — opencode reads
+        # opencode.json from CWD (or $XDG_CONFIG_HOME/opencode/). The sandbox
+        # CWD wins, so writing here keeps the kaetram MCP server scoped.
+        template_path = PROJECT_DIR / "opencode.template.json"
+        if not template_path.exists():
+            raise RuntimeError(
+                "opencode.template.json missing — add it at the project root "
+                "with provider.ollama + mcp.kaetram entries"
+            )
+        text = template_path.read_text()
+        text = text.replace("__VENV_PYTHON__", VENV_PYTHON)
+        text = text.replace("__PROJECT_DIR__", str(PROJECT_DIR))
+        (sandbox_dir / "opencode.json").write_text(text)
+        # System prompt → AGENTS.md (opencode convention)
+        if system_prompt:
+            (sandbox_dir / "AGENTS.md").write_text(system_prompt)
+
+    def build_command(
+        self,
+        user_prompt: str,
+        system_prompt: str,
+        max_turns: int,
+        max_budget_usd: float | None = None,
+        auth_mode: str = "subscription",
+    ) -> list[str]:
+        # opencode run is one-shot per invocation — the outer play.sh loop
+        # drives session cadence. Turn budget caps the per-session wall
+        # clock, not the number of agent turns (opencode has no --max-turns
+        # flag; tool budget is governed by the model's own tool-call loop).
+        timeout_seconds = max(max_turns * 45, 900)
+        return [
+            "timeout",
+            str(timeout_seconds),
+            "opencode",
+            "run",
+            "--model",
+            self.model,
+            "--format",
+            "json",
+            "--dangerously-skip-permissions",
+            user_prompt,
+        ]
+
+    def get_env(self) -> dict[str, str]:
+        # opencode reads auth per-provider from the opencode.json (Ollama
+        # needs no auth; Modal/OpenAI pick up their keys from env automatically).
+        return {}
+
+    def _extract_state_text_from_line(self, line: str) -> str | None:
+        """opencode --format json: each line is a JSON event. Tool results
+        land in `part.state.output` as a JSON string containing the raw
+        MCP tool response. We look for observe output with the game state
+        signature."""
+        try:
+            obj = json.loads(line)
+            part = obj.get("part", {})
+            if obj.get("type") == "tool_use":
+                state = part.get("state", {})
+                output = state.get("output")
+                if isinstance(output, str) and "player_position" in output and "nearby_entities" in output:
+                    return output
+            # Some opencode builds emit assistant-authored state echoes in text events
+            for block in obj.get("message", {}).get("content", []):
+                text = block.get("text", "") if isinstance(block, dict) else ""
+                if "player_position" in text and "nearby_entities" in text:
+                    return text
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        return None
+
+
 def get_adapter(harness: str = "claude", model: str | None = None) -> CLIAdapter:
     """Factory function to create the appropriate CLI adapter.
 
     Args:
-        harness: one of 'claude', 'codex', 'gemini', 'qwen-code', 'kimi'
+        harness: one of 'claude', 'codex', 'gemini', 'qwen-code', 'kimi', 'opencode'
         model: optional model override
     """
     if harness == "codex":
@@ -623,6 +716,8 @@ def get_adapter(harness: str = "claude", model: str | None = None) -> CLIAdapter
         return QwenCodeAdapter(model=model or "qwen3-coder")
     elif harness == "kimi":
         return KimiAdapter(model=model or "kimi-k2")
+    elif harness == "opencode":
+        return OpenCodeAdapter(model=model or "ollama/kaetram")
     else:
         return ClaudeAdapter(model=model or "sonnet")
 

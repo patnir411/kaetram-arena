@@ -15,7 +15,7 @@ An autonomous AI agent that plays [Kaetram](https://github.com/Kaetram/Kaetram-O
 
 ## Current status (April 14, 2026)
 
-- **Multi-harness support.** Three production-ready harnesses: `--claude` (primary), `--codex` (GPT-5.4), `--gemini` (Gemini 2.5 Flash). All share the same MCP server and system prompt.
+- **Multi-harness support.** Four production-ready harnesses: `--claude` (primary), `--codex` (GPT-5.4), `--gemini` (Gemini 2.5 Flash), `--opencode` (local Ollama via OpenCode CLI). All share the same MCP server and system prompt.
 - **Dataset:** 6,419 train / 646 val Qwen3.5 9B SFT records from ~640 Claude sessions. Codex/Gemini logs collected but excluded from training.
 - **Training:** `r8` SFT complete on Modal H100. Key fix: correct loss masking via `train_on_responses_only` (r5-r7 had silently broken masking). See [`research/experiments/training-runs.md`](research/experiments/training-runs.md).
 - **Eval harness** set up — `dataset/eval/` with base vs r8-SFT system prompts, `play_qwen.py` ready for comparison runs. No eval runs executed yet.
@@ -86,7 +86,7 @@ Run N agents in parallel, each with its own Kaetram server instance. The preferr
 
 Each agent gets its own server port (9001, 9011, 9021, 9031), username (`ClaudeBot0`–`ClaudeBot3`), log directory, and personality. All agents get `prompts/game_knowledge.md` (quest guides, NPC coords, mob stats). Resource budget for 3 agents (active collection config): ~2.5 GB RAM, ~27% CPU, ~4.5 GB disk/24h.
 
-> **Harness flags:** `--claude` (primary, training data source), `--codex` (GPT-5.4, uses stop hook), `--gemini` (Gemini 2.5 Flash) are production-ready. `--kimi` and `--qwen-code` are WIP. Codex/Gemini logs are collected but excluded from Qwen SFT training until validated. See [`CLAUDE.md`](CLAUDE.md) for details.
+> **Harness flags:** `--claude` (primary, training data source), `--codex` (GPT-5.4, uses stop hook), `--gemini` (Gemini 2.5 Flash), `--opencode` (local Ollama via OpenCode CLI, uses `opencode.template.json` + `AGENTS.md` instead of `.mcp.json` — model defaults to `ollama/kaetram`, override with `OPENCODE_MODEL=provider/model`) are production-ready. `--kimi` and `--qwen-code` are WIP. Codex/Gemini/OpenCode logs are collected but excluded from Qwen SFT training until validated. See [`CLAUDE.md`](CLAUDE.md) for details.
 
 ### End-to-end data pipeline
 
