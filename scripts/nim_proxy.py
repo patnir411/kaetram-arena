@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""nim_proxy.py — SSE-rewriting proxy between opencode and NVIDIA NIM.
+
+Two transformations on the way through:
+
+1. Request body: flatten any nested ``extraBody`` (or ``extra_body``) into the
+   top-level body. Works around opencode bug #5674 where the openai-compatible
+   provider serializes ``extraBody`` as a literal nested key instead of inlining
+   its contents — so ``chat_template_kwargs.enable_thinking`` actually reaches NIM.
+
+2. SSE response: NIM streams Qwen thinking models' chain-of-thought via
+   ``delta.reasoning_content`` (and a ``delta.reasoning`` mirror), NOT
+   ``delta.content``. opencode's adapter only reads ``delta.content``, so
+   reasoning tokens are silently dropped. We rewrite each SSE chunk so
+   ``reasoning_content`` is copied into ``content`` when ``content`` is empty —
+   the model's final-answer ``content`` deltas (which arrive after thinking
+   ends) pass through untouched.
+
+Listens on 127.0.0.1:8889 by default. Point opencode's ``baseURL`` at
+``http://127.0.0.1:8889/v1`` instead of NIM directly.
+
+Run:
+    ./scripts/start-nim-proxy.sh        # daemonize, log to /tmp/nim_proxy.log
+    python3 scripts/nim_proxy.py        # foreground for debugging
+"""
+
+import json
+import logging
+import os
+import sys
+
+from aiohttp import web, ClientSession, ClientTimeout
+
+NIM_URL = os.environ.get("NIM_PROXY_UPSTREAM", "https://integrate.api.nvidia.com")
+HOST = os.environ.get("NIM_PROXY_HOST", "127.0.0.1")
+PORT = int(os.environ.get("NIM_PROXY_PORT", "8889"))
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+log = logging.getLogger("nim_proxy")
+
+
+def _flatten_extra_body(body: dict) -> dict:
+    """Pull `extraBody` keys into the top of the request body."""
+    for key in ("extraBody", "extra_body"):
+        extra = body.pop(key, None)
+        if isinstance(extra, dict):
+            for k, v in extra.items():
+                body[k] = v
+    return body
+
+
+def _rewrite_sse_line(line: bytes) -> bytes:
+    """Map ``delta.reasoning_content`` → ``delta.content`` in one SSE line.
+
+    Only rewrites when ``content`` would otherwise be empty. The final-answer
+    deltas (which carry real ``content`` and no ``reasoning_content``) are
+    untouched, so the consumer sees a single linear text stream of
+    "thinking → final answer".
+    """
+    if not line.startswith(b"data: "):
+        return line
+    payload = line[6:].strip()
+    if not payload or payload == b"[DONE]":
+        return line
+    try:
+        obj = json.loads(payload)
+    except (ValueError, TypeError):
+        return line
+    rewritten = False
+    for c in obj.get("choices") or []:
+        delta = c.get("delta") or {}
+        reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+        if reasoning and not delta.get("content"):
+            delta["content"] = reasoning
+            rewritten = True
+    if not rewritten:
+        return line
+    return b"data: " + json.dumps(obj, separators=(",", ":")).encode() + b"\n"
+
+
+async def proxy(request: web.Request) -> web.StreamResponse:
+    """Catch-all forwarder."""
+    path = request.match_info.get("path", "")
+    target = f"{NIM_URL.rstrip('/')}/{path}"
+    if request.query_string:
+        target += f"?{request.query_string}"
+
+    fwd_headers = {
+        k: v for k, v in request.headers.items()
+        if k.lower() in ("authorization", "content-type", "accept")
+    }
+    body_bytes = await request.read()
+
+    # Mutate chat-completions bodies to flatten extraBody.
+    if path.endswith("chat/completions") and body_bytes:
+        try:
+            body = json.loads(body_bytes)
+            body = _flatten_extra_body(body)
+            body_bytes = json.dumps(body, separators=(",", ":")).encode()
+            fwd_headers["Content-Length"] = str(len(body_bytes))
+        except (ValueError, TypeError):
+            pass
+
+    timeout = ClientTimeout(total=600, sock_connect=15, sock_read=600)
+    async with ClientSession(timeout=timeout) as session:
+        async with session.request(
+            request.method, target, headers=fwd_headers, data=body_bytes,
+            allow_redirects=False,
+        ) as upstream:
+            content_type = upstream.headers.get("Content-Type", "")
+            is_sse = "text/event-stream" in content_type.lower()
+
+            resp_headers = {
+                k: v for k, v in upstream.headers.items()
+                if k.lower() not in (
+                    "content-encoding", "content-length", "transfer-encoding",
+                )
+            }
+            resp = web.StreamResponse(status=upstream.status, headers=resp_headers)
+            await resp.prepare(request)
+
+            if is_sse:
+                buf = b""
+                async for chunk in upstream.content.iter_any():
+                    buf += chunk
+                    while b"\n" in buf:
+                        line, _, buf = buf.partition(b"\n")
+                        out = _rewrite_sse_line(line)
+                        await resp.write(out + b"\n")
+                if buf:
+                    await resp.write(_rewrite_sse_line(buf))
+            else:
+                data = await upstream.read()
+                # Non-streaming chat-completions: copy reasoning_content into
+                # content if content is empty, so non-streaming consumers also
+                # see the thinking.
+                if path.endswith("chat/completions"):
+                    try:
+                        obj = json.loads(data)
+                        for c in obj.get("choices", []):
+                            msg = c.get("message", {})
+                            rc = msg.get("reasoning_content") or msg.get("reasoning")
+                            if rc and not msg.get("content"):
+                                msg["content"] = rc
+                        data = json.dumps(obj, separators=(",", ":")).encode()
+                    except (ValueError, TypeError):
+                        pass
+                await resp.write(data)
+
+            await resp.write_eof()
+            return resp
+
+
+def main():
+    app = web.Application(client_max_size=64 * 1024 * 1024)
+    app.router.add_route("*", "/{path:.+}", proxy)
+    log.info("NIM proxy listening on http://%s:%d → %s", HOST, PORT, NIM_URL)
+    try:
+        web.run_app(app, host=HOST, port=PORT, access_log=None,
+                    print=lambda *a, **kw: None)
+    except KeyboardInterrupt:
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

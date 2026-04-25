@@ -85,11 +85,11 @@ Personality system being built and broken mid-run. Prompt changes mid-collection
 
 | | Value |
 |---|---|
-| Active agents | 3 (AGGRESSIVE, METHODICAL, CURIOUS) |
-| Supported harnesses | Claude (primary), Codex, Gemini (Kimi/Qwen WIP) |
+| Active agents (r10 dataset) | 3 (AGGRESSIVE, METHODICAL, CURIOUS — vibe personalities). New collection runs use GRINDER / COMPLETIONIST / EXPLORER capability archetypes — see `prompts/personalities/*.md`. |
+| Supported harnesses | Claude (primary, training-data source); Codex, Gemini, OpenCode (experimental smoke tests, excluded from training) |
 | Total session logs on VM | ~640 (220 / 213 / 207 for agents 0/1/2) |
 | SFT training records | 6,419 train / 646 val (`dataset/qwen_sft/`, Claude-only, 4 filtered) |
-| Architecture | Custom FastMCP server (`mcp_game_server.py`), 17 typed tools (curated model-visible surface) |
+| Architecture | Custom FastMCP package (`mcp_server/`, entry point `mcp_game_server.py`), 17 typed tools |
 | Latest SFT run | r8 (COMPLETE Apr 14) — loss masking fixed via `train_on_responses_only` |
 
 Dataset is growing. Rebuild with `scripts/collect_sft_data.sh` or manually:

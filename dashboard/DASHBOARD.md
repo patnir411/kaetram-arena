@@ -6,20 +6,41 @@
 
 ```
 dashboard/
-├── server.py        # Entry point: ThreadedHTTPServer (:8080), WebSocketRelay (:8081), ScreenshotWatcher
-├── handler.py       # HTTP routing (do_GET → path dispatch), template rendering, screenshot/MJPEG serving
+├── server.py        # Entry point: ThreadedHTTPServer (:8080), WebSocketRelay (:8081, auto-restart), ScreenshotWatcher
+├── handler.py       # HTTP routing (do_GET / do_POST → path dispatch), template, /hls/, /static/, /ingest/ endpoints
 ├── api.py           # APIMixin — all /api/* endpoints (mixed into DashboardHandler)
-├── parsers.py       # Session log parsers — auto-detects Claude/Codex/Gemini JSONL formats
+├── parsers.py       # Session log parsers (Claude/Codex/Gemini/OpenCode); mtime-keyed LRU; tail_session_log incremental reader
 ├── game_state.py    # Game state extraction: MongoDB (authoritative) + game_state.json (live) + log fallback
 ├── db.py            # MongoDB queries: player_info, skills, equipment, inventory, quests, achievements
-├── constants.py     # Shared config: ports, paths, MAX_AGENTS, sanitize(), process checks
+├── constants.py     # Shared config: ports, paths, TTL constants, GZIP_MIN_BYTES, sanitize(), process checks
+├── static/          # Vendored static assets (e.g. hls.min.js)
 └── templates/
     └── index.html   # Single-page dashboard (all tabs, JS, CSS in one file)
 ```
 
-**Data flow:** Dashboard merges two sources per agent. `game_state.json` (written by each MCP server's `observe()` tool) provides live volatile state (position, HP, entities, combat). MongoDB provides persistent accumulated state (quests, skills, equipment, inventory). If `game_state.json` is stale (>2min), falls back to DB-only, then log parsing as last resort.
+**Two data planes per agent:**
 
-**Process model:** Python `http.server` with threaded request handling. No framework (no Flask/FastAPI). WebSocket relay runs in a separate thread for real-time screenshot push notifications. ScreenshotWatcher polls file mtimes at 4 FPS.
+1. **HLS livestream** — Each agent runs Xvfb + `ffmpeg x11grab` (managed by
+   `orchestrate.py`) writing segments to `/tmp/hls/agent_N/{stream.m3u8,
+   seg_*.ts}`. The dashboard serves these under `/hls/agent_N/*`. Decoupled
+   from `observe()` cadence — tiles keep streaming during 60 s+ thinking
+   turns. The frontend uses `hls.js` per card.
+
+2. **WebSocket state push (:8081)** — `mcp_server.state_heartbeat` POSTs
+   `window.__latestGameState` to `/ingest/state` (300 ms) and tails the
+   session log to `/ingest/activity` (1 s). The relay rebroadcasts both to
+   every connected browser as typed messages (`{type: state | activity |
+   screenshot | heartbeat}`). `ScreenshotWatcher` glob-discovers agents and
+   sends `notify_screenshot` on file-mtime change as a fallback channel.
+
+**Persistent merge:** `game_state.json` (live, written by `observe()`) +
+MongoDB (authoritative for quests/skills/equipment/inventory). If
+`game_state.json` is stale (>2min), falls back to DB-only, then log parsing
+as last resort.
+
+**Process model:** Python `http.server` with threaded request handling. No
+framework. The WebSocket relay auto-restarts on crash; `ScreenshotWatcher`
+recovers from callback exceptions. Both run in the relay thread.
 
 ## Tabs
 
@@ -50,7 +71,12 @@ dashboard/
 | `/api/eval/live` | GET | — | Live eval sandbox status |
 | `/api/raw` | GET | `?file=X` | Raw file viewer (game_state, session_log, claude_md, state_extractor, orchestrate) |
 | `/api/screenshots` | GET | — | Screenshot gallery (50 most recent) |
-| `/stream/agent_N` | GET | — | MJPEG stream of agent's live_screen.jpg |
+| `/hls/agent_N/stream.m3u8` | GET | — | Per-agent HLS playlist served from `/tmp/hls/agent_N/` (allowlisted segments only) |
+| `/hls/agent_N/seg_*.ts` | GET | — | HLS segment files |
+| `/static/*` | GET | — | Vendored frontend assets (e.g. `hls.min.js`) |
+| `/stream/agent_N` | GET | — | MJPEG fallback stream of agent's `live_screen.jpg` |
+| `/ingest/state` | POST | `?agent=N` (body: state JSON) | Loopback from `mcp_server.state_heartbeat`; rebroadcast as `{type:state}` |
+| `/ingest/activity` | POST | `?agent=N` (body: events list) | Loopback from `mcp_server.state_heartbeat`; rebroadcast as `{type:activity}` |
 | `/report.json` | GET | — | Auto-generated export report (regenerates if >5min stale) |
 
 ## Caching Strategy
@@ -59,11 +85,14 @@ Everything is cached to avoid redundant work on the 8-vCPU VM:
 
 | Cache | TTL | Why |
 |-------|-----|-----|
-| `_agents_cache` | 5s | Avoids re-parsing logs + port probing on every dashboard poll |
+| `_agents_cache` | 5s (`AGENTS_TTL`) | Avoids re-parsing logs + port probing on every dashboard poll. Now includes `hls_age` and `hls_available`. |
 | `_ss_cache` (ss -tlnp) | 5s | Avoids forking subprocess per request |
 | MongoDB player state | 3s | DB only saves on autosave/logout — more frequent queries waste cycles |
-| Session log parser | by file size | Re-parses only when log grows |
+| Session log parser | mtime-keyed LRU | Re-parses only when log mtime advances. `tail_session_log` is incremental — keeps a per-consumer offset for `/api/activity` and `/api/eval/live`. |
+| Dataset / SFT stats | mtime-keyed | Avoids walking `dataset/extracted/` on every poll |
+| Eval live | 1s fingerprint | `/api/eval/live` returns 304-equivalent payload when nothing changed |
 | HTML template | import-time | Loaded once, never re-read (restart dashboard after template edits) |
+| Gzip threshold | `GZIP_MIN_BYTES` (4KB) | Up from 1KB — small responses skip gzip overhead |
 
 ## Management Scripts
 
@@ -107,13 +136,18 @@ The orchestrator (`orchestrate.py`) auto-starts the dashboard if not running. Ma
 - **No framework.** This is raw `http.server` + `BaseHTTPRequestHandler`. No Flask, no FastAPI, no middleware. Adding one would be overengineering for a dev-only dashboard.
 - **All state is file-based or MongoDB.** No in-memory session state, no Redis. Dashboard is stateless — any instance can serve any request. This is intentional for simplicity.
 - **Sanitize before serving.** `constants.sanitize()` redacts API keys, tokens, and long secret-like strings. Always wrap user-visible text content through it. Log content, prompt content, raw files — all must be sanitized.
-- **MJPEG streams block the thread.** Each `/stream/agent_N` request holds a thread for the duration of the stream. The threaded server handles this fine, but don't add synchronous work to the stream loop.
+- **MJPEG streams block the thread.** Each `/stream/agent_N` request holds a thread for the duration of the stream. The threaded server handles this fine, but don't add synchronous work to the stream loop. (HLS is preferred for new code — MJPEG is a fallback.)
+- **HLS segment serving is allowlisted.** `send_hls_file` only serves `stream.m3u8` and `seg_*.ts` from `/tmp/hls/agent_N/`. Adding new file types requires editing the allowlist in `handler.py`.
+- **`/ingest/*` is loopback-only.** Endpoints accept POSTs from `127.0.0.1` only; the heartbeat best-effort POSTs and silently drops on failure (the dashboard is a soft dependency for the agent).
+- **No hardcoded `MAX_AGENTS`.** Agent discovery is glob-based — adding a 4th agent doesn't require dashboard config changes.
 
 ## Port Reference
 
 | Port | Service | Notes |
 |------|---------|-------|
-| 8080 | Dashboard HTTP | Main UI |
-| 8081 | Dashboard WebSocket | Screenshot push notifications to browser |
+| 8080 | Dashboard HTTP | Main UI + `/hls/agent_N/*` + `/ingest/{state,activity}` + `/static/*` |
+| 8081 | Dashboard WebSocket | State, activity, screenshot, heartbeat broadcast (typed messages) |
 | 9000 | Kaetram game client | Shared static files (all agents) |
-| 9001, 9011, 9021, 9031 | Game server WS | Per-agent (agent 0-3) |
+| 9001 + N×10 | Game server WS | Per-agent (agent 0-8); today 9001 / 9011 / 9021 |
+| 9061, 9071 | Eval game servers | r9-sft / base |
+| 9191 | E2E test-lane game server | db `kaetram_e2e` |

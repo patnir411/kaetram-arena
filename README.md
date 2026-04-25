@@ -13,30 +13,39 @@ An autonomous AI agent that plays [Kaetram](https://github.com/Kaetram/Kaetram-O
 - Supports multi-agent mode: run N agents in parallel for scaled data collection
 - 3 capability archetypes (grinder, completionist, explorer_tinkerer) as a data factory for diverse training trajectories
 
-## Current status (April 14, 2026)
+## Current status
 
-- **Multi-harness support.** Four production-ready harnesses: `--claude` (primary), `--codex` (GPT-5.4), `--gemini` (Gemini 2.5 Flash), `--opencode` (local Ollama via OpenCode CLI). All share the same MCP server and system prompt.
-- **Dataset:** 6,419 train / 646 val Qwen3.5 9B SFT records from ~640 Claude sessions. Codex/Gemini logs collected but excluded from training.
-- **Training:** `r8` SFT complete on Modal H100. Key fix: correct loss masking via `train_on_responses_only` (r5-r7 had silently broken masking). See [`research/experiments/training-runs.md`](research/experiments/training-runs.md).
-- **Eval harness** set up — `dataset/eval/` with base vs r8-SFT system prompts, `play_qwen.py` ready for comparison runs. No eval runs executed yet.
-- **KTO pipeline** validated end-to-end. Full `r8-KTO` run pending eval results.
-- **World model** — WIP concept in `world/`. Not prioritized.
+For the latest run state, training results, and what's in flight, see
+[`session_log.md`](session_log.md) and
+[`research/INDEX.md`](research/INDEX.md). The status summary that used to
+live here drifted in days; those two files are the source of truth.
+
+- **Harnesses.** `--claude` is the primary data-collection harness and the
+  only one whose turns flow into Qwen SFT training. `--codex`, `--gemini`,
+  and `--opencode` are experimental smoke-test harnesses that share the
+  orchestrator/dashboard/log paths but are excluded from training.
+- **Training.** Most recent SFT run + dataset stats: see
+  [`research/experiments/training-runs.md`](research/experiments/training-runs.md)
+  and [`dataset/DATA.md`](dataset/DATA.md).
+- **Eval harness.** `eval_harness.py` runs side-by-side episodes on
+  dedicated ports (9061 r9-sft, 9071 base). Live dashboard tab.
+- **World model.** WIP concept in [`world/`](world/). Not prioritized.
 
 ## Architecture
 
 ```
-play.sh ──────────► Claude/Codex/Gemini CLI ──► mcp_game_server.py (FastMCP) ──► Playwright ──► browser
-                          │                        │                              │
-                    reads system.md +         17 typed tools                 page.evaluate()
-                    game_knowledge.md         (observe, attack,              calls state_extractor.js
-                          │                   navigate, warp...)              helpers internally
-                          │                        │
-                          └──► logs/session_N_*.log (auto-logged JSONL)
+play.sh ──────► Claude/Codex/Gemini/OpenCode CLI ──► mcp_server/ (FastMCP) ──► Playwright ──► browser
+                       │                                  │                        │
+                 reads system.md +                17 typed tools             page.evaluate()
+                 game_knowledge.md                (observe, attack,           calls state_extractor.js
+                       │                          navigate, warp...)          helpers internally
+                       │                                  │
+                       └──► logs/session_N_*.log (auto-logged JSONL)
 
-                     dashboard (port 8080) ◄─── MongoDB (kaetram_devlopment, port 27017)
+                  dashboard (8080) ◄─── HLS (/tmp/hls/agent_N) + Mongo (kaetram_devlopment, 27017)
 ```
 
-**`mcp_game_server.py`** — custom FastMCP server exposing 17 typed game tools (curated model-visible surface). Manages Playwright browser internally. Agents call structured tools — never write JavaScript.
+**`mcp_server/`** — custom FastMCP package exposing 17 typed game tools (entry point `mcp_game_server.py`). Manages Playwright internally. Agents call structured tools — never write JavaScript. See [`mcp_server/README.md`](mcp_server/README.md).
 
 **`state_extractor.js`** — injected into browser via `context.add_init_script()`. Exposes `window.__extractGameState()`, `window.__attackMob()`, `window.__navigateTo()`, etc. Called by MCP server internally, never by the agent.
 
@@ -55,7 +64,7 @@ Run each in its own terminal:
 ./scripts/start-kaetram.sh
 
 # Terminal 2 — Dashboard (optional, live monitoring)
-python3 dashboard.py
+./scripts/start-dashboard.sh
 
 # Terminal 3 — Agent loop (must be a separate terminal — see gotchas)
 ./play.sh
@@ -86,7 +95,7 @@ Run N agents in parallel, each with its own Kaetram server instance. The preferr
 
 Each agent gets its own server port (9001, 9011, 9021, 9031), username (`ClaudeBot0`–`ClaudeBot3`), log directory, and personality. All agents get `prompts/game_knowledge.md` (quest guides, NPC coords, mob stats). Resource budget for 3 agents (active collection config): ~2.5 GB RAM, ~27% CPU, ~4.5 GB disk/24h.
 
-> **Harness flags:** `--claude` (primary, training data source), `--codex` (GPT-5.4, uses stop hook), `--gemini` (Gemini 2.5 Flash), `--opencode` (local Ollama via OpenCode CLI, uses `opencode.template.json` + `AGENTS.md` instead of `.mcp.json` — model defaults to `ollama/kaetram`, override with `OPENCODE_MODEL=provider/model`) are production-ready. `--kimi` and `--qwen-code` are WIP. Codex/Gemini/OpenCode logs are collected but excluded from Qwen SFT training until validated. See [`CLAUDE.md`](CLAUDE.md) for details.
+> **Harness flags:** `--claude` (primary, training data source) is fully integrated. `--codex` (GPT-5.4, Stop hook), `--gemini` (Gemini 2.5 Flash, `maxSessionTurns`), and `--opencode` (NVIDIA Qwen free API via OpenCode CLI; uses `opencode.template.json` + `AGENTS.md`; reasoning capture requires the NIM proxy at `scripts/start-nim-proxy.sh`) are experimental — their logs are collected but excluded from Qwen SFT training until validated. See [`CLAUDE.md`](CLAUDE.md) for details.
 
 ### End-to-end data pipeline
 
@@ -178,19 +187,18 @@ python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
 
 ```
 kaetram-agent/
-├── mcp_game_server.py       # Custom FastMCP server — 17 typed game tools via Playwright
-├── cli_adapter.py           # Harness abstraction (Claude, Codex, Gemini = production; Kimi, Qwen = WIP)
-├── play.sh                  # Claude Code agent loop (resolves .mcp.json template)
-├── play_qwen.py             # Qwen agent loop — lightweight 2-tool harness
+├── mcp_game_server.py       # 19-line stub — entry point that imports mcp_server.tools
+├── mcp_server/              # Modular MCP package (15+ files, 17 typed tools). See README.
+├── cli_adapter.py           # Harness abstraction (Claude = production; Codex, Gemini, OpenCode = experimental)
+├── play.sh                  # Claude Code agent loop (resolves .mcp.template.json)
+├── play_qwen.py             # Finetuned-model agent loop — same MCP server
 ├── play_qwen.sh             # Qwen agent session launcher
-├── play_opencode.sh         # OpenCode + Playwright MCP agent launcher
-├── orchestrate.py           # Multi-agent launcher + health monitor + MCP detection
+├── orchestrate.py           # Multi-agent launcher: game servers, Xvfb, ffmpeg, MCP, harness
 ├── extract_turns.py         # JSONL log → clean OODA turn extraction
 ├── convert_to_qwen.py       # Turns → Qwen3.5 9B SFT/GRPO format
-├── state_extractor.js       # Injected into browser — game helpers (called by MCP server internally)
-├── .mcp.json                # MCP config template (placeholders resolved at launch)
-├── dashboard.py             # Live web dashboard launcher (port 8080)
-├── opencode.json            # OpenCode provider config (Modal/Ollama endpoints)
+├── state_extractor.js       # Injected into browser — game helpers (called by MCP server)
+├── .mcp.template.json       # MCP config template (placeholders resolved per-sandbox at launch)
+├── opencode.template.json   # OpenCode provider config template (NVIDIA Qwen)
 ├── dashboard/               # Dashboard package (modular)
 │   ├── api.py               # API endpoints (DB-first, log-fallback game state)
 │   ├── constants.py         # Config (ports, paths, MongoDB connection)
@@ -259,9 +267,10 @@ kaetram-agent/
 | 9001 | Kaetram game server WS (single-agent default) |
 | 9001, 9011, 9021, 9031 | Game server WS (multi-agent, one per agent) |
 | 8080 | Dashboard |
-| 8081 | Dashboard WebSocket relay (realtime screenshot push) |
-| 8082 | Qwen dashboard (MJPEG stream) |
+| 8081 | Dashboard WebSocket relay (state, activity, heartbeat, screenshot) |
 | 27017 | MongoDB (`kaetram-mongo` Docker container, db `kaetram_devlopment`) |
+| 9061, 9071 | Eval game servers (r9-sft, base) |
+| 9191 | E2E test-lane game server (db `kaetram_e2e`) |
 
 ## Slash commands
 
@@ -286,22 +295,20 @@ kaetram-agent/
 
 ## Finetuned agent (Qwen3.5 9B)
 
-The finetuned Qwen3.5-9B model can play autonomously using a lightweight 2-tool harness instead of Claude Code:
+The finetuned Qwen3.5-9B model is served from a Modal SGLang endpoint
+(`finetune/serve_modal.py`) and exercised by the eval harness:
 
 ```bash
-# Direct mode — play_qwen.py drives browser via Playwright, hits Modal/Ollama endpoint
+# Direct mode — play_qwen.py drives the browser, calls the Modal endpoint, uses the same mcp_server
 ./play_qwen.sh
 
-# OpenCode mode — uses OpenCode + Playwright MCP with Ollama/Modal endpoint
-./play_opencode.sh
-
+# Side-by-side eval (r9-sft vs base) — see scripts/run-eval.sh
+./scripts/run-eval.sh
 ```
 
 **Dual-VM architecture:**
-- **GCP VM** (`34.28.111.6`): Hosts Kaetram game server (:9001 WS) + client (:9000 HTTP), runs data collection and the training pipeline.
-- **GPU VM** (`73.173.11.56:1738`, RTX 3060 12GB): Runs the finetuned model in Ollama + the `play_qwen.py` / OpenCode harness via Playwright. Connects back to the GCP VM for the game world.
-
-See `finetune/SETUP_3060.md` for local deployment instructions.
+- **GCP VM** (`34.28.111.6`): Kaetram game server + client, data collection, training pipeline.
+- **GPU VM** (`73.173.11.56:1738`, RTX 3060 12GB): Local-inference experiments + agent harness via Playwright. Connects back to the GCP VM for the game world. See `finetune/SETUP_3060.md`.
 
 ## World model (WIP)
 
