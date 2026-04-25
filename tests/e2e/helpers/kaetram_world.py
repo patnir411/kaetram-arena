@@ -1,27 +1,23 @@
-"""Canonical NPC + quest reference — source of truth for e2e tests.
+"""Quest + NPC reference constants — source-verified from Kaetram-Open's
+PLAYTHROUGH.md and packages/server/data/map/world.json (entities table).
 
-Coordinates derived from Kaetram-Open's packages/server/data/map/world.json
-`entities` table (tile index = y * width + x, width=1152 on current tree).
-Last extracted 2026-04-20 against Kaetram-Open commit 20cac4aac.
+Coordinates were extracted by scanning world.json's `entities` dict (tile
+index = y * width + x, width=1152 on the current tree) for each NPC key on
+2026-04-20. If NPCs move on a future map rebuild these need to be re-derived.
 
-Quests metadata derived from Kaetram-Open's PLAYTHROUGH.md. Only "verified
-working" quests are listed; broken or skipped quests omitted.
+Usage from a test:
 
-If Kaetram-Open rebuilds its map or renames NPCs, this file is the single
-place to update. tests/e2e/game/test_world_npcs.py verifies these constants
-are still live in world.json on every run.
+    from .kaetram_world import NPCS, adjacent_to
+    seed_player(user, position=adjacent_to('forestnpc'), ...)
 """
 
 from __future__ import annotations
 
-# -----------------------------------------------------------------------------
-# NPCs — canonical (key → (x, y))
-# -----------------------------------------------------------------------------
-
+# Canonical NPC key → (x, y) for NPCs that matter to the quest flow.
 NPCS: dict[str, tuple[int, int]] = {
     # Mudwich starting area
     "forestnpc":          (216, 114),   # Forester — Foresting quest
-    "boxingman":          (166, 114),   # Bike Lyson — run-ability achievement
+    "boxingman":          (166, 114),   # Bike Lyson — achievement (run ability)
     "blacksmith":         (199, 169),   # Anvil's Echoes
     "miner":              (323, 178),   # Miner's Quest + II
     "villagegirl2":       (136, 146),   # Scavenger — Village Girl
@@ -29,47 +25,48 @@ NPCS: dict[str, tuple[int, int]] = {
 
     # Programmer's house / tutorial remnant
     "royalguard2":        (282, 887),   # Royal Drama
-    "king":               (284, 884),   # Royal Pet
-    "coder":              (331, 890),   # Tutorial start
+    "king":               (284, 884),   # Royal Pet (delivers 3 books)
 
-    # Beach / Under-the-Sea
-    "beachnpc":           (121, 231),   # Bubba — crabs achievement
-    "sponge":             (52, 310),    # Sea Activities
-    "picklenpc":          (691, 838),   # Sea Activities — Sea Cucumber
-    "picklemob":          (858, 815),   # Sea Activities — picklemob boss (reachability tests use this)
+    # Under the Sea / beach / fishing zone
+    "beachnpc":           (121, 231),   # Bubba — achievement (crabs)
+    "sponge":             (52, 310),    # Sea Activities (start)
+    "picklenpc":          (691, 838),   # Sea Activities (Sea Cucumber)
     "rick":               (1088, 833),  # Rick's Roll
     "rickgf":             (455, 924),   # Lena — delivery
 
     # Castle / Aynor region
     "king2":              (1138, 717),  # Royal Drama finale
-    "ratnpc":             (1087, 698),  # Royal Drama sewer rat
+    "ratnpc":             (1087, 698),  # Royal Drama (sewer Rat)
 
-    # Royal Pet delivery targets
+    # Delivery targets for Royal Pet
     "redbikinigirlnpc":   (294, 489),   # Flaris
     "fisherman":          (324, 318),
     "shepherdboy":        (361, 348),
 
     # Skill quest givers
     "sorcerer":           (706, 101),   # Sorcery and Stuff
-    "scientist":          (763, 666),   # Scientist's Potion — Alchemy unlock
-    "iamverycoldnpc":     (702, 608),   # Babushka — Arts and Crafts — Crafting unlock
+    "scientist":          (763, 666),   # Scientist's Potion (Alchemy unlock)
+    "iamverycoldnpc":     (702, 608),   # Babushka — Arts and Crafts (Crafting unlock)
     "herbalist":          (333, 281),   # Herbalist's Desperation
     "oldlady":            (776, 106),   # Scavenger turn-in
     "oldlady2":           (919, 590),   # Clam Chowder turn-in
-    "doctor":             (698, 550),   # Clam Chowder intermediate
     "bluebikinigirlnpc":  (676, 359),   # Pretzel — Clam Chowder
-    "villagegirl":        (735, 101),   # Wife — Desert Quest turn-in
+    "doctor":            (698, 550),   # Doctor — Clam Chowder
+    "picklemob":         (858, 815),   # Sea Activities mob (use attack(), not interact_npc)
 
     # Endgame
     "ancientmanumentnpc": (415, 294),   # Ancient Lands
+    "villagegirl":        (735, 101),   # Wife (Desert Quest turn-in)
 }
 
+# Nice display names for assertions — matches the in-game "name" field so
+# interact_npc lookups and log readability align.
 NPC_DISPLAY_NAMES: dict[str, str] = {
     "forestnpc": "Forester",
     "blacksmith": "Blacksmith",
     "miner": "Miner",
     "villagegirl2": "Village Girl",
-    "villagegirl": "Village Girl",
+    "villagegirl": "Wife",  # same sprite, but internal name is Wife
     "oldlady": "Old Lady",
     "oldlady2": "Old Lady",
     "rick": "Rick",
@@ -83,7 +80,6 @@ NPC_DISPLAY_NAMES: dict[str, str] = {
     "herbalist": "Herby Mc. Herb",
     "sponge": "Sponge",
     "picklenpc": "Sea Cucumber",
-    "picklemob": "Sea Cucumber",
     "bluebikinigirlnpc": "Pretzel",
     "ancientmanumentnpc": "Ancient Monument",
     "beachnpc": "Bubba",
@@ -93,118 +89,125 @@ NPC_DISPLAY_NAMES: dict[str, str] = {
     "fisherman": "Fisherman",
     "shepherdboy": "Shepherd Boy",
     "ratnpc": "Rat",
-    "coder": "Programmer",
     "doctor": "Doctor",
+    "picklemob": "Sea Cucumber",
 }
 
 
 def adjacent_to(npc_key: str, *, dy: int = 1) -> tuple[int, int]:
-    """Coord 1 tile south of the given NPC (override dy for a different side).
-    Used to seed test players within interact_npc range."""
+    """Return a coord 1 tile south of the given NPC (change dy for another
+    side). Enough for interact_npc to auto-walk into range."""
     if npc_key not in NPCS:
         raise KeyError(f"unknown NPC key: {npc_key}")
     x, y = NPCS[npc_key]
     return (x, y + dy)
 
 
-# -----------------------------------------------------------------------------
-# Quests — verified working per PLAYTHROUGH.md
-# -----------------------------------------------------------------------------
-
+# Quest metadata — a subset of PLAYTHROUGH.md structured for tests. Each entry
+# says where to seed, what starting state the quest should be in, and what
+# outcome a successful test expects. Stage 0 = unstarted (dialogue will start
+# it); stage >0 = mid-quest (bringing required items should advance it).
 QUESTS: dict[str, dict] = {
     "foresting": {
-        "npc_key":  "forestnpc",
-        "display":  "Forester",
-        "reward":   "ironaxe",
-        "stage_count": 3,
-        # Stage 1 + 2 turn-ins each need 10 logs.
-        "turn_in_items": {1: [("logs", 10)], 2: [("logs", 10)]},
+        "npc": "forestnpc",
+        "display": "Forester",
+        "reward": "ironaxe",
+        "stages": 3,
+        "accept_requires": [],
+        "stage1_turn_in": [{"index": 0, "key": "logs", "count": 10}],
     },
     "desertquest": {
-        "npc_key":  "lavanpc",
-        "display":  "Dying Soldier",
-        "reward":   "completion only",
-        "stage_count": 3,
+        "npc": "lavanpc",
+        "display": "Dying Soldier",
+        "reward": "courier only",
+        "stages": 3,
     },
     "anvilsechoes": {
-        "npc_key":  "blacksmith",
-        "display":  "Blacksmith",
-        "reward":   "bronzeboots",
-        "stage_count": 2,
+        "npc": "blacksmith",
+        "display": "Blacksmith",
+        "reward": "bronzeboots",
+        "stages": 2,
     },
     "royaldrama": {
-        "npc_key":  "royalguard2",
-        "display":  "Royal Guard",
-        "reward":   "10000 gold",
-        "stage_count": 3,
-    },
-    "royalpet": {
-        "npc_key":  "king",
-        "display":  "King",
-        "reward":   "completion (catpet reward materializes post-PR1)",
-        "stage_count": 3,
-    },
-    "sorcery": {
-        "npc_key":  "sorcerer",
-        "display":  "Sorcerer",
-        "reward":   "staff (post-PR1)",
-        "stage_count": 2,
-        "turn_in_items": {1: [("bead", 3)]},
+        "npc": "royalguard2",
+        "display": "Royal Guard",
+        "reward": "10000 gold",
+        "stages": 3,
     },
     "ricksroll": {
-        "npc_key":  "rick",
-        "display":  "Rick",
-        "reward":   "1987 gold",
-        "stage_count": 4,
-    },
-    "seaactivities": {
-        "npc_key":  "sponge",
-        "display":  "Sponge",
-        "reward":   "10000 gold",
-        "stage_count": 7,
-    },
-    "scientistspotion": {
-        "npc_key":  "scientist",
-        "display":  "Scientist",
-        "reward":   "alchemy unlock",
-        "stage_count": 1,
-    },
-    "artsandcrafts": {
-        "npc_key":  "iamverycoldnpc",
-        "display":  "Babushka",
-        "reward":   "completion + crafting unlock (on start)",
-        "stage_count": 4,
-    },
-    "minersquest": {
-        "npc_key":  "miner",
-        "display":  "Miner",
-        "reward":   "completion",
-        "stage_count": 2,
-        "turn_in_items": {1: [("nisocore", 15)]},
-    },
-    "herbalistdesperation": {
-        "npc_key":  "herbalist",
-        "display":  "Herby Mc. Herb",
-        "reward":   "hotsauce + 1500 foraging xp",
-        "stage_count": 3,
+        "npc": "rick",
+        "display": "Rick",
+        "reward": "1987 gold",
+        "stages": 4,
     },
     "scavenger": {
-        "npc_key":  "villagegirl2",
-        "display":  "Village Girl",
-        "reward":   "7500 gold",
-        "stage_count": 3,
+        "npc": "villagegirl2",
+        "display": "Village Girl",
+        "reward": "7500 gold",
+        "stages": 3,
     },
-    "clamchowder": {
-        "npc_key":  "bluebikinigirlnpc",
-        "display":  "Pretzel",
-        "reward":   "7500 gold",
-        "stage_count": 7,
+    "seaactivities": {
+        "npc": "sponge",
+        "display": "Sponge",
+        "reward": "10000 gold",
+        "stages": 7,
+    },
+    "scientistspotion": {
+        "npc": "scientist",
+        "display": "Scientist",
+        "reward": "alchemy unlock",
+        "stages": 1,
+    },
+    "artsandcrafts": {
+        "npc": "iamverycoldnpc",
+        "display": "Babushka",
+        "reward": "crafting unlock (on start)",
+        "stages": 4,
+    },
+    "minersquest": {
+        "npc": "miner",
+        "display": "Miner",
+        "reward": "—",
+        "stages": 2,
+    },
+    "herbalistdesperation": {
+        "npc": "herbalist",
+        "display": "Herby Mc. Herb",
+        "reward": "hotsauce + 1500 foraging xp",
+        "stages": 3,
     },
     "ancientlands": {
-        "npc_key":  "ancientmanumentnpc",
-        "display":  "Ancient Monument",
-        "reward":   "snowpotion",
-        "stage_count": 2,
-        "turn_in_items": {1: [("icesword", 1)]},
+        "npc": "ancientmanumentnpc",
+        "display": "Ancient Monument",
+        "reward": "snowpotion",
+        "stages": 2,
+    },
+    "sorcery": {
+        "npc": "sorcerer",
+        "display": "Sorcerer",
+        "reward": "(broken — staff doesn't exist)",
+        "stages": 2,
+    },
+    "royalpet": {
+        "npc": "king",
+        "display": "King",
+        "reward": "(catpet broken, completion only)",
+        "stages": 3,
+        "requires_quest": "royaldrama",
+        "substage_npcs": ["shepherdboy", "redbikinigirlnpc", "fisherman"],
+    },
+    "minersquest2": {
+        "npc": "miner",
+        "display": "Miner",
+        "reward": "mining cave access",
+        "stages": 3,
+        "requires_quest": "minersquest",
+        "requires_mining_level": 30,
+    },
+    "clamchowder": {
+        "npc": "bluebikinigirlnpc",
+        "display": "Pretzel",
+        "reward": "7500 gold",
+        "stages": 7,
     },
 }
