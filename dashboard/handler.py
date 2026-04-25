@@ -124,7 +124,7 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
         completionist = int(payload.get("completionist", 1))
         explorer = int(payload.get("explorer_tinkerer", payload.get("explorer", 1)))
         harness = str(payload.get("harness", "claude"))
-        if harness not in {"claude", "codex", "gemini", "kimi", "qwen-code", "opencode"}:
+        if harness not in {"claude", "codex", "gemini", "opencode"}:
             harness = "claude"
 
         import subprocess

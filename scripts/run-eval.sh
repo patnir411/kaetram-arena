@@ -60,19 +60,22 @@ print('  Eval player data cleared')
 "
 
 # ── Ensure game servers ──
-# Port 9061 (r9-sft eval — distinct from agent_0-5 ports)
+# Port 9061 (r9-sft eval — distinct from agent_0-5 ports).
+# NODE_ENV=eval pins MONGODB_DATABASE=kaetram_eval (see Kaetram-Open/.env.eval)
+# so eval rows don't interleave with the data-collection ClaudeBot* rows in
+# kaetram_devlopment. dotenv-extended layers .env.{NODE_ENV} on top of .env.
 if ! ss -tlnp 2>/dev/null | grep -q ":9061 "; then
-  echo "Starting game server on port 9061 (r9-sft eval)..."
+  echo "Starting game server on port 9061 (r9-sft eval, db=kaetram_eval)..."
   (source "$HOME/.nvm/nvm.sh" && nvm use 20 --silent && cd ~/projects/Kaetram-Open/packages/server && \
-   ACCEPT_LICENSE=true SKIP_DATABASE=false exec node --enable-source-maps dist/main.js --port 9061) &
+   NODE_ENV=eval ACCEPT_LICENSE=true SKIP_DATABASE=false exec node --enable-source-maps dist/main.js --port 9061) &
   for i in $(seq 1 30); do ss -tlnp 2>/dev/null | grep -q ":9061 " && break; sleep 1; done
 fi
 
-# Port 9071 (base eval — distinct from agent_0-5 ports)
+# Port 9071 (base eval — distinct from agent_0-5 ports). Same NODE_ENV=eval lane.
 if ! ss -tlnp 2>/dev/null | grep -q ":9071 "; then
-  echo "Starting game server on port 9071 (base eval)..."
+  echo "Starting game server on port 9071 (base eval, db=kaetram_eval)..."
   (source "$HOME/.nvm/nvm.sh" && nvm use 20 --silent && cd ~/projects/Kaetram-Open/packages/server && \
-   ACCEPT_LICENSE=true SKIP_DATABASE=false exec node --enable-source-maps dist/main.js --port 9071) &
+   NODE_ENV=eval ACCEPT_LICENSE=true SKIP_DATABASE=false exec node --enable-source-maps dist/main.js --port 9071) &
   for i in $(seq 1 60); do
     if ss -tlnp 2>/dev/null | grep -q ":9071 "; then
       echo "  Game server ready on 9071 (${i}s)"

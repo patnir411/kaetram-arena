@@ -27,7 +27,12 @@ from typing import Any
 import pytest
 
 from tests.e2e.quests.conftest import live_observe
-from tests.e2e.quests.reachability.debug import TestDebugLog
+from tests.e2e.quests.reachability.debug import (
+    TestDebugLog,
+    get_current_test_debug,
+    reset_current_test_debug,
+    set_current_test_debug,
+)
 
 # Tutorial bypass grants this exact starter kit — see
 # Kaetram-Open/packages/server/src/game/entity/character/player/quests.ts
@@ -43,23 +48,45 @@ VANILLA_STARTER_KIT: list[dict[str, Any]] = [
 # Mudwich central spawn — warps.ts landing tile for `mudwich`.
 MUDWICH_SPAWN: tuple[int, int] = (188, 157)
 
+# Reachability tests are about map/interaction access, not survivability under
+# incidental aggro. Give the default seed a large HP buffer so long walks do
+# not fail on unrelated combat variance. Individual tests can still override
+# `hit_points=` when they need a specific combat envelope.
+REACHABILITY_HP_BUFFER = 3039
+REACHABILITY_NO_PROGRESS_TIMEOUT_S = 10.0
+REACHABILITY_HEALTH_XP = 15_000_000
+
 
 def vanilla_seed_kwargs(**overrides: Any) -> dict[str, Any]:
     """Return a `seed_player(**kwargs)`-compatible dict for a fresh
-    post-tutorial spawn at Mudwich with the starter kit.
+    post-tutorial spawn at Mudwich with the starter kit and boosted HP.
 
     Caller may pass `position=`, `skills=`, etc. to override specific fields
     — the default is "nothing pre-granted beyond what the tutorial bypass
-    gives a real player."
+    gives a real player", except for the reachability HP buffer that keeps
+    nav-only assertions from failing due to stray mob damage.
     """
     base = {
         "position": MUDWICH_SPAWN,
-        "hit_points": 100,
+        "hit_points": REACHABILITY_HP_BUFFER,
         "mana": 20,
         "inventory": list(VANILLA_STARTER_KIT),
+        "skills": [{"type": 3, "experience": REACHABILITY_HEALTH_XP}],
     }
-    base.update(overrides)
-    return base
+    merged = dict(base)
+    merged.update(overrides)
+
+    override_skills = list(overrides.get("skills") or [])
+    if override_skills:
+        has_health = any(int(skill.get("type", -1)) == 3 for skill in override_skills)
+        if not has_health:
+            override_skills.append({"type": 3, "experience": REACHABILITY_HEALTH_XP})
+        merged["skills"] = override_skills
+
+    if "inventory" in overrides and overrides["inventory"] is not None:
+        merged["inventory"] = list(overrides["inventory"])
+
+    return merged
 
 
 def _nav_log(msg: str) -> None:
@@ -79,7 +106,8 @@ async def navigate_long(
     arrive_tolerance: int = 3,
     per_hop_timeout_s: float = 90.0,
     poll_interval_s: float = 2.0,
-    no_progress_timeout_s: float = 45.0,
+    no_progress_timeout_s: float = REACHABILITY_NO_PROGRESS_TIMEOUT_S,
+    navigate_call_timeout_s: float = 10.0,
     debug: TestDebugLog | None = None,
 ) -> dict[str, Any]:
     """Chain `navigate` calls to reach a faraway target.
@@ -104,8 +132,172 @@ async def navigate_long(
     The outer loop gives up after `max_hops` unsuccessful hops.
     """
     import time as _time
+    if debug is None:
+        debug = get_current_test_debug()
+
+    async def _capture_failure_probe(label: str, **fields: Any) -> None:
+        if debug is None:
+            return
+        debug.event(label, **fields)
+        try:
+            r = await session.call_tool("observe", {})
+            debug.action(
+                "observe",
+                args={"_probe": label, **fields},
+                ok=not r.is_error,
+                result_preview=(r.text or "")[:240] if r.text else None,
+                error=(r.text[:240] if r.is_error and r.text else None),
+            )
+            debug.raw_observe(label, r.text or "")
+            stuck = r.observe_stuck_check()
+            if stuck is not None:
+                debug.event(f"{label}_stuck_check", **fields, stuck=stuck)
+        except Exception as exc:
+            debug.event(f"{label}_probe_error", **fields, error=str(exc))
+
+    def _manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    def _escape_candidates(
+        cx: int, cy: int, target_x: int, target_y: int, radius: int = 12
+    ) -> list[tuple[int, int]]:
+        dx = target_x - cx
+        dy = target_y - cy
+        candidates: list[tuple[int, int]] = []
+
+        # Prefer stepping perpendicular to the current main heading first to
+        # break out of local tree/rock pockets, then try reversing the axis.
+        if abs(dx) >= abs(dy):
+            candidates.extend([
+                (cx, cy - radius),
+                (cx, cy + radius),
+                (cx - radius if dx > 0 else cx + radius, cy),
+                (cx + radius if dx > 0 else cx - radius, cy),
+            ])
+        else:
+            candidates.extend([
+                (cx - radius, cy),
+                (cx + radius, cy),
+                (cx, cy - radius if dy > 0 else cy + radius),
+                (cx, cy + radius if dy > 0 else cy - radius),
+            ])
+
+        # Final fallback: all four cardinals in case the preferred ordering is blocked.
+        candidates.extend([
+            (cx - radius, cy),
+            (cx + radius, cy),
+            (cx, cy - radius),
+            (cx, cy + radius),
+        ])
+
+        deduped: list[tuple[int, int]] = []
+        seen: set[tuple[int, int]] = set()
+        for cand in candidates:
+            if cand in seen:
+                continue
+            seen.add(cand)
+            deduped.append(cand)
+        return deduped
+
+    def _hop_candidates(cx: int, cy: int, dx_total: int, dy_total: int) -> list[tuple[int, int]]:
+        close_enough = abs(dx_total) <= max_step and abs(dy_total) <= max_step
+
+        sx = 0 if dx_total == 0 else (1 if dx_total > 0 else -1)
+        sy = 0 if dy_total == 0 else (1 if dy_total > 0 else -1)
+        step_x = abs(dx_total) if close_enough else min(max_step, abs(dx_total))
+        step_y = abs(dy_total) if close_enough else min(max_step, abs(dy_total))
+        half_step = max(12, max_step // 2)
+
+        candidates: list[tuple[int, int]] = []
+        if close_enough:
+            candidates.append((target_x, target_y))
+        if abs(dx_total) >= abs(dy_total):
+            candidates.extend([
+                (cx + sx * step_x, cy),
+                (cx, cy + sy * step_y),
+                (cx + sx * half_step, cy + sy * half_step),
+                (cx + sx * half_step, cy - sy * half_step if sy else cy + half_step),
+                (cx + sx * half_step, cy + sy * half_step if sy else cy - half_step),
+            ])
+        else:
+            candidates.extend([
+                (cx, cy + sy * step_y),
+                (cx + sx * step_x, cy),
+                (cx + sx * half_step, cy + sy * half_step),
+                (cx - sx * half_step if sx else cx + half_step, cy + sy * half_step),
+                (cx + sx * half_step if sx else cx - half_step, cy + sy * half_step),
+            ])
+
+        deduped: list[tuple[int, int]] = []
+        seen: set[tuple[int, int]] = set()
+        for cand in candidates:
+            if cand in seen or cand == (cx, cy):
+                continue
+            seen.add(cand)
+            deduped.append(cand)
+        return deduped
+
+    async def _attempt_escape(
+        *,
+        cluster_origin: tuple[int, int],
+        hop: int,
+    ) -> dict[str, Any] | None:
+        for esc_x, esc_y in _escape_candidates(cluster_origin[0], cluster_origin[1], target_x, target_y):
+            try:
+                result = await asyncio.wait_for(
+                    session.call_tool("navigate", {"x": esc_x, "y": esc_y}),
+                    timeout=navigate_call_timeout_s,
+                )
+            except asyncio.TimeoutError:
+                continue
+
+            if result.is_error:
+                continue
+
+            if debug is not None:
+                debug.action(
+                    tool="navigate",
+                    args={"x": esc_x, "y": esc_y, "_escape": True, "_hop": hop, "_from": cluster_origin},
+                    ok=True,
+                    result_preview=(result.text or "")[:240] if result.text else None,
+                )
+
+            last_escape_obs: dict[str, Any] = {}
+            for _ in range(4):
+                await asyncio.sleep(2.0)
+                last_escape_obs = await live_observe(session)
+                pos = last_escape_obs.get("pos") or {}
+                px = int(pos.get("x", cluster_origin[0]))
+                py = int(pos.get("y", cluster_origin[1]))
+                if _manhattan((px, py), cluster_origin) >= 6:
+                    if debug is not None:
+                        debug.event(
+                            "escape_nav_succeeded",
+                            hop=hop,
+                            start=cluster_origin,
+                            end=(px, py),
+                            target=(esc_x, esc_y),
+                        )
+                    return last_escape_obs
+
+                nav_state = (last_escape_obs.get("navigation") or {}).get("status")
+                if nav_state == "stuck":
+                    break
+
+            if debug is not None and last_escape_obs:
+                pos = last_escape_obs.get("pos") or {}
+                debug.event(
+                    "escape_nav_failed",
+                    hop=hop,
+                    start=cluster_origin,
+                    end=(int(pos.get("x", cluster_origin[0])), int(pos.get("y", cluster_origin[1]))),
+                    target=(esc_x, esc_y),
+                )
+        return None
 
     obs = await live_observe(session)
+    replan_starts: list[tuple[int, int]] = []
+    replan_distances: list[int] = []
     if debug is not None:
         debug.event("navigate_long_start", target=(target_x, target_y),
                     max_step=max_step, max_hops=max_hops)
@@ -117,35 +309,158 @@ async def navigate_long(
         if cx < 0 or cy < 0:
             raise AssertionError(f"navigate_long: bad pos in observe: {pos!r}")
 
-        dx_total = target_x - cx
-        dy_total = target_y - cy
+        replan_starts.append((cx, cy))
+        if len(replan_starts) > 6:
+            replan_starts.pop(0)
+        replan_distances.append(abs(dx_total := target_x - cx) + abs(dy_total := target_y - cy))
+        if len(replan_distances) > 6:
+            replan_distances.pop(0)
+
+        same_cluster = sum(1 for px, py in replan_starts if _manhattan((px, py), (cx, cy)) <= 4)
+        if same_cluster >= 3:
+            if debug is not None:
+                debug.event(
+                    "same_cluster_detected",
+                    hop=hop,
+                    cluster=(cx, cy),
+                    recent_starts=replan_starts[-6:],
+                )
+            escaped_obs = await _attempt_escape(cluster_origin=(cx, cy), hop=hop)
+            if escaped_obs is not None:
+                obs = escaped_obs
+                continue
+            await _capture_failure_probe(
+                "same_cluster_probe",
+                hop=hop,
+                cluster=(cx, cy),
+                target=(target_x, target_y),
+                recent_starts=replan_starts[-6:],
+            )
+            raise AssertionError(
+                f"navigate_long: repeated replans from local cluster near ({cx},{cy}) "
+                f"while heading to ({target_x},{target_y})"
+            )
+
+        if len(replan_starts) >= 4:
+            cluster_span = max(
+                _manhattan(a, b)
+                for a in replan_starts[-4:]
+                for b in replan_starts[-4:]
+            )
+            progress_gain = replan_distances[-4] - replan_distances[-1]
+            if cluster_span <= 18 and progress_gain <= 12:
+                if debug is not None:
+                    debug.event(
+                        "oscillation_detected",
+                        hop=hop,
+                        recent_starts=replan_starts[-4:],
+                        recent_distances=replan_distances[-4:],
+                        cluster_span=cluster_span,
+                        progress_gain=progress_gain,
+                    )
+                await _capture_failure_probe(
+                    "oscillation_probe",
+                    hop=hop,
+                    cluster=(cx, cy),
+                    target=(target_x, target_y),
+                    recent_starts=replan_starts[-4:],
+                    recent_distances=replan_distances[-4:],
+                    cluster_span=cluster_span,
+                    progress_gain=progress_gain,
+                )
+                raise AssertionError(
+                    f"navigate_long: local oscillation near ({cx},{cy}) while heading to "
+                    f"({target_x},{target_y}); recent_starts={replan_starts[-4:]}"
+                )
+
         if abs(dx_total) + abs(dy_total) <= arrive_tolerance:
             return obs
 
-        # Pick hop target: either the destination (if within one hop) or
-        # `max_step` tiles along the larger axis.
-        if abs(dx_total) <= max_step and abs(dy_total) <= max_step:
-            hop_x, hop_y = target_x, target_y
-        elif abs(dx_total) >= abs(dy_total):
-            hop_x = cx + max(-max_step, min(max_step, dx_total))
-            hop_y = cy
-        else:
-            hop_x = cx
-            hop_y = cy + max(-max_step, min(max_step, dy_total))
-
-        _nav_log(f"hop {hop}: ({cx},{cy}) -> ({hop_x},{hop_y}) "
-                 f"[remaining: dx={dx_total}, dy={dy_total}]")
-        result = await session.call_tool("navigate", {"x": hop_x, "y": hop_y})
-        if debug is not None:
-            preview = (result.text or "")[:240] if result.text else None
-            debug.action(
-                tool="navigate",
-                args={"x": hop_x, "y": hop_y, "_hop": hop, "_from": (cx, cy)},
-                ok=not result.is_error,
-                result_preview=preview,
-                error=(result.text[:240] if result.is_error else None),
+        navigate_result = None
+        navigate_payload: dict[str, Any] = {}
+        hop_x = hop_y = -1
+        candidate_blockers: list[dict[str, Any]] = []
+        for candidate_index, (cand_x, cand_y) in enumerate(_hop_candidates(cx, cy, dx_total, dy_total)):
+            hop_x, hop_y = cand_x, cand_y
+            _nav_log(
+                f"hop {hop}: try#{candidate_index} ({cx},{cy}) -> ({hop_x},{hop_y}) "
+                f"[remaining: dx={dx_total}, dy={dy_total}]"
             )
-        assert not result.is_error, f"navigate hop {hop} errored: {result.text[:300]}"
+            try:
+                result = await asyncio.wait_for(
+                    session.call_tool("navigate", {"x": hop_x, "y": hop_y}),
+                    timeout=navigate_call_timeout_s,
+                )
+            except asyncio.TimeoutError as exc:
+                if debug is not None:
+                    debug.event(
+                        "navigate_call_timeout",
+                        hop=hop,
+                        start=(cx, cy),
+                        target=(hop_x, hop_y),
+                        timeout_s=navigate_call_timeout_s,
+                    )
+                raise AssertionError(
+                    f"navigate_long: navigate tool call timed out after "
+                    f"{navigate_call_timeout_s:.1f}s on hop {hop} from ({cx},{cy}) "
+                    f"to ({hop_x},{hop_y})"
+                ) from exc
+
+            preview = (result.text or "")[:240] if result.text else None
+            if debug is not None:
+                debug.action(
+                    tool="navigate",
+                    args={
+                        "x": hop_x,
+                        "y": hop_y,
+                        "_hop": hop,
+                        "_from": (cx, cy),
+                        "_candidate_index": candidate_index,
+                    },
+                    ok=not result.is_error,
+                    result_preview=preview,
+                    error=(result.text[:240] if result.is_error else None),
+                )
+            assert not result.is_error, f"navigate hop {hop} errored: {result.text[:300]}"
+
+            navigate_payload = result.json() or {}
+            if (
+                navigate_payload.get("status") == "stuck"
+                and navigate_payload.get("pathfinding") == "bfs_failed"
+            ):
+                candidate_blockers.append(
+                    {"target": (hop_x, hop_y), "payload": navigate_payload}
+                )
+                if debug is not None:
+                    debug.event(
+                        "hop_candidate_blocked",
+                        hop=hop,
+                        start=(cx, cy),
+                        target=(hop_x, hop_y),
+                        payload=navigate_payload,
+                    )
+                continue
+
+            navigate_result = result
+            break
+
+        if navigate_result is None:
+            if debug is not None:
+                debug.event(
+                    "hop_all_candidates_blocked",
+                    hop=hop,
+                    start=(cx, cy),
+                    blockers=candidate_blockers,
+                )
+            await _capture_failure_probe(
+                "hop_all_candidates_blocked_probe",
+                hop=hop,
+                start=(cx, cy),
+                target=(target_x, target_y),
+                blockers=candidate_blockers,
+            )
+            obs = await live_observe(session)
+            continue
 
         hop_start = _time.monotonic()
         last_progress_at = hop_start
@@ -164,6 +479,7 @@ async def navigate_long(
             px = int(pos.get("x", -1))
             py = int(pos.get("y", -1))
             nav_state = (obs.get("navigation") or {}).get("status")
+            is_dead = bool(obs.get("is_dead") or (obs.get("status") or {}).get("dead"))
 
             if abs(px - hop_x) + abs(py - hop_y) <= arrive_tolerance:
                 exit_reason = "at_hop"
@@ -173,6 +489,9 @@ async def navigate_long(
                 break
             if nav_state == "stuck":
                 exit_reason = "nav_stuck"
+                break
+            if is_dead:
+                exit_reason = "player_dead"
                 break
 
             if (px, py) != (last_px, last_py):
@@ -213,8 +532,29 @@ async def navigate_long(
                     pass
                 if stuck is not None:
                     debug.event("stuck_check", hop=hop, stuck=stuck)
+                await _capture_failure_probe(
+                    "hop_stall_probe",
+                    hop=hop,
+                    start=(cx, cy),
+                    end=(last_px, last_py),
+                    target=(hop_x, hop_y),
+                    final_target=(target_x, target_y),
+                    reason=exit_reason,
+                )
+            if exit_reason == "player_dead":
+                debug.snapshot(f"hop_{hop}_dead", obs)
+                raise AssertionError(
+                    f"navigate_long: player died during hop {hop} while heading to "
+                    f"({target_x},{target_y}); last pos=({last_px},{last_py})"
+                )
         # Loop back — outer for-loop re-observes and re-plans.
 
+    await _capture_failure_probe(
+        "navigate_long_final_failure_probe",
+        final_target=(target_x, target_y),
+        last_pos=((obs.get("pos") or {}).get("x"), (obs.get("pos") or {}).get("y")),
+        last_nav=obs.get("navigation") or {},
+    )
     raise AssertionError(
         f"navigate_long: failed to reach ({target_x},{target_y}) within "
         f"{max_hops} hops. Last pos={(obs.get('pos') or {})}, "
@@ -243,7 +583,7 @@ reachability = pytest.mark.reachability
 slow = pytest.mark.slow
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def test_debug(request):
     """Per-test debug collector. No-op unless KAETRAM_DEBUG=1 is set.
 
@@ -263,6 +603,7 @@ def test_debug(request):
     # Expose a hook so tests can bump status to PASS on success — we also
     # detect via finalizer whether the test raised.
     dbg._mark_pass = _mark_pass  # type: ignore[attr-defined]
+    token = set_current_test_debug(dbg)
 
     yield dbg
 
@@ -277,6 +618,7 @@ def test_debug(request):
             status = "PASS" if rep.passed else ("SKIP" if rep.skipped else "FAIL")
     except Exception:
         pass
+    reset_current_test_debug(token)
     dbg.close(status=status)
 
 

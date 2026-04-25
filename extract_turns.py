@@ -8,6 +8,7 @@ tuples for SFT training:
 - Codex: --json with item.started/item.completed events
 - Qwen Code: stream-json (Gemini CLI fork, same format as Claude)
 - Kimi: extended thinking with --thinking flag, raw output + thinking tokens
+- OpenCode: --format json with flat type=text/reasoning/tool_use/step_finish events
 
 Usage:
     python3 extract_turns.py --log-dir logs/ --output-dir dataset/extracted/
@@ -42,8 +43,84 @@ def parse_events(log_path: Path) -> list[dict]:
         # To enable: implement _parse_gemini_events() and uncomment below.
         print(f"  [skip] {log_path.name}: gemini format (extraction disabled)", file=sys.stderr)
         return []
+    if fmt == "opencode":
+        return _parse_opencode_events(log_path)
     # Claude, Qwen Code, and Kimi all use compatible stream-json-like formats
     return _parse_claude_events(log_path)
+
+
+def _parse_opencode_events(log_path: Path) -> list[dict]:
+    """Parse OpenCode --format json log into normalized events.
+
+    OpenCode emits flat JSONL events with:
+      - type=text, part.text → assistant prose
+      - type=reasoning, part.text → assistant chain-of-thought (thinking models)
+      - type=tool_use, part.tool, part.callID, part.state.{input,output} →
+        carries BOTH the call and the result in one event (unlike Claude which
+        splits them). We emit two normalized events: tool_use and tool_result.
+      - type=step_finish, part.tokens.reasoning → token accounting (skipped here;
+        the reasoning content already lands in `reasoning` parts when present).
+
+    Tool names are normalized from `kaetram_<name>` to `mcp__kaetram__<name>` so
+    they match MCP_ACTION_TOOLS / is_observe downstream.
+    """
+    events = []
+    for i, line in enumerate(open(log_path)):
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        t = ev.get("type")
+        timestamp = ev.get("timestamp")
+        part = ev.get("part") or {}
+        if not isinstance(part, dict):
+            continue
+
+        if t == "text":
+            text = part.get("text", "")
+            if text:
+                events.append({
+                    "line": i, "type": "text", "role": "assistant",
+                    "text": text, "timestamp": timestamp,
+                })
+            continue
+
+        if t == "reasoning":
+            text = part.get("text", "")
+            if text:
+                events.append({
+                    "line": i, "type": "thinking", "role": "assistant",
+                    "text": text, "timestamp": timestamp,
+                })
+            continue
+
+        if t == "tool_use":
+            tool_name = part.get("tool", "")
+            if tool_name and not tool_name.startswith("mcp__"):
+                tool_name = f"mcp__{tool_name}" if tool_name.startswith("kaetram__") else f"mcp__kaetram__{tool_name.removeprefix('kaetram_')}"
+            state = part.get("state") or {}
+            input_obj = state.get("input", {}) if isinstance(state, dict) else {}
+            call_id = part.get("callID", "")
+
+            events.append({
+                "line": i, "type": "tool_use", "role": "assistant",
+                "name": tool_name,
+                "input": input_obj if isinstance(input_obj, dict) else {},
+                "id": call_id, "timestamp": timestamp,
+            })
+
+            if isinstance(state, dict) and state.get("status") == "completed":
+                output = state.get("output", "")
+                text_content = output if isinstance(output, str) else json.dumps(output)
+                events.append({
+                    "line": i, "type": "tool_result", "role": "user",
+                    "tool_use_id": call_id,
+                    "text": text_content,
+                    "timestamp": timestamp,
+                })
+
+    return events
 
 
 def _parse_claude_events(log_path: Path) -> list[dict]:

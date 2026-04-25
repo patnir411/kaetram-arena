@@ -782,7 +782,53 @@ class AgentInstance:
                 except (json.JSONDecodeError, ValueError):
                     continue
 
+            # Strategy 4: OpenCode — 429s land in opencode's internal log dir
+            # (~/.local/share/opencode/log/*.log), not the session log. Scan
+            # the most-recent internal log for AI_APICallError + statusCode 429.
+            opencode_rl = self._check_opencode_rate_limit()
+            if opencode_rl:
+                return opencode_rl
+
             return None
+        except OSError:
+            return None
+
+    def _check_opencode_rate_limit(self) -> dict | None:
+        """Scan opencode's internal log dir for 429 / rate-limit errors.
+
+        opencode keeps API errors in ~/.local/share/opencode/log/<ts>.log,
+        completely separate from the agent session log. We read only the tail
+        and only the most recent file to keep this cheap.
+        """
+        log_dir = Path.home() / ".local/share/opencode/log"
+        if not log_dir.is_dir():
+            return None
+        try:
+            files = sorted(log_dir.glob("*.log"),
+                           key=lambda p: p.stat().st_mtime, reverse=True)
+            if not files:
+                return None
+            log_file = files[0]
+            # Only consider the log if it was modified in the last 5 minutes
+            # — stale 429s from a prior run shouldn't trip the guard now.
+            if time.time() - log_file.stat().st_mtime > 300:
+                return None
+            size = log_file.stat().st_size
+            with open(log_file, "r", errors="replace") as f:
+                if size > 200_000:
+                    f.seek(size - 200_000)
+                    f.readline()
+                tail = f.read()
+            if "AI_APICallError" not in tail or '"statusCode":429' not in tail:
+                return None
+            # NIM doesn't return retry_after; default to 60s and let the
+            # outer health loop re-check after sleep.
+            return {
+                "reset_at": time.time() + 60,
+                "rate_limit_type": "opencode_429",
+                "reason": "NVIDIA NIM returned HTTP 429 (rate limited)",
+                "source": "opencode",
+            }
         except OSError:
             return None
 
@@ -1126,7 +1172,7 @@ class Orchestrator:
         """Create all server and agent instances."""
         # Build per-agent harness assignment list
         harness_list = []
-        for h in ("claude", "codex", "gemini", "kimi", "qwen-code", "opencode"):
+        for h in ("claude", "codex", "gemini", "opencode"):
             harness_list.extend([h] * self.harness_counts.get(h, 0))
 
         # Build personality assignment list
@@ -1157,7 +1203,7 @@ class Orchestrator:
 
             harness = harness_list[i] if i < len(harness_list) else "claude"
             adapter = get_adapter(harness=harness, model=self.model)
-            prefix_map = {"codex": "CodexBot", "gemini": "GeminiBot", "kimi": "KimiBot", "qwen-code": "QwenBot", "opencode": "OpenCodeBot"}
+            prefix_map = {"codex": "CodexBot", "gemini": "GeminiBot", "opencode": "OpenCodeBot"}
             bot_prefix = prefix_map.get(harness, "ClaudeBot")
 
             personality = assignments[i] if i < len(assignments) else "grinder"
@@ -1180,7 +1226,7 @@ class Orchestrator:
     def start(self):
         """Start all servers, wait for health, then start all agents."""
         harness_parts = []
-        for h, count in [("Claude", "claude"), ("Codex", "codex"), ("Gemini", "gemini"), ("Kimi", "kimi"), ("Qwen Code", "qwen-code")]:
+        for h, count in [("Claude", "claude"), ("Codex", "codex"), ("Gemini", "gemini"), ("OpenCode", "opencode")]:
             n = self.harness_counts.get(count, 0)
             if n > 0:
                 harness_parts.append(f"{n} {h}")
@@ -1375,14 +1421,6 @@ def main():
         help="Number of Gemini agents (bare --gemini = all agents)"
     )
     parser.add_argument(
-        "--kimi", type=int, nargs="?", const=-1, default=0,
-        help="Number of Kimi agents (bare --kimi = all agents)"
-    )
-    parser.add_argument(
-        "--qwen-code", type=int, nargs="?", const=-1, default=0,
-        help="Number of Qwen Code agents (bare --qwen-code = all agents)"
-    )
-    parser.add_argument(
         "--opencode", type=int, nargs="?", const=-1, default=0,
         help="Number of OpenCode agents (bare --opencode = all agents). "
              "Uses NVIDIA Qwen free API via opencode.template.json."
@@ -1413,43 +1451,35 @@ def main():
     if n_total < 1 or n_total > 8:
         parser.error("Total agent count must be 1-8")
 
-    # Resolve harness counts (--claude N / --codex N / --gemini N / --kimi N / --qwen-code N)
+    # Resolve harness counts (--claude N / --codex N / --gemini N / --opencode N)
     claude_n = args.claude or 0
     codex_n = args.codex or 0
     gemini_n = args.gemini or 0
-    kimi_n = args.kimi or 0
-    qwen_code_n = args.qwen_code or 0
     opencode_n = args.opencode or 0
 
-    bare_flags = sum(1 for v in [claude_n, codex_n, gemini_n, kimi_n, qwen_code_n, opencode_n] if v == -1)
+    bare_flags = sum(1 for v in [claude_n, codex_n, gemini_n, opencode_n] if v == -1)
     if bare_flags > 1:
-        parser.error("Cannot use multiple bare harness flags (--claude, --codex, --gemini, --kimi, --qwen-code, --opencode) without counts")
+        parser.error("Cannot use multiple bare harness flags (--claude, --codex, --gemini, --opencode) without counts")
 
     # Handle bare flags (e.g. --codex alone means all agents)
     if opencode_n == -1:
         opencode_n = n_total
-        claude_n = codex_n = gemini_n = kimi_n = qwen_code_n = 0
-    elif qwen_code_n == -1:
-        qwen_code_n = n_total
-        claude_n = codex_n = gemini_n = kimi_n = opencode_n = 0
-    elif kimi_n == -1:
-        kimi_n = n_total
-        claude_n = codex_n = gemini_n = qwen_code_n = opencode_n = 0
+        claude_n = codex_n = gemini_n = 0
     elif gemini_n == -1:
         gemini_n = n_total
-        claude_n = codex_n = kimi_n = qwen_code_n = opencode_n = 0
+        claude_n = codex_n = opencode_n = 0
     elif codex_n == -1:
         codex_n = n_total
-        claude_n = gemini_n = kimi_n = qwen_code_n = opencode_n = 0
+        claude_n = gemini_n = opencode_n = 0
     elif claude_n == -1:
         claude_n = n_total
-        codex_n = gemini_n = kimi_n = qwen_code_n = opencode_n = 0
-    elif claude_n == 0 and codex_n == 0 and gemini_n == 0 and kimi_n == 0 and qwen_code_n == 0 and opencode_n == 0:
+        codex_n = gemini_n = opencode_n = 0
+    elif claude_n == 0 and codex_n == 0 and gemini_n == 0 and opencode_n == 0:
         # No harness specified: default all Claude
         claude_n = n_total
     else:
         # Explicit counts: fill remainder with Claude
-        explicit_total = claude_n + codex_n + gemini_n + kimi_n + qwen_code_n + opencode_n
+        explicit_total = claude_n + codex_n + gemini_n + opencode_n
         if explicit_total < n_total:
             claude_n = n_total - explicit_total
         elif explicit_total > n_total:
@@ -1457,7 +1487,7 @@ def main():
 
     harness_counts = {
         "claude": claude_n, "codex": codex_n, "gemini": gemini_n,
-        "kimi": kimi_n, "qwen-code": qwen_code_n, "opencode": opencode_n,
+        "opencode": opencode_n,
     }
 
     # Check for required CLIs
@@ -1465,10 +1495,6 @@ def main():
         parser.error("codex CLI not found. Install with: npm install -g @openai/codex")
     if gemini_n > 0 and shutil.which("gemini") is None:
         parser.error("gemini CLI not found. Install with: npm install -g @google/gemini-cli")
-    if kimi_n > 0 and shutil.which("kimi") is None:
-        parser.error("kimi CLI not found. Install with: curl -LsSf https://code.kimi.com/install.sh | bash")
-    if qwen_code_n > 0 and shutil.which("qwen") is None:
-        parser.error("qwen-code CLI not found. Install with: npm install -g @qwen-code/qwen-code")
     if opencode_n > 0 and shutil.which("opencode") is None:
         parser.error("opencode CLI not found. Install with: npm install -g opencode")
 

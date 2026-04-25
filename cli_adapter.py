@@ -466,148 +466,6 @@ class GeminiAdapter(CLIAdapter):
         return None
 
 
-class QwenCodeAdapter(CLIAdapter):
-    """Adapter for Qwen Code CLI (qwen -p).
-
-    Qwen Code outputs stream-json format (Gemini CLI fork) with thinking blocks
-    embedded in the message.content array, same as Claude. Reasoning tokens are
-    automatically captured in session logs and extracted by extract_turns.py.
-    """
-
-    def __init__(self, model: str = "qwen3-coder"):
-        super().__init__(model)
-
-    @property
-    def name(self) -> str:
-        return "qwen-code"
-
-    def setup_sandbox(self, sandbox_dir: Path, system_prompt: str | None = None,
-                      port: str = "", username: str = "ClaudeBot") -> None:
-        # Qwen Code uses its own MCP registry (qwen mcp add), not .mcp.json.
-        # Register custom kaetram MCP server globally.
-        result = subprocess.run(
-            ["qwen", "mcp", "list"], capture_output=True, text=True, timeout=10
-        )
-        if "kaetram" not in result.stdout:
-            screenshot_dir = str(sandbox_dir / "state")
-            subprocess.run(
-                ["qwen", "mcp", "add", "kaetram", VENV_PYTHON,
-                 str(PROJECT_DIR / "mcp_game_server.py")],
-                capture_output=True, text=True, timeout=10
-            )
-
-    def build_command(
-        self,
-        user_prompt: str,
-        system_prompt: str,
-        max_turns: int,
-        max_budget_usd: float | None = None,
-        auth_mode: str = "subscription",
-    ) -> list[str]:
-        # Qwen Code is a Gemini CLI fork — similar to Claude Code interface
-        return [
-            "qwen",
-            "-p",
-            user_prompt,
-            "--model",
-            self.model,
-            "--yolo",
-            "--output-format",
-            "stream-json",
-            "--max-session-turns",
-            str(max_turns),
-            "--append-system-prompt",
-            system_prompt,
-        ]
-
-    def get_env(self) -> dict[str, str]:
-        # Qwen Code reads auth from env vars or ~/.qwen/settings.json
-        # Caller must set OPENAI_API_KEY and OPENAI_BASE_URL for headless mode
-        return {}
-
-    def _extract_state_text_from_line(self, line: str) -> str | None:
-        """Qwen Code stream-json: same format as Claude (Gemini CLI fork).
-        State is in message.content[].text."""
-        try:
-            obj = json.loads(line)
-            for block in obj.get("message", {}).get("content", []):
-                text = block.get("text", "") if isinstance(block, dict) else ""
-                if "player_position" in text and "nearby_entities" in text:
-                    return text
-        except (json.JSONDecodeError, AttributeError):
-            pass
-        return None
-
-
-class KimiAdapter(CLIAdapter):
-    """Adapter for Kimi CLI (kimi -p).
-
-    Kimi K2 supports extended thinking mode via --thinking flag, which outputs
-    detailed reasoning tokens. These are captured in raw log output and extracted
-    by extract_turns.py for SFT training. Timeout is increased to ~60s/turn to
-    allow for thinking latency.
-    """
-
-    def __init__(self, model: str = "kimi-k2"):
-        super().__init__(model)
-
-    @property
-    def name(self) -> str:
-        return "kimi"
-
-    def setup_sandbox(self, sandbox_dir: Path, system_prompt: str | None = None,
-                      port: str = "", username: str = "ClaudeBot") -> None:
-        # Resolve MCP config template to sandbox
-        mcp_text = _resolve_mcp_template(sandbox_dir, port=port, username=username)
-        (sandbox_dir / ".mcp.json").write_text(mcp_text)
-
-    def build_command(
-        self,
-        user_prompt: str,
-        system_prompt: str,
-        max_turns: int,
-        max_budget_usd: float | None = None,
-        auth_mode: str = "subscription",
-    ) -> list[str]:
-        # Kimi K2 supports extended thinking (--thinking) and structured JSON output (--output-format stream-json)
-        # This gives us thinking blocks in the same format as Claude for easy parsing
-        # Use timeout wrapper like Codex (estimate ~60s per turn to account for thinking time)
-        timeout_seconds = max(max_turns * 60, 900)
-        return [
-            "timeout",
-            str(timeout_seconds),
-            "kimi",
-            "-p",
-            user_prompt,
-            "--model",
-            self.model,
-            "--yolo",
-            "--thinking",  # Enable extended thinking for better reasoning capture
-            "--output-format",
-            "stream-json",  # Structured JSON output with thinking blocks
-        ]
-
-    def get_env(self) -> dict[str, str]:
-        # Kimi reads auth from MOONSHOT_API_KEY env var or ~/.kimi/config.toml
-        return {}
-
-    def _extract_state_text_from_line(self, line: str) -> str | None:
-        """Kimi stream-json output: extract game state from message.content[].text.
-
-        Since Kimi now outputs --output-format stream-json (same as Claude),
-        game state is in the same JSON structure as Claude output.
-        """
-        try:
-            obj = json.loads(line)
-            for block in obj.get("message", {}).get("content", []):
-                text = block.get("text", "") if isinstance(block, dict) else ""
-                if "player_position" in text and "nearby_entities" in text:
-                    return text
-        except (json.JSONDecodeError, AttributeError):
-            pass
-        return None
-
-
 class OpenCodeAdapter(CLIAdapter):
     """Adapter for OpenCode CLI (opencode run).
 
@@ -616,15 +474,13 @@ class OpenCodeAdapter(CLIAdapter):
     Output format is --format json (not stream-json); each line is a JSON
     event with `type` and nested `part` / `message.content` shapes.
 
-    Model must be given in provider/model form. The default NVIDIA provider
-    is defined in opencode.template.json (free-tier Qwen via integrate.api
-    .nvidia.com); set OPENCODE_MODEL to override. Requires NVIDIA_API_KEY.
+    We do not specify a model — opencode picks the default from the user's
+    `opencode auth` configuration and the providers defined in
+    opencode.template.json. The model field below is metadata-only.
     """
 
-    _DEFAULT_MODEL = "nvidia/qwen/qwen3-coder-480b-a35b-instruct"
-
     def __init__(self, model: str | None = None):
-        super().__init__(model or os.environ.get("OPENCODE_MODEL") or self._DEFAULT_MODEL)
+        super().__init__(model or "opencode-default")
 
     @property
     def name(self) -> str:
@@ -717,17 +573,13 @@ def get_adapter(harness: str = "claude", model: str | None = None) -> CLIAdapter
     """Factory function to create the appropriate CLI adapter.
 
     Args:
-        harness: one of 'claude', 'codex', 'gemini', 'qwen-code', 'kimi', 'opencode'
+        harness: one of 'claude', 'codex', 'gemini', 'opencode'
         model: optional model override
     """
     if harness == "codex":
         return CodexAdapter(model=model or "gpt-5.4")
     elif harness == "gemini":
         return GeminiAdapter(model=model or "gemini-3-flash-preview")
-    elif harness == "qwen-code":
-        return QwenCodeAdapter(model=model or "qwen3-coder")
-    elif harness == "kimi":
-        return KimiAdapter(model=model or "kimi-k2")
     elif harness == "opencode":
         return OpenCodeAdapter(model=model)
     else:
@@ -738,14 +590,13 @@ def detect_log_format(log_path: Path) -> str:
     """Detect CLI harness from session log format.
 
     Reads the first 25 JSON lines looking for format markers:
-    - Claude/Qwen-Code: stream-json with claude_code_version or Gemini CLI markers
+    - Claude: stream-json with claude_code_version
     - Codex: JSON with thread.started, item.completed events
     - Gemini: gemini_version or model contains "gemini"
     - OpenCode: tool_use events carry part.tool (no message.content), or
       step_finish events with part.tokens
-    - Kimi: raw text or mixed format (no reliable markers — returns 'unknown')
 
-    Returns 'claude', 'qwen-code', 'codex', 'gemini', 'opencode', 'kimi', or 'unknown'.
+    Returns 'claude', 'codex', 'gemini', 'opencode', or 'unknown'.
     """
     try:
         checked = 0

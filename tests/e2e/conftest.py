@@ -1,20 +1,35 @@
 """Shared e2e test fixtures — runs against an ambient Kaetram server.
 
-Prerequisites (all assumed running before pytest invocation):
-  - Kaetram server on :9001 (client on :9000)
-  - MongoDB on :27017 with database `kaetram_devlopment`
-  - (optional) Ollama on :11434 for LLM-driven tests
+Default lane is the **isolated test lane** (separate from data-collection
+agents): game server on :9191, mongo db `kaetram_e2e`. Override per-run
+via env vars below if you want to point at single-agent dev (:9001 +
+`kaetram_devlopment`) or any other server.
 
-The previous REST-helper-lane fixture has been replaced with this ambient
-model. Per-test isolation via unique usernames — no two tests touch the
-same player row. The QwenPlays autonomous `pm2 agent` is paused for the
-test session so it doesn't fight with test MCP subprocesses over browser
-state.
+  KAETRAM_HOST          (default 127.0.0.1)
+  KAETRAM_WS_PORT       (default 9191)        — game server websocket
+  KAETRAM_CLIENT_PORT   (default 9000)        — static client (shared)
+  KAETRAM_MONGO_HOST    (default 127.0.0.1)
+  KAETRAM_MONGO_PORT    (default 27017)
+  KAETRAM_MONGO_DB      (default kaetram_e2e) — also exported into the env
+                                                 so seed.py + MCP subprocesses
+                                                 see the same value
+
+Prerequisites (all assumed running before pytest invocation):
+  - Kaetram server on $KAETRAM_WS_PORT (start with scripts/start-test-kaetram.sh)
+  - Static client on $KAETRAM_CLIENT_PORT (the regular :9000 client is fine)
+  - MongoDB on $KAETRAM_MONGO_HOST:$KAETRAM_MONGO_PORT
+
+Per-test isolation via unique usernames — no two tests touch the same
+player row. The QwenPlays autonomous `pm2 agent` is paused for the test
+session so it doesn't fight with test MCP subprocesses over browser
+state. Data-collection agents (`orchestrate.py` in tmux `datacol`) are
+NOT paused — the test lane is on its own port + db so they don't collide.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import socket
 import subprocess
 import time
@@ -24,11 +39,21 @@ from dataclasses import dataclass
 import pytest
 
 
-KAETRAM_HOST = "127.0.0.1"
-KAETRAM_WS_PORT = 9001
-KAETRAM_CLIENT_PORT = 9000
-MONGO_HOST = "127.0.0.1"
-MONGO_PORT = 27017
+KAETRAM_HOST = os.environ.get("KAETRAM_HOST", "127.0.0.1")
+KAETRAM_WS_PORT = int(os.environ.get("KAETRAM_WS_PORT", "9191"))
+KAETRAM_CLIENT_PORT = int(os.environ.get("KAETRAM_CLIENT_PORT", "9000"))
+MONGO_HOST = os.environ.get("KAETRAM_MONGO_HOST", "127.0.0.1")
+MONGO_PORT = int(os.environ.get("KAETRAM_MONGO_PORT", "27017"))
+MONGO_DB = os.environ.get("KAETRAM_MONGO_DB", "kaetram_e2e")
+
+# Export so seed.py (pymongo direct writes) and any MCP subprocess that
+# inherits env land on the same db. seed.py reads KAETRAM_MONGO_DB at
+# import-time, so set it before that module is imported anywhere.
+os.environ["KAETRAM_MONGO_DB"] = MONGO_DB
+# KAETRAM_PORT is what mcp_game_server.py reads to rewrite the browser's
+# WS URL. mcp_client._server_params builds a fresh env dict per subprocess
+# but falls through to this when callers don't pass `port=` explicitly.
+os.environ.setdefault("KAETRAM_PORT", str(KAETRAM_WS_PORT))
 
 
 def _tcp_open(host: str, port: int, timeout: float = 1.0) -> bool:

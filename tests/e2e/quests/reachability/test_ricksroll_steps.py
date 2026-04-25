@@ -29,10 +29,12 @@ from tests.e2e.quests.conftest import (
     assert_quest_state,
     count_saved_inventory,
     gather_until_count,
+    traverse_door,
     wait_for_position,
     wait_for_quest_state,
 )
 from tests.e2e.quests.reachability.conftest import (
+    REACHABILITY_NO_PROGRESS_TIMEOUT_S,
     assert_pos_within,
     navigate_long,
     reachability,
@@ -40,7 +42,7 @@ from tests.e2e.quests.reachability.conftest import (
     vanilla_seed_kwargs,
 )
 
-FISHING = 11
+FISHING = 8
 COOKING = 9
 RICK_POS = NPCS["rick"]        # (1088, 833)
 LENA_POS = NPCS["rickgf"]       # (455, 924)
@@ -75,7 +77,7 @@ async def test_r1_navigate_mudwich_to_rick(test_username, test_debug):
                 arrive_tolerance=6,
                 per_hop_timeout_s=90.0,
                 poll_interval_s=2.0,
-                no_progress_timeout_s=45.0,
+                no_progress_timeout_s=REACHABILITY_NO_PROGRESS_TIMEOUT_S,
                 debug=test_debug,
             )
             await assert_pos_within(
@@ -111,15 +113,19 @@ async def test_r3_fish_shrimp_at_nearest_spot(test_username):
     seed_player(
         test_username,
         **vanilla_seed_kwargs(
-            position=(SHRIMP_SPOT_NEAR_RICK[0], SHRIMP_SPOT_NEAR_RICK[1] + 1),
+            position=adjacent_to("fisherman"),
             skills=[{"type": FISHING, "experience": 1_000}],
         ),
     )
     try:
         async with mcp_session(username=test_username) as session:
+            for waypoint in ((332, 324), SHRIMP_SPOT_NEAR_RICK):
+                r = await session.call_tool("move", {"x": waypoint[0], "y": waypoint[1]})
+                assert not r.is_error, r.text[:300]
+                await asyncio.sleep(1.0)
             await gather_until_count(
                 session,
-                resource_name="Shrimp",
+                resource_name="Shrimp Spot",
                 item_key="rawshrimp",
                 target_count=1,
                 attempts=5,
@@ -136,13 +142,11 @@ async def test_r4_cook_shrimp_via_craft(test_username):
     the cooking station infrastructure is accessible from the quest region."""
     seed_player(
         test_username,
-        **vanilla_seed_kwargs(
-            position=adjacent_to("rick"),
-            inventory=[
-                {"key": "rawshrimp", "count": 5},
-            ],
-            skills=[{"type": COOKING, "experience": 1_000}],
-        ),
+        position=adjacent_to("doctor"),
+        inventory=[
+            {"key": "rawshrimp", "count": 5},
+        ],
+        skills=[{"type": COOKING, "experience": 1_000}],
     )
     try:
         async with mcp_session(username=test_username) as session:
@@ -167,17 +171,16 @@ async def test_r5_shrimp_turnin_receives_seaweedroll(test_username):
     """R5: Turn in 5× cookedshrimp to Rick; receive seaweedroll; stage 1→2."""
     seed_player(
         test_username,
-        **vanilla_seed_kwargs(
-            position=adjacent_to("rick"),
-            inventory=[{"key": "cookedshrimp", "count": 5}],
-            quests=[{"key": "ricksroll", "stage": 1, "subStage": 0, "completedSubStages": []}],
-        ),
+        position=adjacent_to("rick"),
+        inventory=[{"key": "cookedshrimp", "count": 5}],
+        quests=[{"key": "ricksroll", "stage": 1, "subStage": 0, "completedSubStages": []}],
     )
     try:
         async with mcp_session(username=test_username) as session:
-            r = await session.call_tool("interact_npc", {"npc_name": "Rick"})
-            assert not r.is_error, r.text[:300]
-            await asyncio.sleep(1.0)
+            for _ in range(2):
+                r = await session.call_tool("interact_npc", {"npc_name": "Rick"})
+                assert not r.is_error, r.text[:300]
+                await asyncio.sleep(1.0)
         await asyncio.sleep(AUTOSAVE_WAIT)
         assert_quest_state(test_username, "ricksroll", stage=2, sub_stage=0, completed_sub_stages=[])
         assert count_saved_inventory(test_username, "seaweedroll") >= 1, (
@@ -201,12 +204,12 @@ async def test_r6_door_teleport_lands_at_lena_side(test_username):
     )
     try:
         async with mcp_session(username=test_username) as session:
-            r = await session.call_tool("navigate", {"x": RICK_DOOR[0], "y": RICK_DOOR[1]})
-            assert not r.is_error, r.text[:300]
-            await wait_for_position(
+            await traverse_door(
                 session,
-                x=LENA_SIDE_DOOR[0],
-                y=LENA_SIDE_DOOR[1],
+                door_x=RICK_DOOR[0],
+                door_y=RICK_DOOR[1],
+                exit_x=LENA_SIDE_DOOR[0],
+                exit_y=LENA_SIDE_DOOR[1],
                 max_distance=5,
                 polls=20,
                 delay_s=1.0,

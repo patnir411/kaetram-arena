@@ -35,10 +35,12 @@ from tests.e2e.quests.conftest import (
     assert_quest_finished,
     assert_quest_state,
     count_saved_inventory,
+    traverse_door,
     wait_for_position,
     wait_for_quest_state,
 )
 from tests.e2e.quests.reachability.conftest import (
+    REACHABILITY_NO_PROGRESS_TIMEOUT_S,
     assert_pos_within,
     navigate_long,
     reachability,
@@ -79,7 +81,7 @@ async def test_s1_navigate_mudwich_to_water_guardian(test_username, test_debug):
                 arrive_tolerance=6,
                 per_hop_timeout_s=90.0,
                 poll_interval_s=2.0,
-                no_progress_timeout_s=45.0,
+                no_progress_timeout_s=REACHABILITY_NO_PROGRESS_TIMEOUT_S,
                 debug=test_debug,
             )
             await assert_pos_within(
@@ -180,7 +182,7 @@ async def test_s5_sponge_dialogue_chain_0_to_4(test_username):
             await navigate_long(
                 session, target_x=px, target_y=py,
                 max_step=50, max_hops=20, arrive_tolerance=4,
-                per_hop_timeout_s=90.0, no_progress_timeout_s=45.0,
+                per_hop_timeout_s=90.0, no_progress_timeout_s=REACHABILITY_NO_PROGRESS_TIMEOUT_S,
             )
             r = await session.call_tool("interact_npc", {"npc_name": "Sea Cucumber"})
             assert not r.is_error, r.text[:300]
@@ -190,7 +192,7 @@ async def test_s5_sponge_dialogue_chain_0_to_4(test_username):
             await navigate_long(
                 session, target_x=sx, target_y=sy,
                 max_step=50, max_hops=20, arrive_tolerance=4,
-                per_hop_timeout_s=90.0, no_progress_timeout_s=45.0,
+                per_hop_timeout_s=90.0, no_progress_timeout_s=REACHABILITY_NO_PROGRESS_TIMEOUT_S,
             )
             r = await session.call_tool("interact_npc", {"npc_name": "Sponge"})
             assert not r.is_error, r.text[:300]
@@ -199,7 +201,7 @@ async def test_s5_sponge_dialogue_chain_0_to_4(test_username):
             await navigate_long(
                 session, target_x=px, target_y=py,
                 max_step=50, max_hops=20, arrive_tolerance=4,
-                per_hop_timeout_s=90.0, no_progress_timeout_s=45.0,
+                per_hop_timeout_s=90.0, no_progress_timeout_s=REACHABILITY_NO_PROGRESS_TIMEOUT_S,
             )
             r = await session.call_tool("interact_npc", {"npc_name": "Sea Cucumber"})
             assert not r.is_error, r.text[:300]
@@ -224,14 +226,12 @@ async def test_s6_arena_door_teleport(test_username):
     )
     try:
         async with mcp_session(username=test_username) as session:
-            r = await session.call_tool(
-                "navigate", {"x": ARENA_ENTRY_DOOR[0], "y": ARENA_ENTRY_DOOR[1]}
-            )
-            assert not r.is_error, r.text[:300]
-            await wait_for_position(
+            await traverse_door(
                 session,
-                x=ARENA_EXIT_DOOR[0],
-                y=ARENA_EXIT_DOOR[1],
+                door_x=ARENA_ENTRY_DOOR[0],
+                door_y=ARENA_ENTRY_DOOR[1],
+                exit_x=ARENA_EXIT_DOOR[0],
+                exit_y=ARENA_EXIT_DOOR[1],
                 max_distance=5,
                 polls=15,
                 delay_s=1.0,
@@ -324,34 +324,32 @@ async def test_s7_prime_picklemob_with_endgame_gear(test_username):
     pmx, pmy = PICKLEMOB_POS
     seed_player(
         test_username,
-        **vanilla_seed_kwargs(
-            position=(pmx - 2, pmy),
-            hit_points=3039,  # 39 + 100*30
-            mana=200,
-            inventory=[{"key": "apple", "count": 10}],
-            equipment=[
-                {"type": 0,  "key": "conquerorhelmet",     "count": 1, "enchantments": {}},
-                {"type": 3,  "key": "conquerorchestplate", "count": 1, "enchantments": {}},
-                {"type": 4,  "key": "moongreataxe",        "count": 1, "enchantments": {}},
-                {"type": 5,  "key": "shieldofliberty",     "count": 1, "enchantments": {}},
-                {"type": 9,  "key": "hellkeeperlegplates", "count": 1, "enchantments": {}},
-                {"type": 11, "key": "hellkeeperboots",     "count": 1, "enchantments": {}},
-            ],
-            skills=[
-                {"type": 1, "experience": COMBAT_AGGRO_XP},
-                {"type": 3, "experience": COMBAT_AGGRO_XP},
-                {"type": 6, "experience": COMBAT_AGGRO_XP},
-                {"type": 7, "experience": COMBAT_AGGRO_XP},
-            ],
-            quests=[{"key": "seaactivities", "stage": 4, "subStage": 0, "completedSubStages": []}],
-            achievements=[WATERGUARDIAN_ACH],
-        ),
+        position=(pmx - 1, pmy),
+        hit_points=3039,
+        mana=200,
+        inventory=[{"key": "apple", "count": 10}],
+        equipment=[
+            {"type": 0,  "key": "conquerorhelmet",     "count": 1, "enchantments": {}},
+            {"type": 3,  "key": "conquerorchestplate", "count": 1, "enchantments": {}},
+            {"type": 4,  "key": "moongreataxe",        "count": 1, "enchantments": {}},
+            {"type": 5,  "key": "shieldofliberty",     "count": 1, "enchantments": {}},
+            {"type": 9,  "key": "hellkeeperlegplates", "count": 1, "enchantments": {}},
+            {"type": 11, "key": "hellkeeperboots",     "count": 1, "enchantments": {}},
+        ],
+        skills=[
+            {"type": 1, "experience": COMBAT_AGGRO_XP},
+            {"type": 3, "experience": COMBAT_AGGRO_XP},
+            {"type": 6, "experience": COMBAT_AGGRO_XP},
+            {"type": 7, "experience": COMBAT_AGGRO_XP},
+        ],
+        quests=[{"key": "seaactivities", "stage": 4, "subStage": 0, "completedSubStages": []}],
+        achievements=[WATERGUARDIAN_ACH],
     )
     try:
         async with mcp_session(username=test_username) as session:
             r = await session.call_tool("attack", {"mob_name": "Sea Cucumber"})
             assert not r.is_error, r.text[:300]
-            await asyncio.sleep(20.0)
+            await asyncio.sleep(15.0)
         await asyncio.sleep(AUTOSAVE_WAIT + 3.0)
         assert_quest_state(test_username, "seaactivities", stage=5)
     finally:
@@ -381,7 +379,7 @@ async def test_s8_final_turnin_chain_5_to_7(test_username):
             await navigate_long(
                 session, target_x=sx, target_y=sy,
                 max_step=50, max_hops=20, arrive_tolerance=4,
-                per_hop_timeout_s=90.0, no_progress_timeout_s=45.0,
+                per_hop_timeout_s=90.0, no_progress_timeout_s=REACHABILITY_NO_PROGRESS_TIMEOUT_S,
             )
             # Stage 6 → 7
             r = await session.call_tool("interact_npc", {"npc_name": "Sponge"})

@@ -15,6 +15,7 @@ Integration points:
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import sys
@@ -24,6 +25,10 @@ from pathlib import Path
 from typing import Any
 
 PROJECT_DIR = Path(__file__).resolve().parents[5]
+_CURRENT_TEST_DEBUG: contextvars.ContextVar["TestDebugLog | None"] = contextvars.ContextVar(
+    "reachability_current_test_debug",
+    default=None,
+)
 
 
 def _debug_enabled() -> bool:
@@ -196,6 +201,18 @@ class TestDebugLog:
         )
 
 
+def set_current_test_debug(debug: TestDebugLog | None):
+    return _CURRENT_TEST_DEBUG.set(debug)
+
+
+def reset_current_test_debug(token) -> None:
+    _CURRENT_TEST_DEBUG.reset(token)
+
+
+def get_current_test_debug() -> TestDebugLog | None:
+    return _CURRENT_TEST_DEBUG.get()
+
+
 async def logged_call_tool(session, debug: TestDebugLog | None, name: str,
                             args: dict | None = None):
     """Wrapper around `session.call_tool` that records the invocation.
@@ -204,6 +221,8 @@ async def logged_call_tool(session, debug: TestDebugLog | None, name: str,
     action to land in the debug trace. The helper is a drop-in replacement —
     it returns the same ToolResult.
     """
+    if debug is None:
+        debug = get_current_test_debug()
     result = await session.call_tool(name, args or {})
     if debug is not None:
         preview = result.text[:240] if result.text else None

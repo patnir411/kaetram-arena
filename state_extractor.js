@@ -53,14 +53,32 @@
   // True if tile is walkable OR is a door (teleport on step)
   function _isWalkableOrDoor(map, x, y) {
     if (map.isOutOfBounds(x, y)) return false;
-    if (!map.isColliding(x, y)) return true;
-    return _isDoor(x, y);
+    var walkable = !map.isColliding(x, y);
+    var door = _isDoor(x, y);
+    if (door) console.log('[debug_npc] _isWalkableOrDoor (' + x + ',' + y + ') IS DOOR');
+    return walkable || door;
   }
-
   // ── Live screenshot hook for dashboard (fires every 1s via console.debug) ──
   if (!window.__liveScreenshotActive) {
     window.__liveScreenshotActive = true;
     setInterval(function () { console.debug('LIVE_SCREENSHOT_TRIGGER'); }, 250);
+  }
+
+  // ── Live State Push to Dashboard ──
+  if (!window.__liveStatePushActive) {
+    window.__liveStatePushActive = true;
+    setInterval(function () {
+      if (!window.__extractGameState) return;
+      var state = window.__extractGameState();
+      if (state && !state.error) {
+        var port = window.location.port || '9000';
+        fetch('http://localhost:3000/api/state?port=' + port, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(state)
+        }).catch(function() { /* ignore connection errors if dashboard is down */ });
+      }
+    }, 250);
   }
 
   // ── Dynamic canvas metrics (computed per extraction) ──
@@ -409,9 +427,6 @@
         failed: !!window.__kaetramState.warpPending.failed,
         reason: window.__kaetramState.warpPending.reason || null,
       } : null,
-      lootbag_popup: (typeof window.__lootbagPopupState === 'function')
-        ? window.__lootbagPopupState()
-        : { open: false, item_count: 0 },
     };
 
     // Inject rules reminder every ~180 ticks (~90 seconds at 500ms interval)
@@ -554,8 +569,9 @@
     try {
       var p = game.player;
       if (p && p.equipments) {
-        for (const [slotId, eq] of Object.entries(p.equipments)) {
-          beforeEquip[slotId] = eq ? (eq.name || eq.key || 'none') : 'none';
+        for (var i = 0; i < p.equipments.length; i++) {
+          var eq = p.equipments[i];
+          beforeEquip[i] = eq ? (eq.name || eq.key || 'none') : 'none';
         }
       }
     } catch(e) {}
@@ -626,6 +642,44 @@
     return best;
   }
 
+  window.__debugCursorTiles = function (wantedName) {
+    var game = window.game;
+    if (!game || !game.player || !game.map) {
+      return { error: 'Game not loaded' };
+    }
+    var cursorTiles = game.map.cursorTiles || {};
+    var counts = {};
+    var samples = [];
+    var wanted = (wantedName || '').toLowerCase();
+    var wantedMatches = [];
+    var total = 0;
+
+    for (var index in cursorTiles) {
+      if (!Object.prototype.hasOwnProperty.call(cursorTiles, index)) continue;
+      total += 1;
+      var cursor = String(cursorTiles[index] || '').toLowerCase();
+      counts[cursor] = (counts[cursor] || 0) + 1;
+      if (samples.length < 20) {
+        var coord = game.map.indexToCoord(parseInt(index, 10));
+        samples.push({ cursor: cursor, x: coord.x, y: coord.y });
+      }
+      if (wanted && cursor === wanted) {
+        var wantedCoord = game.map.indexToCoord(parseInt(index, 10));
+        wantedMatches.push({ x: wantedCoord.x, y: wantedCoord.y });
+      }
+    }
+
+    return {
+      player_pos: { x: game.player.gridX, y: game.player.gridY },
+      total_cursor_tiles: total,
+      distinct_cursors: Object.keys(counts).sort(),
+      counts: counts,
+      wanted: wanted,
+      wanted_matches: wantedMatches,
+      sample: samples
+    };
+  };
+
   function _currentCraftingSkillName() {
     var game = window.game;
     if (!game || !game.menu || !game.menu.getCrafting) return '';
@@ -659,6 +713,17 @@
     };
   };
 
+  // Close the crafting menu client-side. Useful between chained crafts of the
+  // same skill where the server-side state survives but the client interface
+  // misses the "fresh" Crafting.Open packet that primes follow-up confirms.
+  window.__closeCraftingMenu = function () {
+    var game = window.game;
+    if (!game || !game.menu || !game.menu.getCrafting) return { closed: false };
+    var menu = game.menu.getCrafting();
+    if (menu && typeof menu.hide === 'function') menu.hide();
+    return { closed: true };
+  };
+
   window.__openProductionInterface = function (skill) {
     var game = window.game;
     if (!game || !game.player || !game.menu) return { error: 'Game not loaded' };
@@ -686,14 +751,24 @@
       var inv = game.menu.getInventory();
       if (!inv || !inv.select) return { error: 'Inventory not available', skill: normalized };
       inv.select(slot, true);
-      try { game.socket.send(21, { opcode: 3, type: 1, fromIndex: slot, value: 1 }); } catch (e) {}
       return { opened: false, via: 'inventory_item', skill: normalized, opener: openerKey, slot: slot };
     }
 
     var target = _findNearestCursorTile(normalized);
-    if (!target) return { error: 'No station found for skill on this map', skill: normalized };
-    var adjacent = _snapToWalkable(target.x, target.y, 4);
-    if (!adjacent) return { error: 'No reachable tile next to station', skill: normalized, target: target };
+    if (!target) {
+      return {
+        error: 'No station found for skill on this map',
+        skill: normalized
+      };
+    }
+    var adjacent = _snapNearWalkable(target.x, target.y, 4);
+    if (!adjacent) {
+      return {
+        error: 'No reachable tile next to station',
+        skill: normalized,
+        target: target
+      };
+    }
     var dist = Math.abs(game.player.gridX - adjacent.x) + Math.abs(game.player.gridY - adjacent.y);
     if (dist > 6) {
       return {
@@ -708,13 +783,26 @@
     }
 
     var clicked = window.__clickTile(target.x, target.y);
+    var directTarget = null;
+    var player = game.player;
+    if (player && Math.abs(player.gridX - target.x) <= 2 && Math.abs(player.gridY - target.y) <= 2) {
+      try {
+        if (typeof player.lookAtPosition === 'function') player.lookAtPosition(target.x, target.y);
+        // Packets.Target = 14, Opcodes.Target.Object = 3 on the current tree.
+        game.socket.send(14, [3, target.x + '-' + target.y]);
+        directTarget = { sent: true, instance: target.x + '-' + target.y };
+      } catch (e) {
+        directTarget = { error: String(e), instance: target.x + '-' + target.y };
+      }
+    }
     return {
       opened: false,
       via: 'station',
       skill: normalized,
       target: target,
       adjacent: adjacent,
-      click: clicked
+      click: clicked,
+      direct_target: directTarget
     };
   };
 
@@ -1015,20 +1103,50 @@
     var game = window.game;
     if (!game || !game.player) return { error: 'Game not loaded' };
     var p = game.player;
+    var map = game.map;
     var startX = p.gridX, startY = p.gridY;
-    if (game.map.isOutOfBounds(gridX, gridY))
+    if (map.isOutOfBounds(gridX, gridY))
       return { error: 'Out of bounds', target: { x: gridX, y: gridY } };
-    if (game.map.isColliding(gridX, gridY) && !_isDoor(gridX, gridY))
+    var targetIsDoor = _isDoor(gridX, gridY);
+    if (map.isColliding(gridX, gridY) && !targetIsDoor)
       return { error: 'Target is a wall', target: { x: gridX, y: gridY }, player_pos: { x: startX, y: startY } };
     var distance = Math.abs(gridX - startX) + Math.abs(gridY - startY);
     p.disableAction = false;
-    p.go(gridX, gridY);
+    // Door tiles are flagged colliding in map.grid, so handleRequestPath returns []
+    // before pathfinding runs. Temporarily mark the door tile walkable, request the
+    // path, then restore. Mirrors how Kaetram's own pathfinder.handleIgnore works.
+    var doorPatched = false;
+    var prevGridVal, prevDataVal, dataIdx;
+    if (targetIsDoor) {
+      if (map.grid && map.grid[gridY] && map.grid[gridY][gridX] === 1) {
+        prevGridVal = map.grid[gridY][gridX];
+        map.grid[gridY][gridX] = 0;
+        doorPatched = true;
+      }
+      if (map.data && typeof map.coordToIndex === 'function') {
+        dataIdx = map.coordToIndex(gridX, gridY);
+        var dv = map.data[dataIdx];
+        if (typeof dv === 'number' && dv < 1) {
+          prevDataVal = dv;
+          map.data[dataIdx] = 1;
+          doorPatched = true;
+        }
+      }
+    }
+    try {
+      p.go(gridX, gridY);
+    } finally {
+      if (doorPatched) {
+        if (prevGridVal !== undefined) map.grid[gridY][gridX] = prevGridVal;
+        if (prevDataVal !== undefined && dataIdx !== undefined) map.data[dataIdx] = prevDataVal;
+      }
+    }
     // Verify a path was actually generated (A* returns [] for complex/long paths)
     if (!p.hasPath() && !p.moving) {
       return {
         error: 'No path found (too far or terrain too complex). Use __navigateTo() for long distances.',
         target: { x: gridX, y: gridY }, player_pos: { x: startX, y: startY },
-        distance: distance,
+        distance: distance, door: targetIsDoor,
       };
     }
     return {
@@ -1051,13 +1169,12 @@
   };
 
   // Bounded BFS pathfinder — finds a walkable path between two points.
-  // Returns array of {x,y} waypoints (sampled every ~sampleInterval tiles), or null if no path.
+  // Returns the full tile-by-tile path, or null if no path.
   // Bounded to maxRadius tiles from the midpoint to keep it fast.
-  function _bfsPath(fromX, fromY, toX, toY, maxRadius, sampleInterval) {
+  function _bfsPath(fromX, fromY, toX, toY, maxRadius) {
     var map = window.game.map;
     if (!map) return null;
     maxRadius = maxRadius || 30;
-    sampleInterval = sampleInterval || 8;
 
     // Bounding box centered on midpoint
     var midX = Math.round((fromX + toX) / 2);
@@ -1077,10 +1194,7 @@
     while (queue.length > 0) {
       var cur = queue.shift();
       if (cur.x === toX && cur.y === toY) { found = true; break; }
-      // Close enough (within 2 tiles)
-      if (Math.abs(cur.x - toX) + Math.abs(cur.y - toY) <= 2) {
-        toX = cur.x; toY = cur.y; found = true; break;
-      }
+
       for (var d = 0; d < 4; d++) {
         var nx = cur.x + dirs[d][0], ny = cur.y + dirs[d][1];
         if (nx < minX || nx > maxX || ny < minY || ny > maxY) continue;
@@ -1105,15 +1219,26 @@
       cx = p.x; cy = p.y;
     }
 
-    // Sample waypoints every sampleInterval tiles
-    if (path.length <= sampleInterval) return path.length > 0 ? [path[path.length - 1]] : null;
+    return path.length > 0 ? path : null;
+  }
+
+  function _samplePath(path, sampleInterval) {
+    if (!path || path.length === 0) return null;
+    sampleInterval = Math.max(1, sampleInterval || 1);
+    if (sampleInterval === 1 || path.length <= sampleInterval)
+      return [path[path.length - 1]];
+
     var sampled = [];
     for (var i = sampleInterval - 1; i < path.length; i += sampleInterval) {
       sampled.push(path[i]);
     }
-    // Always include final point
+
     var last = path[path.length - 1];
-    if (sampled.length === 0 || sampled[sampled.length - 1].x !== last.x || sampled[sampled.length - 1].y !== last.y) {
+    if (
+      sampled.length === 0 ||
+      sampled[sampled.length - 1].x !== last.x ||
+      sampled[sampled.length - 1].y !== last.y
+    ) {
       sampled.push(last);
     }
     return sampled;
@@ -1126,6 +1251,24 @@
     for (var r = 1; r <= maxR; r++) {
       for (var dx = -r; dx <= r; dx++) {
         for (var dy = -r; dy <= r; dy++) {
+          if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+          var nx = cx + dx, ny = cy + dy;
+          if (_isWalkableOrDoor(map, nx, ny)) return { x: nx, y: ny };
+        }
+      }
+    }
+    return null;
+  }
+
+  // Find a walkable approach tile near a station/object without selecting the
+  // station cursor tile itself. Clicking the tile the player is standing on can
+  // fail to trigger station interaction.
+  function _snapNearWalkable(cx, cy, maxR) {
+    var map = window.game.map;
+    for (var r = 1; r <= maxR; r++) {
+      for (var dx = -r; dx <= r; dx++) {
+        for (var dy = -r; dy <= r; dy++) {
+          if (dx === 0 && dy === 0) continue;
           if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
           var nx = cx + dx, ny = cy + dy;
           if (_isWalkableOrDoor(map, nx, ny)) return { x: nx, y: ny };
@@ -1152,46 +1295,94 @@
     var targetX = target.x, targetY = target.y;
     var totalDist = Math.abs(targetX - startX) + Math.abs(targetY - startY);
 
-    if (totalDist <= 1)
+    if (totalDist === 0)
       return { status: 'arrived', player_pos: { x: startX, y: startY } };
 
     // For short distances, just use moveTo directly
     if (totalDist <= 15) {
       p.disableAction = false;
-      p.go(targetX, targetY);
+      // Door tiles are flagged colliding in map.grid, so the game's A* won't
+      // plan into them without a hint. Mirror __moveTo's grid/data patch so
+      // a short navigate onto a door tile actually triggers the teleport.
+      var targetIsDoor = _isDoor(targetX, targetY);
+      var doorPatched = false;
+      var prevGridVal, prevDataVal, dataIdx;
+      if (targetIsDoor) {
+        var map = game.map;
+        if (map.grid && map.grid[targetY] && map.grid[targetY][targetX] === 1) {
+          prevGridVal = map.grid[targetY][targetX];
+          map.grid[targetY][targetX] = 0;
+          doorPatched = true;
+        }
+        if (map.data && typeof map.coordToIndex === 'function') {
+          dataIdx = map.coordToIndex(targetX, targetY);
+          var dv = map.data[dataIdx];
+          if (typeof dv === 'number' && dv < 1) {
+            prevDataVal = dv;
+            map.data[dataIdx] = 1;
+            doorPatched = true;
+          }
+        }
+      }
+      try {
+        p.go(targetX, targetY);
+      } finally {
+        if (doorPatched) {
+          if (prevGridVal !== undefined) game.map.grid[targetY][targetX] = prevGridVal;
+          if (prevDataVal !== undefined && dataIdx !== undefined) game.map.data[dataIdx] = prevDataVal;
+        }
+      }
       if (p.hasPath() || p.moving) {
         // Reset nav state to idle (no auto-advance needed)
         nav.active = false; nav.status = 'idle';
         return { status: 'short_path', success: true, player_pos: { x: startX, y: startY },
-                 target: { x: targetX, y: targetY }, distance: totalDist };
+                 target: { x: targetX, y: targetY }, distance: totalDist, door: targetIsDoor };
       }
       // Fall through to waypoint mode if short path also fails (complex terrain)
     }
 
-    // PRIMARY: Use BFS pathfinding for wall-aware waypoints
-    var bfsMaxRadius = Math.min(Math.max(totalDist, 30), 150);
-    var bfsSample = Math.max(8, Math.min(15, Math.round(totalDist / 6)));
-    var waypoints = _bfsPath(startX, startY, targetX, targetY, bfsMaxRadius, bfsSample);
-    var usedBFS = !!(waypoints && waypoints.length > 0);
-
-    // FALLBACK: Linear interpolation if BFS fails (path too long or no route in bounded area)
-    if (!usedBFS) {
-      var HOP_SIZE = 15;
-      waypoints = [];
-      var steps = Math.ceil(totalDist / HOP_SIZE);
-      for (var i = 1; i <= steps; i++) {
-        var t = i / steps;
-        var wpX = Math.round(startX + (targetX - startX) * t);
-        var wpY = Math.round(startY + (targetY - startY) * t);
-        var snapped = _snapToWalkable(wpX, wpY, 10);
-        if (snapped) waypoints.push(snapped);
-      }
+    // PRIMARY: Use BFS pathfinding for wall-aware waypoints.
+    // Keep waypoints dense enough that player.go() does not have to improvise
+    // around single-tile blockers like trees or rocks. Try a tight bounded box
+    // first for speed, then progressively widen so detours around mid-route
+    // walls (e.g. cliff edges, river bends) still succeed.
+    var bfsPath = null;
+    var bfsRadiusUsed = 0;
+    var radiusTries = [
+      Math.min(Math.max(totalDist, 30), 80),
+      Math.min(Math.max(totalDist + 30, 60), 150),
+      Math.min(Math.max(totalDist + 80, 120), 250),
+      Math.min(Math.max(totalDist + 200, 250), 400),
+    ];
+    for (var ri = 0; ri < radiusTries.length; ri++) {
+      bfsPath = _bfsPath(startX, startY, targetX, targetY, radiusTries[ri]);
+      if (bfsPath && bfsPath.length > 0) { bfsRadiusUsed = radiusTries[ri]; break; }
     }
-    // Ensure final waypoint is the actual target
-    if (waypoints.length === 0 || waypoints[waypoints.length - 1].x !== targetX ||
-        waypoints[waypoints.length - 1].y !== targetY) {
-      waypoints.push({ x: targetX, y: targetY });
+    if (!bfsPath || bfsPath.length === 0) {
+      nav.active = false;
+      nav.status = 'stuck';
+      nav.waypoints = [];
+      nav.currentWP = 0;
+      nav.targetX = targetX;
+      nav.targetY = targetY;
+      nav.startTime = Date.now();
+      nav.lastMoveTime = Date.now();
+      nav.lastPos = { x: startX, y: startY };
+      nav.stuckCount = 0;
+      nav.error = 'No BFS path found within bounded radius (tried up to ' + radiusTries[radiusTries.length - 1] + ')';
+      nav._pathfindingMethod = 'bfs_failed';
+      nav._stuckReason = 'no_bfs_route';
+      return {
+        status: 'stuck',
+        pathfinding: nav._pathfindingMethod,
+        player_pos: { x: startX, y: startY },
+        target: { x: targetX, y: targetY },
+        total_distance: totalDist,
+        error: nav.error,
+      };
     }
+    var bfsSample = Math.max(2, Math.min(5, Math.round(totalDist / 25)));
+    var waypoints = _samplePath(bfsPath, bfsSample);
 
     // Set up nav state
     nav.active = true;
@@ -1205,7 +1396,7 @@
     nav.stuckCount = 0;
     nav.status = 'navigating';
     nav.error = null;
-    nav._pathfindingMethod = usedBFS ? 'bfs' : 'linear_fallback';
+    nav._pathfindingMethod = 'bfs';
     nav._stuckReason = null;
 
     // Start first hop
@@ -1292,6 +1483,7 @@
     var nameLower = name.toLowerCase();
     var best = null, bestDist = Infinity;
     var allEnts = game.entities.entities || {};
+
     for (var inst in allEnts) {
       if (!allEnts.hasOwnProperty(inst)) continue;
       var ent = allEnts[inst];
@@ -1300,13 +1492,13 @@
       var dist = Math.abs(ent.gridX - px) + Math.abs(ent.gridY - py);
       if (dist < bestDist) { bestDist = dist; best = { instance: inst, entity: ent, dist: dist }; }
     }
+
     if (!best) return { error: 'No NPC matching "' + name + '" found nearby' };
+
     var npc = best.entity;
-    // Server uses Manhattan distance < 2 for adjacency (orthogonal only, diagonals rejected)
     var manhattan = Math.abs(npc.gridX - px) + Math.abs(npc.gridY - py);
     p.disableAction = false;
     if (manhattan < 2) {
-      // Orthogonally adjacent — send talk packet (Packets.Target=14, Opcodes.Target.Talk=0)
       game.socket.send(14, [0, best.instance, npc.gridX, npc.gridY]);
       return {
         talked: true, npc: getEntityName(npc), instance: best.instance,
@@ -1400,74 +1592,6 @@
     return { reset: true };
   };
 
-  // ── Lootbag popup (Menu-extending modal) helpers ──
-  // The #lootbag popup appears when the server has set player.activeLootBag
-  // after a Movement.Stop packet with target=lootbag.instance. Only when this
-  // popup is visible will direct LootBag.Take packets succeed server-side.
-  window.__lootbagPopupState = function () {
-    try {
-      var el = document.querySelector('#lootbag');
-      if (!el) return { open: false, item_count: 0 };
-      var display = (el.style && el.style.display) || '';
-      if (display !== 'flex' && display.indexOf('flex') === -1) {
-        return { open: false, item_count: 0 };
-      }
-      var slots = document.querySelectorAll('#lootbag-items > ul > li');
-      var indices = [];
-      for (var i = 0; i < slots.length; i++) {
-        var li = slots[i];
-        var idx = (typeof li.index === 'number')
-          ? li.index
-          : parseInt(li.getAttribute('data-index') || String(i), 10);
-        if (!isNaN(idx)) indices.push(idx);
-      }
-      var free = 0;
-      try {
-        var inv = window.game && window.game.menu && window.game.menu.getInventory();
-        if (inv && inv.getElement) {
-          for (var j = 0; j < 25; j++) {
-            var invEl = inv.getElement(j);
-            if (!invEl || !invEl.dataset || !invEl.dataset.key
-                || (inv.isEmpty && inv.isEmpty(invEl))) free++;
-          }
-        }
-      } catch (_) {}
-      return {
-        open: true,
-        item_count: indices.length,
-        slot_indices: indices,
-        inventory_free_slots: free,
-      };
-    } catch (e) {
-      return { open: false, error: String(e) };
-    }
-  };
-
-  window.__takeAllFromLootbag = function () {
-    // Send one LootBag.Take packet per slot index. Server validates that
-    // player.activeLootBag matches the bag instance (it will, because the
-    // popup is only shown after open() sets that flag). Silent no-op if
-    // popup is not open.
-    try {
-      var state = window.__lootbagPopupState();
-      if (!state.open) return { sent: 0, reason: 'popup_not_open' };
-      var game = window.game;
-      if (!game || !game.socket) return { sent: 0, reason: 'game_not_loaded' };
-      var sent = 0;
-      var indices = state.slot_indices || [];
-      for (var i = 0; i < indices.length; i++) {
-        try {
-          // Packets.LootBag = 56, Opcodes.LootBag.Take = 1
-          game.socket.send(56, { opcode: 1, index: indices[i] });
-          sent++;
-        } catch (e) {}
-      }
-      return { sent: sent, indices: indices };
-    } catch (e) {
-      return { sent: 0, error: String(e) };
-    }
-  };
-
   // ── Auto-cache: update game state + ASCII map every 500ms ──
   window.__latestGameState = window.__extractGameState();
   window.__latestAsciiMap = window.__generateAsciiMap();
@@ -1551,8 +1675,8 @@
               p.go(nav.waypoints[nav.currentWP].x, nav.waypoints[nav.currentWP].y);
             }
           }
-          // Check if stuck (no position change for 8 seconds)
-          else if (Date.now() - nav.lastMoveTime > 8000) {
+          // Check if stuck (no position change for 3 seconds)
+          else if (Date.now() - nav.lastMoveTime > 3000) {
             var moved = nav.lastPos && (p.gridX !== nav.lastPos.x || p.gridY !== nav.lastPos.y);
             if (moved) {
               // Player moved but hasn't reached waypoint — update tracking
@@ -1562,26 +1686,32 @@
             } else {
               nav.stuckCount++;
               if (nav.stuckCount === 1) {
-                // First stuck: try BFS to find a path around the obstacle
+                // First stuck: reroute all the way to the final target from the
+                // current position instead of nudging the same coarse waypoint.
                 nav.lastMoveTime = Date.now();
-                var bfsTarget = wp;
-                // If current waypoint is close but unreachable, try BFS to the NEXT waypoint or final target
-                if (distToWP <= 20 && nav.currentWP + 1 < nav.waypoints.length) {
-                  bfsTarget = nav.waypoints[nav.currentWP + 1];
+                var reroutePath = null;
+                var rerouteTries = [
+                  Math.min(Math.max(distToTarget + 20, 40), 80),
+                  Math.min(Math.max(distToTarget + 60, 80), 150),
+                  Math.min(Math.max(distToTarget + 120, 150), 250),
+                ];
+                for (var rri = 0; rri < rerouteTries.length; rri++) {
+                  reroutePath = _bfsPath(p.gridX, p.gridY, nav.targetX, nav.targetY, rerouteTries[rri]);
+                  if (reroutePath && reroutePath.length > 0) break;
                 }
-                var bfsResult = _bfsPath(p.gridX, p.gridY, bfsTarget.x, bfsTarget.y, 40, 10);
-                if (bfsResult && bfsResult.length > 0) {
-                  // Splice BFS waypoints into the nav plan, replacing current waypoint
-                  var remaining = nav.waypoints.slice(nav.currentWP + (bfsTarget === wp ? 1 : 2));
-                  nav.waypoints = nav.waypoints.slice(0, nav.currentWP).concat(bfsResult).concat(remaining);
-                  // Start moving to first BFS waypoint
+                if (reroutePath && reroutePath.length > 0) {
+                  var rerouteSample = Math.max(2, Math.min(4, Math.round(distToTarget / 20)));
+                  var rerouteWaypoints = _samplePath(reroutePath, rerouteSample);
+                  nav.waypoints = rerouteWaypoints;
+                  nav.currentWP = 0;
                   p.disableAction = false;
-                  p.go(nav.waypoints[nav.currentWP].x, nav.waypoints[nav.currentWP].y);
+                  p.go(rerouteWaypoints[0].x, rerouteWaypoints[0].y);
                   nav.stuckCount = 0; // Reset — we have a new route
                 } else {
-                  // BFS failed — retry go() as before
-                  p.disableAction = false;
-                  if (!p.moving && !p.hasPath()) { p.go(wp.x, wp.y); }
+                  nav.active = false;
+                  nav.status = 'stuck';
+                  nav._stuckReason = 'reroute_failed';
+                  nav.error = 'Stuck and could not reroute with BFS at (' + p.gridX + ',' + p.gridY + ')';
                 }
               } else if (nav.stuckCount >= 2) {
                 nav.active = false;

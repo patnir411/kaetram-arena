@@ -149,7 +149,7 @@ def run_agent_phase(
     username: str,
     phase: Phase,
     endpoint: LLMEndpoint,
-    game_url: str = "http://localhost:9000",
+    game_url: str | None = None,
     time_budget_seconds: int = 180,
     headed: bool = False,
 ) -> AgentResult:
@@ -159,6 +159,10 @@ def run_agent_phase(
       - pytest skip if endpoint is None (use llm_endpoint.skip_if_no_llm)
       - eventual cleanup_player on test teardown (done via fixture scope)
     """
+    # Resolve client URL: explicit arg > KAETRAM_CLIENT_URL env (set by
+    # conftest from KAETRAM_CLIENT_PORT) > localhost:9000 fallback.
+    if game_url is None:
+        game_url = os.environ.get("KAETRAM_CLIENT_URL", "http://localhost:9000")
     sandbox = Path(tempfile.mkdtemp(prefix=f"kaetram_quest_{phase.phase_id}_"))
     (sandbox / "state").mkdir(parents=True, exist_ok=True)
     (sandbox / "logs").mkdir(parents=True, exist_ok=True)

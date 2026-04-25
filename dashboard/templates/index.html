@@ -1699,6 +1699,7 @@ const typeMap = {0:'player',1:'npc',2:'item',3:'mob',4:'item',8:'item',12:'npc',
 function classifyAction(ev) {
   if (ev.type === 'thinking') return { icon: '\ud83e\udde0', cls: 'thinking-event', label: 'Think' };
   if (ev.type === 'text') return { icon: '\ud83d\udcac', cls: 'text-event', label: 'Say' };
+  if (ev.type === 'error') return { icon: '\u26a0\ufe0f', cls: 'error-event', label: 'Error' };
   const tool = (ev.tool || '').toLowerCase();
   const toolFull = (ev.tool_full || '').toLowerCase();
   const sum = (ev.summary || '').toLowerCase();
@@ -1835,6 +1836,14 @@ function buildEventHTML(ev, idx, prefix, withDetails, isNew) {
     if (withDetails) {
       html += '<div class="event-detail" id="' + id + '">' + esc(ev.text) + '</div>';
     }
+  } else if (ev.type === 'error') {
+    html += '<div class="activity-event error-event' + newCls + '" data-ev-idx="' + idx + '">'
+      + '<span class="ev-icon">' + cls.icon + '</span>'
+      + '<span class="turn-num">#' + ev.turn + '</span>'
+      + '<span class="tool-name" style="color:#e07b7b">' + esc(cls.label) + '</span>'
+      + '<span class="summary" style="color:#e07b7b">' + esc(ev.summary || '') + '</span>'
+      + '<span class="ev-time" data-ev-turn="' + ev.turn + '"></span>'
+      + '</div>';
   } else if (ev.type === 'thinking') {
     html += '<div class="activity-event thinking-event' + newCls + '" data-ev-idx="' + idx + '" onclick="toggleDetail(\'' + id + '\')">'
       + '<span class="ev-icon">' + cls.icon + '</span>'
@@ -2492,16 +2501,12 @@ async function refreshFast() {
               claude: 'var(--green)',
               codex: 'var(--amber)',
               gemini: '#4285F4',    // Google blue
-              kimi: '#00BFA5',      // teal
-              'qwen-code': '#FF6B00', // orange
               opencode: '#9C27B0'   // purple
             };
             const hLabels = {
               claude: 'CLAUDE',
               codex: 'CODEX',
               gemini: 'GEMINI',
-              kimi: 'KIMI K2',
-              'qwen-code': 'QWEN CODE',
               opencode: 'OPENCODE'
             };
             const hColor = hColors[harness] || 'var(--text)';

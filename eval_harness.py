@@ -48,12 +48,12 @@ DEFAULT_MODELS = {
     "base": {
         "endpoint": "https://patnir411--kaetram-qwen-base-inference-serve.modal.run/v1",
         "username": "evalbotBase",
-        "server_port": "9041",
+        "server_port": "9071",
     },
     "r9-sft": {
         "endpoint": "https://patnir411--kaetram-qwen-serve-inference-serve.modal.run/v1",
         "username": "evalbotR9",
-        "server_port": "9001",
+        "server_port": "9061",
     },
 }
 

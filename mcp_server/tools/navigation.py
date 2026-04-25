@@ -57,7 +57,7 @@ async def navigate(ctx: Context, x: int, y: int) -> str:
     result = await page.evaluate(
         "([x,y]) => JSON.stringify(window.__navigateTo(x, y))", [x, y]
     )
-    await page.wait_for_timeout(4000)
+    await page.wait_for_timeout(1000)
 
     try:
         parsed = json.loads(result) if isinstance(result, str) else result

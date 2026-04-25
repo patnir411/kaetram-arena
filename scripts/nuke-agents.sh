@@ -8,12 +8,10 @@ echo "=== NUKING all agent processes ==="
 pkill -9 -f "python3 orchestrate.py" 2>/dev/null || true
 tmux kill-session -t datacol 2>/dev/null || true
 
-# Kill ALL agent CLI processes (Claude, Codex, Gemini, Kimi, Qwen, OpenCode)
+# Kill ALL agent CLI processes (Claude, Codex, Gemini, OpenCode)
 pkill -9 -f "claude -p" 2>/dev/null || true
 pkill -9 -f "codex.*exec" 2>/dev/null || true
 pkill -9 -f "gemini -p" 2>/dev/null || true
-pkill -9 -f "kimi -p" 2>/dev/null || true
-pkill -9 -f "qwen -p" 2>/dev/null || true
 pkill -9 -f "opencode run" 2>/dev/null || true
 # Kill the bash `timeout` wrappers too (they keep their child alive on SIGTERM)
 pkill -9 -f "timeout .* opencode" 2>/dev/null || true

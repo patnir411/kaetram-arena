@@ -33,6 +33,7 @@ from tests.e2e.quests.conftest import (
 )
 from tests.e2e.quests.reachability.conftest import (
     MUDWICH_SPAWN,
+    REACHABILITY_NO_PROGRESS_TIMEOUT_S,
     assert_pos_within,
     navigate_long,
     reachability,
@@ -40,7 +41,7 @@ from tests.e2e.quests.reachability.conftest import (
     vanilla_seed_kwargs,
 )
 
-FORAGING = 15  # Modules.Skills enum
+FORAGING = 15  # Modules.Skills enum (Kaetram-Open common/network/modules.ts)
 HERBALIST_POS = NPCS["herbalist"]  # (333, 281)
 
 # Bush placements near Mudwich / Herbalist corridor. Verified by Herbalist
@@ -74,7 +75,7 @@ async def test_h1_navigate_mudwich_to_herbalist(test_username, test_debug):
                 arrive_tolerance=5,
                 per_hop_timeout_s=90.0,
                 poll_interval_s=2.0,
-                no_progress_timeout_s=45.0,
+                no_progress_timeout_s=REACHABILITY_NO_PROGRESS_TIMEOUT_S,
                 debug=test_debug,
             )
             await assert_pos_within(
@@ -118,35 +119,29 @@ async def test_h2_accept_herbalist_quest(test_username):
 
 @reachability
 @slow
-async def test_h3_foraging_skill_chain_from_mudwich_bushes(test_username):
-    """H3: Can the Foraging skill be ground from Lv1 → Lv10 using only
-    bushes reachable near Mudwich? (Blueberry Lv1 → Corn Lv5 → Bluelily Lv10.)
+async def test_h3_forage_blueberry_near_mudwich(test_username):
+    """H3: Can a vanilla player gather a starter blueberry bush near Mudwich?
 
-    The Herbalist quest's real-player prereq is Foraging Lv25 (paprika), but
-    the first tier-progression leap is 1→10 which must work before any bush
-    harder than blueberry can be touched. This test covers the first third.
+    Reachability tests should keep action-only assertions minimal. H4 and H5
+    already prove the higher-level foraging gathers with skill seeded; this
+    step only needs to show the Mudwich blueberry primitive works from a
+    real starter position.
     """
     seed_player(
         test_username,
-        **vanilla_seed_kwargs(position=(BLUEBERRY_CLUSTER[0], BLUEBERRY_CLUSTER[1] + 1)),
+        **vanilla_seed_kwargs(position=(BLUEBERRY_CLUSTER[0] - 1, BLUEBERRY_CLUSTER[1])),
     )
     try:
         async with mcp_session(username=test_username) as session:
-            # Gather blueberries until Foraging ≥ 5 (corn unlock).
-            # Blueberry yields 10 XP per gather; need ~54 to cross Lv5
-            # (150 XP threshold on the RS curve).
             await gather_until_count(
                 session,
                 resource_name="Blueberry",
                 item_key="blueberry",
-                target_count=15,
-                attempts=20,
+                target_count=1,
+                attempts=3,
                 polls_after_gather=4,
                 delay_after_gather_s=0.5,
             )
-            # Don't assert an exact level here — just that the primitive works.
-            # Full 1→10 grind is out of scope for a reachability check; H4/H5
-            # prove the higher-level gathers work with skill seeded.
     finally:
         cleanup_player(test_username)
 

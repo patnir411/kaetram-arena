@@ -30,8 +30,6 @@ N_EXPLORER_TINKERER=""
 N_CLAUDE=""
 N_CODEX=""
 N_GEMINI=""
-N_KIMI=""
-N_QWEN_CODE=""
 N_OPENCODE=""
 
 # Parse args
@@ -61,20 +59,6 @@ while [[ $# -gt 0 ]]; do
         N_GEMINI="$2"; shift 2
       else
         N_GEMINI="-1"; shift  # bare --gemini = all agents
-      fi
-      ;;
-    --kimi)
-      if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
-        N_KIMI="$2"; shift 2
-      else
-        N_KIMI="-1"; shift  # bare --kimi = all agents
-      fi
-      ;;
-    --qwen-code)
-      if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
-        N_QWEN_CODE="$2"; shift 2
-      else
-        N_QWEN_CODE="-1"; shift  # bare --qwen-code = all agents
       fi
       ;;
     --opencode)
@@ -130,13 +114,9 @@ HARNESS_DESC=""
 [ -n "$N_CLAUDE" ] && [ "$N_CLAUDE" != "-1" ] && [ "$N_CLAUDE" -gt 0 ] 2>/dev/null && HARNESS_DESC="${HARNESS_DESC}${HARNESS_DESC:+ + }$N_CLAUDE Claude"
 [ -n "$N_CODEX" ] && [ "$N_CODEX" != "-1" ] && [ "$N_CODEX" -gt 0 ] 2>/dev/null && HARNESS_DESC="${HARNESS_DESC}${HARNESS_DESC:+ + }$N_CODEX Codex"
 [ -n "$N_GEMINI" ] && [ "$N_GEMINI" != "-1" ] && [ "$N_GEMINI" -gt 0 ] 2>/dev/null && HARNESS_DESC="${HARNESS_DESC}${HARNESS_DESC:+ + }$N_GEMINI Gemini"
-[ -n "$N_KIMI" ] && [ "$N_KIMI" != "-1" ] && [ "$N_KIMI" -gt 0 ] 2>/dev/null && HARNESS_DESC="${HARNESS_DESC}${HARNESS_DESC:+ + }$N_KIMI Kimi"
-[ -n "$N_QWEN_CODE" ] && [ "$N_QWEN_CODE" != "-1" ] && [ "$N_QWEN_CODE" -gt 0 ] 2>/dev/null && HARNESS_DESC="${HARNESS_DESC}${HARNESS_DESC:+ + }$N_QWEN_CODE Qwen Code"
 [ -n "$N_OPENCODE" ] && [ "$N_OPENCODE" != "-1" ] && [ "$N_OPENCODE" -gt 0 ] 2>/dev/null && HARNESS_DESC="${HARNESS_DESC}${HARNESS_DESC:+ + }$N_OPENCODE OpenCode"
 [ "$N_CODEX" = "-1" ] && HARNESS_DESC="all Codex"
 [ "$N_GEMINI" = "-1" ] && HARNESS_DESC="all Gemini"
-[ "$N_KIMI" = "-1" ] && HARNESS_DESC="all Kimi"
-[ "$N_QWEN_CODE" = "-1" ] && HARNESS_DESC="all Qwen Code"
 [ "$N_OPENCODE" = "-1" ] && HARNESS_DESC="all OpenCode"
 [ -z "$HARNESS_DESC" ] && HARNESS_DESC="all Claude"
 echo "  Harness: $HARNESS_DESC"
@@ -154,8 +134,6 @@ tmux kill-session -t datacol 2>/dev/null || true
 pkill -f "claude -p.*You play\|claude -p.*ClaudeBot\|claude -p.*play the game\|claude -p.*IMPORTANT" 2>/dev/null || true
 pkill -f "codex.*exec" 2>/dev/null || true
 pkill -f "gemini.*-p" 2>/dev/null || true
-pkill -f "kimi -p" 2>/dev/null || true
-pkill -f "qwen -p" 2>/dev/null || true
 pkill -f "opencode run" 2>/dev/null || true
 pkill -f "timeout .* opencode" 2>/dev/null || true
 pkill -f "play.sh" 2>/dev/null || true
@@ -216,7 +194,7 @@ if docker ps --format '{{.Names}}' | grep -q "^${MONGO_CONTAINER}$"; then
   USER_JS_ARRAY=""
   for i in $(seq 0 $((TOTAL_AGENTS - 1))); do
     [ -n "$USER_JS_ARRAY" ] && USER_JS_ARRAY="${USER_JS_ARRAY},"
-    USER_JS_ARRAY="${USER_JS_ARRAY}'claudebot${i}','codexbot${i}','geminibot${i}','kimibot${i}','qwencodebot${i}','opencodebot${i}'"
+    USER_JS_ARRAY="${USER_JS_ARRAY}'claudebot${i}','codexbot${i}','geminibot${i}','opencodebot${i}'"
   done
 
   echo "Resetting player data in MongoDB..."
@@ -239,9 +217,9 @@ if docker ps --format '{{.Names}}' | grep -q "^${MONGO_CONTAINER}$"; then
   PYTHONPATH="$PROJECT_DIR" "$PROJECT_DIR/.venv/bin/python3" - <<PYEOF
 from tests.e2e.helpers.seed import seed_player
 for i in range($TOTAL_AGENTS):
-    for prefix in ("claudebot", "codexbot", "geminibot", "kimibot", "qwencodebot", "opencodebot"):
+    for prefix in ("claudebot", "codexbot", "geminibot", "opencodebot"):
         seed_player(f"{prefix}{i}")
-print(f"  Seeded {$TOTAL_AGENTS * 6} bot rows.")
+print(f"  Seeded {$TOTAL_AGENTS * 4} bot rows.")
 PYEOF
 else
   echo "WARNING: MongoDB container not running — skipping DB reset"
@@ -301,6 +279,19 @@ else
   echo "Dashboard already running on :8080"
 fi
 
+# Ensure the NIM proxy is running for any opencode agents (it flattens
+# extraBody and rewrites reasoning_content → content so opencode actually
+# surfaces Qwen thinking). Cheap to run when no opencode agents are launched
+# either, so we always start it.
+if [ -n "$N_OPENCODE" ] && [ "$N_OPENCODE" != "0" ]; then
+  if ! ss -lnt 'sport = :8889' | grep -q LISTEN; then
+    echo "Starting NIM proxy on 127.0.0.1:8889 ..."
+    "$PROJECT_DIR/scripts/start-nim-proxy.sh" || echo "  (proxy start failed — opencode will still run but reasoning won't surface)"
+  else
+    echo "NIM proxy already running on 127.0.0.1:8889"
+  fi
+fi
+
 # ── Step 7: Launch orchestrator in datacol tmux session ──
 echo "Launching orchestrator ($TOTAL_AGENTS agents, $HOURS hours)..."
 
@@ -316,8 +307,6 @@ fi
 [ -n "$N_CLAUDE" ] && ORCH_CMD="$ORCH_CMD --claude $N_CLAUDE"
 [ -n "$N_CODEX" ] && ORCH_CMD="$ORCH_CMD --codex $N_CODEX"
 [ -n "$N_GEMINI" ] && ORCH_CMD="$ORCH_CMD --gemini $N_GEMINI"
-[ -n "$N_KIMI" ] && ORCH_CMD="$ORCH_CMD --kimi $N_KIMI"
-[ -n "$N_QWEN_CODE" ] && ORCH_CMD="$ORCH_CMD --qwen-code $N_QWEN_CODE"
 [ -n "$N_OPENCODE" ] && ORCH_CMD="$ORCH_CMD --opencode $N_OPENCODE"
 ORCH_CMD="$ORCH_CMD 2>&1 | tee /tmp/orchestrate.log"
 

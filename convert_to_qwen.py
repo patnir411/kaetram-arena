@@ -1238,7 +1238,8 @@ def turn_to_conversation(turn: dict, personality: str | None = None, min_score: 
 EXCLUDED_AGENTS = {"agent_3", "agent_4", "agent_5"}
 
 # Only include turns from these harnesses in training data.
-# Codex/Kimi/Qwen turns are excluded until validated.
+# Codex/Gemini/OpenCode integrations are experimental (smoke-test only) and
+# their turns are excluded until validated.
 INCLUDED_HARNESSES = {"claude", "unknown"}
 
 

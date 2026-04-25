@@ -71,6 +71,15 @@ async def craft_item(ctx: Context, skill: str, recipe_key: str, count: int = 1) 
     crafting_state = {}
     visible = False
     inventory_opener = open_result.get("via") == "inventory_item"
+    # For inventory-opener skills (fletching/chiseling), the open round-trip
+    # is asynchronous: client sends Container.Select -> server fires the
+    # knife/chisel plugin -> server sends Crafting.Open back -> client makes
+    # the menu visible. Without this leading wait the visible-check below
+    # passes on a stale `selected_key` from a previous open, but the server's
+    # `activeCraftingInterface` isn't set yet, so the follow-up Craft packet
+    # is rejected at incoming.ts:794.
+    if inventory_opener:
+        await page.wait_for_timeout(1500)
     for _ in range(10):
         await page.wait_for_timeout(500)
         crafting_state = await page.evaluate("() => window.__getCraftingState ? window.__getCraftingState() : ({ visible: false })")
@@ -114,6 +123,42 @@ async def craft_item(ctx: Context, skill: str, recipe_key: str, count: int = 1) 
         diff = inv_after.get(item_key, 0) - inv_before.get(item_key, 0)
         if diff != 0:
             inventory_delta[item_key] = diff
+
+    # Workaround for chained crafts on the same already-open interface (e.g.
+    # fletching: 1 logs -> 4 sticks, then 4 sticks -> 1 bowlmedium). The server
+    # accepts Crafting.Select but a follow-up Craft sometimes lands as a no-op.
+    # If the confirm produced no inventory change, close the menu, re-open it
+    # via the standard path, re-select, and re-confirm once.
+    if not inventory_delta and open_result.get("via") == "existing":
+        log(f"[craft_item] empty inventory_delta on existing menu — retrying with fresh open for {skill_name}/{key}")
+        await page.evaluate("() => window.__closeCraftingMenu && window.__closeCraftingMenu()")
+        await page.wait_for_timeout(500)
+        reopen = await page.evaluate("(skillName) => window.__openProductionInterface(skillName)", skill_name)
+        if isinstance(reopen, str):
+            reopen = json.loads(reopen)
+        if not reopen.get("error"):
+            for _ in range(10):
+                await page.wait_for_timeout(500)
+                cs = await page.evaluate("() => window.__getCraftingState ? window.__getCraftingState() : ({ visible: false })")
+                if cs.get("visible") or (cs.get("skill") == skill_name and cs.get("selected_key")):
+                    break
+            sel2 = await page.evaluate("(recipe) => window.__selectCraftRecipe(recipe)", key)
+            if isinstance(sel2, str):
+                sel2 = json.loads(sel2)
+            if not sel2.get("error"):
+                await page.wait_for_timeout(700)
+                conf2 = await page.evaluate("([recipe, amount]) => window.__confirmCraftRecipe(recipe, amount)", [key, craft_count])
+                if isinstance(conf2, str):
+                    conf2 = json.loads(conf2)
+                if not conf2.get("error"):
+                    await page.wait_for_timeout(2500)
+                    inv_retry = await page.evaluate("() => window.__inventorySnapshot ? window.__inventorySnapshot() : {}")
+                    inventory_delta = {}
+                    keys = set(inv_before) | set(inv_retry)
+                    for item_key in keys:
+                        diff = inv_retry.get(item_key, 0) - inv_before.get(item_key, 0)
+                        if diff != 0:
+                            inventory_delta[item_key] = diff
 
     result = {"crafted": True, "skill": skill_name, "recipe_key": key, "count": craft_count,
               "opened_via": open_result.get("via"), "target": open_result.get("target"),

@@ -24,8 +24,6 @@ HOURS=""
 N_CLAUDE=""
 N_CODEX=""
 N_GEMINI=""
-N_KIMI=""
-N_QWEN_CODE=""
 N_OPENCODE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -54,20 +52,6 @@ while [[ $# -gt 0 ]]; do
         N_GEMINI="-1"; shift
       fi
       ;;
-    --kimi)
-      if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
-        N_KIMI="$2"; shift 2
-      else
-        N_KIMI="-1"; shift
-      fi
-      ;;
-    --qwen-code)
-      if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
-        N_QWEN_CODE="$2"; shift 2
-      else
-        N_QWEN_CODE="-1"; shift
-      fi
-      ;;
     --opencode)
       if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
         N_OPENCODE="$2"; shift 2
@@ -91,8 +75,6 @@ fi
 pkill -f "claude -p.*You play\|claude -p.*ClaudeBot\|claude -p.*play the game\|claude -p.*IMPORTANT" 2>/dev/null || true
 pkill -f "codex.*exec" 2>/dev/null || true
 pkill -f "gemini.*-p" 2>/dev/null || true
-pkill -f "kimi -p" 2>/dev/null || true
-pkill -f "qwen -p" 2>/dev/null || true
 pkill -f "opencode run" 2>/dev/null || true
 pkill -f "timeout .* opencode" 2>/dev/null || true
 pkill -f "play.sh" 2>/dev/null || true
@@ -225,8 +207,6 @@ fi
 [ -n "$N_CLAUDE" ] && ORCH_ARGS="$ORCH_ARGS --claude $N_CLAUDE"
 [ -n "$N_CODEX" ] && ORCH_ARGS="$ORCH_ARGS --codex $N_CODEX"
 [ -n "$N_GEMINI" ] && ORCH_ARGS="$ORCH_ARGS --gemini $N_GEMINI"
-[ -n "$N_KIMI" ] && ORCH_ARGS="$ORCH_ARGS --kimi $N_KIMI"
-[ -n "$N_QWEN_CODE" ] && ORCH_ARGS="$ORCH_ARGS --qwen-code $N_QWEN_CODE"
 [ -n "$N_OPENCODE" ] && ORCH_ARGS="$ORCH_ARGS --opencode $N_OPENCODE"
 
 ORCH_CMD="cd $PROJECT_DIR && python3 orchestrate.py $ORCH_ARGS 2>&1 | tee /tmp/orchestrate.log"

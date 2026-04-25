@@ -185,7 +185,10 @@ async def _ensure_browser(state: dict):
                 const _WS = window.WebSocket;
                 window.WebSocket = function(url, protocols) {{
                     url = url.replace(/\\/\\/[^:/]+/, '//localhost');
-                    url = url.replace(/:9001(?=\\/|$)/, ':' + PORT);
+                    // Rewrite whatever port the client emits (today always
+                    // :9001 from .env.defaults; defensive against future
+                    // Kaetram default-port changes).
+                    url = url.replace(/:\\d+(?=\\/|$)/, ':' + PORT);
                     return protocols ? new _WS(url, protocols) : new _WS(url);
                 }};
                 window.WebSocket.prototype = _WS.prototype;

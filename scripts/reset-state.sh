@@ -78,7 +78,7 @@ fi
 USERNAMES=()
 USER_JS_ARRAY=""
 for i in $(seq 0 $((N_AGENTS - 1))); do
-  for prefix in claudebot codexbot geminibot kimibot qwencodebot; do
+  for prefix in claudebot codexbot geminibot opencodebot; do
     USERNAMES+=("${prefix}${i}")
     [ -n "$USER_JS_ARRAY" ] && USER_JS_ARRAY="${USER_JS_ARRAY},"
     USER_JS_ARRAY="${USER_JS_ARRAY}'${prefix}${i}'"

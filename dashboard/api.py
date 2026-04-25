@@ -445,8 +445,7 @@ class APIMixin:
                 "claude": "sonnet",
                 "codex": "gpt-5.4",
                 "gemini": "gemini-2.5-flash",
-                "kimi": "kimi-k2",
-                "qwen-code": "qwen3-coder",
+                "opencode": "opencode-default",
             }
             if os.path.isfile(metadata_file):
                 try:

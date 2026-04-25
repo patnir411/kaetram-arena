@@ -57,8 +57,13 @@ def _server_params(
         "KAETRAM_PASSWORD": password,
         "KAETRAM_SCREENSHOT_DIR": screenshot_dir,
     }
-    if port is not None:
-        env["KAETRAM_PORT"] = str(port)
+    # Resolve port: explicit arg > KAETRAM_PORT env (set by conftest from
+    # KAETRAM_WS_PORT). Without this fallback the MCP subprocess starts
+    # with no port hint and the browser's WS URL stays at the default
+    # :9001 — which is agent_0's port, not the test lane.
+    resolved_port = port if port is not None else _os.environ.get("KAETRAM_PORT")
+    if resolved_port is not None:
+        env["KAETRAM_PORT"] = str(resolved_port)
     if extra_env:
         env.update(extra_env)
     return StdioServerParameters(

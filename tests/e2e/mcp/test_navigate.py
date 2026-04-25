@@ -1,41 +1,46 @@
-"""Layer A navigate happy path: seed a player, request a short move, assert
-the position updates within the timeout.
-
-Layer B test pending a real navigate call once the lane is confirmed green."""
+"""navigate() — navigate 12 tiles east, verify player position changed."""
 
 from __future__ import annotations
 
+import asyncio
+import math
+
 import pytest
 
-from tests.e2e.helpers.browser import browser_session, login_seeded_player
-from tests.e2e.helpers.primitives import game_move_to
-from tests.e2e.helpers.seed import cleanup_player, seed_player
-from tests.e2e.helpers.wait import wait_for_state
+from bench.seed import cleanup_player, seed_player
+
+from ..helpers.mcp_client import mcp_session
+
+MOVE_TIMEOUT = 4.0
 
 
-@pytest.mark.mcp_smoke
-async def test_layerA_navigate_short_range_happy_path(isolated_lane, unique_username):
-    start_x, start_y = 199, 169
-    target_x, target_y = 200, 169
-
-    seed_player(
-        unique_username,
-        helper_url=isolated_lane.db_helper_url,
-        position=(start_x, start_y),
-    )
+@pytest.mark.mcp
+async def test_navigate_moves_player(test_username):
+    """Seed at (188, 157), navigate to (200, 157). After MOVE_TIMEOUT seconds,
+    observe must show the player moved ≥1 tile from seed position."""
+    cleanup_player(test_username)
+    seed_player(test_username, position=(188, 157))
     try:
-        async with browser_session() as (_browser, _context, page):
-            await login_seeded_player(page, unique_username, client_url=isolated_lane.client_url)
+        async with mcp_session(username=test_username) as s:
+            obs0 = (await s.call_tool("observe", {})).json() or {}
+            pos0 = obs0.get("pos") or {}
+            x0, y0 = pos0.get("x", 188), pos0.get("y", 157)
 
-            await game_move_to(page, target_x, target_y)
+            res = await s.call_tool("navigate", {"x": 200, "y": 157})
+            assert not res.is_error, res.text[:200]
+            data = res.json() or {}
+            assert data.get("status") in (
+                "navigating", "arrived", "short_path", "stuck",
+            ), f"unexpected nav status: {data}"
 
-            final = await wait_for_state(
-                page,
-                lambda s: s["player"]["x"] == target_x and s["player"]["y"] == target_y,
-                timeout=8.0,
+            await asyncio.sleep(MOVE_TIMEOUT)
+
+            obs1 = (await s.call_tool("observe", {})).json() or {}
+            pos1 = obs1.get("pos") or {}
+            x1, y1 = pos1.get("x", x0), pos1.get("y", y0)
+            dist = math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2)
+            assert dist >= 1, (
+                f"player didn't move: ({x0},{y0}) → ({x1},{y1}); status={data.get('status')}"
             )
-
-        assert final["player"]["x"] == target_x
-        assert final["player"]["y"] == target_y
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(test_username)

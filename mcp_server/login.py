@@ -160,10 +160,11 @@ async def login_impl(ctx: Context, page) -> str:
         log(f"[mcp] Login failed for {username}{detail}")
         log_tool("login", success=False, error=login_error or "game did not load")
         ctx.request_context.lifespan_context["logged_in"] = False
+        ws_port = os.environ.get("KAETRAM_PORT", "(unset)")
         return (
             f"Login FAILED for {username}{detail}. "
             "Check KAETRAM_PASSWORD env matches the seeded bcrypt hash; "
-            "make sure the game server on :9001 is reachable and no other "
+            f"make sure the game server on :{ws_port} is reachable and no other "
             "session holds this username."
         )
 

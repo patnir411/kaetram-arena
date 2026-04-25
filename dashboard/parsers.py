@@ -85,7 +85,7 @@ def parse_session_log(filepath):
     if fmt == "codex":
         result = _parse_codex_session_log(filepath)
     else:
-        # Claude, Gemini, OpenCode, Kimi, Qwen Code all use compatible stream-json
+        # Claude, Gemini, OpenCode all use compatible stream-json
         result = _parse_claude_session_log(filepath)
 
     _parse_cache[filepath] = (mtime, result)
@@ -272,6 +272,20 @@ def _parse_claude_session_log(filepath):
                         "detail": sanitize(detail),
                         "result": result_text,
                         "id": obj.get("tool_id") or part.get("callID", ""),
+                    })
+                    continue
+
+                # Synthetic harness-level errors written by play.sh when a
+                # session ends abnormally (e.g. opencode hits NIM 429 and
+                # produces zero step_finish events). Surface in activity feed.
+                if t == "harness_error":
+                    err = obj.get("error", "harness error")
+                    backoff = obj.get("backoff_secs")
+                    label = f"{err}" if backoff is None else f"{err} (sleep {backoff}s)"
+                    turn += 1
+                    events.append({
+                        "turn": turn, "type": "error",
+                        "summary": sanitize(str(label)[:240]),
                     })
                     continue
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Autonomous Kaetram gameplay loop — supports Claude Code and Codex CLI
+# Autonomous Kaetram gameplay loop — supports Claude Code, Codex, Gemini, OpenCode CLIs
 set -euo pipefail
 unset CLAUDECODE
 
@@ -12,9 +12,6 @@ HARNESS="claude"
 CLAUDE_MODEL="sonnet"
 CODEX_MODEL="gpt-5.4"
 GEMINI_MODEL="gemini-3-flash-preview"
-KIMI_MODEL="kimi-k2"
-QWEN_CODE_MODEL="qwen3-coder"
-OPENCODE_MODEL="${OPENCODE_MODEL:-nvidia/qwen/qwen3-coder-480b-a35b-instruct}"
 for arg in "$@"; do
   case "$arg" in
     # Capability-focused archetypes (only supported set)
@@ -24,8 +21,6 @@ for arg in "$@"; do
     --explorer)             PERSONALITY="explorer_tinkerer";;  # short form
     --codex)       HARNESS="codex";;
     --gemini)      HARNESS="gemini";;
-    --kimi)        HARNESS="kimi";;
-    --qwen-code)   HARNESS="qwen-code";;
     --opencode)    HARNESS="opencode";;
   esac
 done
@@ -38,8 +33,6 @@ PAUSE_BETWEEN=10
 case "$HARNESS" in
   codex)    BOT_USERNAME="CodexBot";;
   gemini)   BOT_USERNAME="GeminiBot";;
-  kimi)     BOT_USERNAME="KimiBot";;
-  qwen-code) BOT_USERNAME="QwenBot";;
   opencode) BOT_USERNAME="OpenCodeBot";;
   *)        BOT_USERNAME="ClaudeBot";;
 esac
@@ -60,26 +53,12 @@ case "$HARNESS" in
     fi
     echo "Using Gemini CLI (model: $GEMINI_MODEL)"
     ;;
-  kimi)
-    if ! command -v kimi &>/dev/null; then
-      echo "ERROR: kimi CLI not found. Install with: curl -LsSf https://code.kimi.com/install.sh | bash"
-      exit 1
-    fi
-    echo "Using Kimi CLI (model: $KIMI_MODEL)"
-    ;;
-  qwen-code)
-    if ! command -v qwen &>/dev/null; then
-      echo "ERROR: qwen-code CLI not found. Install with: npm install -g @qwen-code/qwen-code"
-      exit 1
-    fi
-    echo "Using Qwen Code CLI (model: $QWEN_CODE_MODEL)"
-    ;;
   opencode)
     if ! command -v opencode &>/dev/null; then
       echo "ERROR: opencode CLI not found. Install with: npm install -g opencode"
       exit 1
     fi
-    echo "Using OpenCode CLI (model: $OPENCODE_MODEL)"
+    echo "Using OpenCode CLI (model: opencode default)"
     ;;
   *)
     echo "Using Claude Code CLI (model: $CLAUDE_MODEL)"
@@ -274,39 +253,6 @@ GEMINIJSON
         2>&1 | tee "$LOG_FILE" || true
       ;;
 
-    kimi)
-      # Kimi: resolve .mcp.json template to sandbox, enable thinking and stream-json output
-      sed -e "s|__VENV_PYTHON__|${PROJECT_DIR}/.venv/bin/python3|g" \
-          -e "s|__PROJECT_DIR__|${PROJECT_DIR}|g" \
-          -e "s|__SCREENSHOT_DIR__|${SANDBOX}/state|g" \
-          "$PROJECT_DIR/.mcp.template.json" > "$SANDBOX/.mcp.json"
-
-      # Increased timeout for thinking: ~60s per turn
-      TIMEOUT_SECS=$((MAX_TURNS * 60))
-      (cd "$SANDBOX" && timeout "${TIMEOUT_SECS}s" kimi -p "$PROMPT" \
-        --model "$KIMI_MODEL" \
-        --yolo \
-        --thinking \
-        --output-format stream-json \
-        --append-system-prompt "$SYSTEM") \
-        2>&1 | tee "$LOG_FILE" || true
-      ;;
-
-    qwen-code)
-      # Qwen Code: resolve .mcp.json template to sandbox
-      sed -e "s|__VENV_PYTHON__|${PROJECT_DIR}/.venv/bin/python3|g" \
-          -e "s|__PROJECT_DIR__|${PROJECT_DIR}|g" \
-          -e "s|__SCREENSHOT_DIR__|${SANDBOX}/state|g" \
-          "$PROJECT_DIR/.mcp.template.json" > "$SANDBOX/.mcp.json"
-
-      (cd "$SANDBOX" && qwen -p "$PROMPT" \
-        --model "$QWEN_CODE_MODEL" \
-        --yolo \
-        --output-format stream-json \
-        --append-system-prompt "$SYSTEM") \
-        2>&1 | tee "$LOG_FILE" || true
-      ;;
-
     opencode)
       # OpenCode: resolve opencode.template.json into the sandbox (its CWD-based
       # config lookup) so opencode picks up the kaetram MCP server with the
@@ -321,20 +267,78 @@ GEMINIJSON
 
       mkdir -p "$SANDBOX/state"
       # opencode run is one-shot per invocation; the outer `while true` loop
-      # drives session cadence like every other harness. Turn budget shaped
-      # like qwen-code / kimi (local Ollama inference is comparable speed).
+      # drives session cadence like every other harness.
       TIMEOUT_SECS=$((MAX_TURNS * 45))
       (cd "$SANDBOX" && \
         KAETRAM_USERNAME="$BOT_USERNAME" \
         KAETRAM_EXTRACTOR="$PROJECT_DIR/state_extractor.js" \
         KAETRAM_SCREENSHOT_DIR="$SANDBOX/state" \
         timeout "${TIMEOUT_SECS}s" opencode run \
-          --model "$OPENCODE_MODEL" \
           --format json \
           --dangerously-skip-permissions \
           --dir "$SANDBOX" \
           "$PROMPT") \
-        2>&1 | tee "$LOG_FILE" || true
+        2>&1 | tee "$LOG_FILE" &
+      OPENCODE_BG_PID=$!
+
+      # Context watchdog: opencode rotates the same conversation across many
+      # tool turns; if cumulative input tokens approach the model's window we
+      # must end the session so the outer `while true` starts a fresh one.
+      # Threshold 250k chosen to leave headroom under typical 256k/262k limits.
+      OPENCODE_CTX_LIMIT="${OPENCODE_CTX_LIMIT:-250000}"
+      (
+        sleep 2
+        while kill -0 "$OPENCODE_BG_PID" 2>/dev/null; do
+          if [ -f "$LOG_FILE" ]; then
+            max_ctx=$(grep '"type":"step_finish"' "$LOG_FILE" 2>/dev/null \
+              | grep -oE '"total":[0-9]+' | awk -F: '{print $2}' \
+              | sort -n | tail -1)
+            if [ -n "$max_ctx" ] && [ "$max_ctx" -gt "$OPENCODE_CTX_LIMIT" ]; then
+              echo "[ctx-watchdog] context ${max_ctx} > ${OPENCODE_CTX_LIMIT} — rotating session for $BOT_USERNAME" >&2
+              pkill -TERM -f "opencode run.*--dir $SANDBOX" 2>/dev/null
+              sleep 3
+              pkill -KILL -f "opencode run.*--dir $SANDBOX" 2>/dev/null
+              break
+            fi
+          fi
+          sleep 5
+        done
+      ) &
+      WATCHDOG_PID=$!
+
+      wait "$OPENCODE_BG_PID" 2>/dev/null || true
+      kill "$WATCHDOG_PID" 2>/dev/null || true
+      wait "$WATCHDOG_PID" 2>/dev/null || true
+
+      # Rate-limit backoff: a session that produced no step_finish events is
+      # almost certainly an opencode 429 (or upstream auth failure). Without a
+      # sleep, the outer `while true` immediately respawns and hammers the
+      # endpoint. Detect short/empty sessions and back off before retrying.
+      step_count=$(grep -c '"type":"step_finish"' "$LOG_FILE" 2>/dev/null || echo 0)
+      if [ "${step_count:-0}" -lt 2 ]; then
+        # Check opencode internal log for a 429 to size the backoff
+        OC_LOG_DIR="$HOME/.local/share/opencode/log"
+        backoff=30
+        err_msg="empty session ($step_count step_finish events)"
+        if [ -d "$OC_LOG_DIR" ]; then
+          recent=$(ls -t "$OC_LOG_DIR"/*.log 2>/dev/null | head -1)
+          if [ -n "$recent" ] && grep -q '"statusCode":429' "$recent" 2>/dev/null; then
+            echo "[backoff] $BOT_USERNAME: NIM 429 detected — sleeping 120s before retry" >&2
+            backoff=120
+            err_msg="NVIDIA NIM HTTP 429 — rate limited, sleeping ${backoff}s"
+          else
+            echo "[backoff] $BOT_USERNAME: empty session ($step_count step_finish) — sleeping ${backoff}s" >&2
+          fi
+        fi
+        # Emit a synthetic harness_error event into the session log so the
+        # dashboard activity feed can surface this — opencode itself never
+        # writes errors to the session log.
+        ts_ms=$(date +%s%3N)
+        printf '{"type":"harness_error","timestamp":%s,"error":%s,"backoff_secs":%s}\n' \
+          "$ts_ms" "$(printf '%s' "$err_msg" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')" \
+          "$backoff" >> "$LOG_FILE"
+        sleep "$backoff"
+      fi
       ;;
 
     *)
