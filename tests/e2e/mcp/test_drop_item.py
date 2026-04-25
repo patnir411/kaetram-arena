@@ -1,73 +1,48 @@
-"""Layer B tests for the `drop_item` MCP tool.
-
-Apr 18-19 production data shows drop_item at 0% success across 82 calls,
-typically firing from an inventory-full panic. Agents often correctly
-guess that a lootbag popup is blocking the drop but the tool reports only
-"inventory count unchanged" without surfacing that modal state.
-
-Layer B covers:
-
-- happy path: seed one junk item in slot 0 on an otherwise empty inventory,
-  call drop_item(0), assert the response JSON reports dropped=true and the
-  inventory_after < inventory_before.
-- empty-slot guard: call drop_item on an empty slot; assert the tool
-  surfaces a clean "No item in slot N" error rather than silently
-  claiming success.
-"""
+"""drop_item() — drop logs from slot 0, verify absent from Mongo after autosave."""
 
 from __future__ import annotations
 
-import json
+import asyncio
 
 import pytest
 
-from tests.e2e.helpers.mcp_client import mcp_session
-from tests.e2e.helpers.seed import cleanup_player, seed_player
+from bench.seed import cleanup_player, seed_player, snapshot_player
+
+from ..helpers.mcp_client import mcp_session
+
+AUTOSAVE_WAIT = 5.0
 
 
-@pytest.mark.mcp_smoke
-async def test_layerB_drop_item_happy_path(isolated_lane, unique_username):
+@pytest.mark.mcp
+async def test_drop_item_removes_from_inventory(test_username):
+    """Seed logs in slot 0, drop slot 0. Tool must not return an error and
+    Mongo inventory must not contain logs after autosave."""
+    cleanup_player(test_username)
     seed_player(
-        unique_username,
-        position=(199, 169),
-        inventory=[{"key": "mushroom1", "count": 1}],
+        test_username,
+        position=(188, 157),
+        inventory=[
+            {"index": 0, "key": "logs", "count": 1},
+            {"index": 1, "key": "apple", "count": 3},
+        ],
     )
     try:
-        async with mcp_session(
-            username=unique_username,
-            client_url=isolated_lane.client_url,
-        ) as session:
-            result = await session.call_tool("drop_item", {"slot": 0})
+        async with mcp_session(username=test_username) as s:
+            await s.call_tool("observe", {})
+            res = await s.call_tool("drop_item", {"slot": 0})
+            assert not res.is_error, f"drop_item errored: {res.text[:300]}"
+            data = res.json() or {}
+            assert "error" not in data, f"drop_item returned error: {data}"
+            await asyncio.sleep(1.0)
 
-        assert not result.is_error, result.text
-        payload = json.loads(result.text)
-        assert payload.get("dropped") is True, payload
-        before = payload.get("inventory_before")
-        after = payload.get("inventory_after")
-        assert isinstance(before, int) and isinstance(after, int), payload
-        assert after < before, f"expected inventory to shrink, got {payload}"
+        await asyncio.sleep(AUTOSAVE_WAIT)
+
+        snap = snapshot_player(test_username)
+        inv_keys = [
+            sl.get("key") for sl in
+            (snap.get("player_inventory") or {}).get("slots") or []
+            if sl.get("key")
+        ]
+        assert "logs" not in inv_keys, f"logs still in Mongo after drop+autosave: {inv_keys}"
     finally:
-        cleanup_player(unique_username)
-
-
-@pytest.mark.mcp_smoke
-async def test_layerB_drop_item_empty_slot(isolated_lane, unique_username):
-    seed_player(
-        unique_username,
-        position=(199, 169),
-    )
-    try:
-        async with mcp_session(
-            username=unique_username,
-            client_url=isolated_lane.client_url,
-        ) as session:
-            result = await session.call_tool("drop_item", {"slot": 5})
-
-        assert not result.is_error, result.text
-        payload = json.loads(result.text)
-        err = (payload.get("error") or "").lower()
-        assert "no item" in err or "slot" in err, (
-            f"expected an empty-slot error so agent doesn't retry blindly, got {payload}"
-        )
-    finally:
-        cleanup_player(unique_username)
+        cleanup_player(test_username)

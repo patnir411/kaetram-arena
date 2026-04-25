@@ -1,13 +1,7 @@
-"""Miner's Quest II stage-by-stage quest coverage.
-
-Marked skip_tier: upstream-broken in Kaetram-Open. Run with
-``pytest -m skip_tier`` for regression sweeps; excluded from default runs.
-"""
+"""Miner's Quest II stage-by-stage quest coverage."""
 import asyncio
 
 import pytest
-
-pytestmark = pytest.mark.skip_tier
 
 from bench.seed import cleanup_player, seed_player
 from tests.e2e.helpers.kaetram_world import adjacent_to

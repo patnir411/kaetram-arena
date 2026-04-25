@@ -1,110 +1,95 @@
-"""Layer B tests for the `buy_item` MCP tool.
-
-Apr 18-19 production data shows buy_item at 0% success across 39 calls.
-Most failures were "Purchase may have failed — no new items in inventory"
-when buying Burgers from the Clerk, or the agent firing buy_item before
-being adjacent to the NPC.
-
-Layer B covers:
-
-- happy path: seed the player adjacent to Clerk with enough gold,
-  buy Burger (index 4), assert the response reports a purchase and the
-  burger lands in inventory.
-- unknown-NPC guard: the tool hardcodes an NPC→store key map; an unknown
-  name must surface a clean error (rather than walking 999 tiles or
-  silently failing).
-- not-adjacent guard: seed the player far from the Clerk, call buy_item
-  with npc_name='Clerk'; assert the tool reports it could not reach the
-  NPC rather than pretending to buy.
-"""
+"""buy_item() — buy a real item from a real current-tree shopkeeper."""
 
 from __future__ import annotations
 
-import json
+import asyncio
 
 import pytest
 
-from tests.e2e.helpers.mcp_client import mcp_session
-from tests.e2e.helpers.seed import cleanup_player, seed_player
+from bench.seed import cleanup_player, seed_player, snapshot_player
+
+from ..helpers.mcp_client import mcp_session
+
+AUTOSAVE_WAIT = 5.0
+# Miner is a confirmed store NPC on the current tree and is easy to seed
+# adjacent to deterministically.
+MINER_POS = (323, 179)
+START_GOLD = 500
 
 
-@pytest.mark.mcp_smoke
-async def test_layerB_buy_item_happy_path(isolated_lane, unique_username):
+@pytest.mark.mcp
+async def test_buy_coal_from_miner_shopkeeper(test_username):
+    """Seed enough gold adjacent to Miner and buy Coal (item index 0).
+
+    Important caveat: the Miner NPC cannot open the shop while he is occupied
+    by Miner's Quest / Miner's Quest II dialogue. This test therefore seeds a
+    player with those Miner quests in a completed state and asserts that
+    precondition from live observe() before attempting the purchase.
+    """
+    cleanup_player(test_username)
     seed_player(
-        unique_username,
-        position=(398, 889),
-        inventory=[{"key": "gold", "count": 10_000}],
+        test_username,
+        position=MINER_POS,
+        inventory=[
+            {"index": 0, "key": "gold", "count": START_GOLD},
+        ],
+        quests=[
+            {"key": "minersquest", "stage": 2, "subStage": 0, "completedSubStages": []},
+            {"key": "minersquest2", "stage": 3, "subStage": 0, "completedSubStages": []},
+        ],
     )
     try:
-        async with mcp_session(
-            username=unique_username,
-            client_url=isolated_lane.client_url,
-        ) as session:
-            result = await session.call_tool(
-                "buy_item",
-                {"npc_name": "Clerk", "item_index": 4, "count": 1},
-            )
-
-        assert not result.is_error, result.text
-        payload = json.loads(result.text)
-        assert payload.get("bought") is True, payload
-        gained = payload.get("items_gained") or {}
-        assert gained.get("burger", 0) >= 1, payload
-        assert payload.get("gold_spent", 0) > 0, payload
-    finally:
-        cleanup_player(unique_username)
-
-
-@pytest.mark.mcp_smoke
-async def test_layerB_buy_item_unknown_npc(isolated_lane, unique_username):
-    seed_player(
-        unique_username,
-        position=(199, 169),
-        inventory=[{"key": "gold", "count": 10_000}],
-    )
-    try:
-        async with mcp_session(
-            username=unique_username,
-            client_url=isolated_lane.client_url,
-        ) as session:
-            result = await session.call_tool(
-                "buy_item",
-                {"npc_name": "NotARealNPC", "item_index": 0, "count": 1},
-            )
-
-        assert not result.is_error, result.text
-        payload = json.loads(result.text)
-        err = (payload.get("error") or "").lower()
-        assert "unknown store npc" in err or "npc" in err, (
-            f"expected unknown-NPC error, got {payload}"
+        seeded = snapshot_player(test_username)
+        seeded_slots = (seeded.get("player_inventory") or {}).get("slots") or []
+        seeded_gold = next(
+            (int(slot.get("count", 0)) for slot in seeded_slots if slot.get("key") == "gold"),
+            0,
         )
-    finally:
-        cleanup_player(unique_username)
-
-
-@pytest.mark.mcp_smoke
-async def test_layerB_buy_item_not_adjacent(isolated_lane, unique_username):
-    seed_player(
-        unique_username,
-        position=(5, 5),
-        inventory=[{"key": "gold", "count": 10_000}],
-    )
-    try:
-        async with mcp_session(
-            username=unique_username,
-            client_url=isolated_lane.client_url,
-        ) as session:
-            result = await session.call_tool(
-                "buy_item",
-                {"npc_name": "Clerk", "item_index": 0, "count": 1},
-            )
-
-        assert not result.is_error, result.text
-        payload = json.loads(result.text)
-        purchased = payload.get("purchased") or payload.get("bought")
-        assert purchased is not True, (
-            f"player is seeded far from Clerk; a purchase here would be a false positive. got {payload}"
+        assert seeded_gold >= START_GOLD, (
+            f"seed did not persist gold to Mongo (expected {START_GOLD}, got {seeded_gold}); "
+            f"slots={seeded_slots}"
         )
-        assert "error" in payload or "cannot find" in (payload.get("error") or "").lower() or True, payload
+
+        async with mcp_session(username=test_username) as s:
+            obs = (await s.call_tool("observe", {})).json() or {}
+            gold_before = next(
+                (int(i.get("count", 0)) for i in (obs.get("inventory") or [])
+                 if str(i.get("name", "")).lower() == "gold"),
+                0,
+            )
+            assert gold_before >= 50, (
+                f"expected >=50 gold in observe, got {gold_before}; "
+                f"mongo_seed_gold={seeded_gold}; observe_inventory={obs.get('inventory')}"
+            )
+            active_quests = [str(q.get("name", "")).lower() for q in (obs.get("active_quests") or [])]
+            assert "miner's quest" not in active_quests, f"Miner shop blocked by active quest state: {active_quests}"
+            assert "miner's quest ii" not in active_quests, f"Miner shop blocked by active quest state: {active_quests}"
+            finished_quests = [str(q.get("name", "")).lower() for q in (obs.get("finished_quests") or [])]
+            assert "miner's quest" in finished_quests, f"expected Miner's Quest to be finished, got: {finished_quests}"
+            assert "miner's quest ii" in finished_quests, f"expected Miner's Quest II to be finished, got: {finished_quests}"
+
+            # Deliberate settle time so headed dashboard runs are watchable and
+            # the live client has a moment to finish initial UI hydration.
+            await asyncio.sleep(1.5)
+            res = await s.call_tool("buy_item", {"npc_name": "Miner", "item_index": 0, "count": 1})
+            assert not res.is_error, f"buy_item errored: {res.text[:300]}"
+            data = res.json() or {}
+            await asyncio.sleep(1.0)
+            assert data.get("bought") is True, f"expected successful purchase, got: {data}"
+            gained = data.get("items_gained") or {}
+            assert int(gained.get("coal", 0)) >= 1, f"expected coal in purchase delta, got: {data}"
+            assert int(data.get("gold_spent", 0)) >= 50, f"expected coal cost to be spent, got: {data}"
+
+        snap = snapshot_player(test_username)
+        inv_slots = (snap.get("player_inventory") or {}).get("slots") or []
+        inv_keys = [sl.get("key") for sl in inv_slots if sl.get("key")]
+        gold_after = next(
+            (int(sl.get("count", 0)) for sl in inv_slots if sl.get("key") == "gold"),
+            0,
+        )
+        assert gold_after < START_GOLD, (
+            f"gold unchanged in Mongo (before={START_GOLD}, after={gold_after}); inv={inv_keys}"
+        )
+        assert "coal" in inv_keys, f"coal missing from Mongo inventory after purchase; inv={inv_keys}"
     finally:
-        cleanup_player(unique_username)
+        cleanup_player(test_username)

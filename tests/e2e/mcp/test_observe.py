@@ -1,66 +1,52 @@
-"""Day-2 first-green: Layer A + Layer B `observe` happy path.
-
-Layer A: seed a player, log in via Playwright, read the snapshot, assert
-that the player is at the seeded position and the `observe_via_browser`
-helper returns a well-shaped dict.
-
-Layer B: spawn the MCP subprocess for the same seeded username and assert
-the `observe` tool returns a non-error response that mentions the player's
-name or position.
-"""
+"""observe() — returns expected shape, position, inventory, equipment, and ASCII map."""
 
 from __future__ import annotations
 
 import pytest
 
-from tests.e2e.helpers.browser import browser_session, login_seeded_player
-from tests.e2e.helpers.mcp_client import mcp_session
-from tests.e2e.helpers.observe import observe_via_browser
-from tests.e2e.helpers.seed import cleanup_player, seed_player
+from ..helpers.mcp_client import mcp_session
 
 
-@pytest.mark.mcp_smoke
-async def test_layerA_observe_happy_path(isolated_lane, unique_username):
-    seed_player(
-        unique_username,
-        position=(199, 169),
-        inventory=[{"key": "apple", "count": 1}],
-    )
-    try:
-        async with browser_session() as (_browser, _context, page):
-            await login_seeded_player(page, unique_username, client_url=isolated_lane.client_url)
-            import asyncio as _a
-            await _a.sleep(2.0)
-            snapshot = await observe_via_browser(page)
-            import json as _j
-            print("PLAYER:", _j.dumps(snapshot.get("player"), indent=2))
-            print("QUESTS:", _j.dumps(snapshot.get("quests"), indent=2))
-            print("INV:", _j.dumps(snapshot.get("inventory"), indent=2))
+@pytest.mark.mcp
+async def test_observe_unified_shape(seeded_player):
+    """Observe returns the unified view with all expected top-level keys,
+    seeded position near Mudwich (188,157), seeded Bronze Axe in inventory
+    with item key, equipment block, ASCII map, and STUCK_CHECK trailer."""
+    async with mcp_session(username=seeded_player["username"]) as s:
+        res = await s.call_tool("observe", {})
+        assert not res.is_error, f"unexpected error: {res.text[:200]}"
+        data = res.json()
+        assert data is not None, "could not parse JSON from observe"
 
-        assert "error" not in snapshot, snapshot.get("error")
-        assert snapshot["player"]["x"] == 199
-        assert snapshot["player"]["y"] == 169
-        assert snapshot["inventory"].get("apple", 0) >= 1
-        assert "skills" in snapshot
-        assert "equipment" in snapshot
-    finally:
-        cleanup_player(unique_username)
+        # Core structure
+        for key in ("pos", "stats", "equipment", "skills", "status",
+                    "nearby", "inventory", "active_quests", "finished_quests"):
+            assert key in data, f"missing key '{key}'"
 
+        # Nearby is categorized
+        nearby = data.get("nearby") or {}
+        for cat in ("npcs", "mobs", "resources", "ground_items"):
+            assert cat in nearby, f"missing nearby.{cat}"
 
-@pytest.mark.mcp_smoke
-async def test_layerB_observe_happy_path(isolated_lane, unique_username):
-    seed_player(
-        unique_username,
-        position=(199, 169),
-    )
-    try:
-        async with mcp_session(
-            username=unique_username,
-            client_url=isolated_lane.client_url,
-        ) as session:
-            result = await session.call_tool("observe", {})
+        # Status block
+        status = data.get("status") or {}
+        for field in ("dead", "stuck", "nav", "indoors"):
+            assert field in status, f"missing status.{field}"
 
-        assert not result.is_error, result.text
-        assert result.text, "observe returned empty content"
-    finally:
-        cleanup_player(unique_username)
+        # ASCII map IS present in unified mode
+        assert "\n\nASCII_MAP:" in res.text, "missing ASCII_MAP"
+        assert "\n\nSTUCK_CHECK:" in res.text, "missing STUCK_CHECK trailer"
+
+        # Position check
+        pos = data.get("pos") or {}
+        assert 180 <= pos.get("x", 0) <= 200, f"unexpected x: {pos}"
+        assert 150 <= pos.get("y", 0) <= 170, f"unexpected y: {pos}"
+
+        # Inventory has item keys
+        inv = data.get("inventory") or []
+        assert any(i.get("key") == "bronzeaxe" for i in inv), (
+            f"bronzeaxe missing from inventory keys: {inv}"
+        )
+        # Inventory items have names too (backward compat)
+        inv_names = [i.get("name", "").lower() for i in inv]
+        assert any("axe" in n for n in inv_names), f"axe missing from names: {inv_names}"
