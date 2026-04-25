@@ -1,7 +1,9 @@
 ## PRIMARY OBJECTIVE
 
-You are scored on **5 quests**. That is your whole job. Do not wander into
-other quests until the Core 5 are finished.
+You are scored on **5 quests**. That is your whole job. Quest acceptance
+is opt-in: `interact_npc` only reads dialogue by default — when you've
+decided to start a quest, call `interact_npc(name, accept_quest_offer=True)`.
+Talking to an NPC does NOT commit you to anything.
 
 ### CORE 5 (must complete — do these first, in any sensible order)
 
@@ -13,7 +15,7 @@ other quests until the Core 5 are finished.
 | 4 | **Arts and Crafts** | Babushka (702, 608) | Crafting + Fletching + Cooking at 3 different stations |
 | 5 | **Sea Activities** | Sponge (52, 310) | Real combat (picklemob) + 7-stage multi-NPC courier |
 
-### EXTRA 5 (only after Core 5 is done — bonus, not scored)
+### EXTRA 5 (after Core 5 — bonus, not scored)
 
 | # | Quest | NPC | Prereq / note |
 |---|-------|-----|---------------|
@@ -23,23 +25,27 @@ other quests until the Core 5 are finished.
 | 9 | Scientist's Potion | Scientist (763, 666) | 1-stage Alchemy unlock |
 | 10 | Ancient Lands | Ancient Monument (415, 294) | Capstone — need `icesword` from Ice Knight at (808, 813), lvl 62 |
 
-### SKIP ENTIRELY — do not attempt, even if an NPC prompts you
+### Off-limits — broken or zero-value, don't accept these
 
-- **Miner's Quest / Miner's Quest II** — upstream circular bug: the only 2 `nisocrock` placements in the map are behind `reqQuest=minersquest2`, and MQ2 requires MQ. Impossible for a normal player.
+You can talk to these NPCs to learn dialogue, but `accept_quest_offer=True`
+on these is wasted time — the rewards/items either don't exist or repeat
+what Core 5 already unlocks.
+
+- **Miner's Quest / Miner's Quest II** — upstream circular bug: the only 2 `nisocrock` placements in the map are behind `reqQuest=minersquest2`, and MQ2 requires MQ. Not completable.
 - **Sorcery and Stuff** — reward item `staff` doesn't exist; Hermit Crab Warrior bead farm isn't placed in the current processed world.
 - **Evil Santa** — stage-1 door not playtest-verified.
 - **The Coder's Glitch / Glitch II / Fallacy** — missing talisman items; not reliably completable.
-- **Anvil's Echoes, Scavenger, Clam Chowder** — completable but add no primitive the Core 5 doesn't already cover. Only pursue these if all 10 above are done and you want bonus completion.
+- **Anvil's Echoes, Scavenger, Clam Chowder** — completable but add no primitive Core 5 doesn't already cover. Only pursue these after all 10 above are done.
 
 ---
 
 ## CURRENT TREE TRUTHS
 
 - Tutorial is auto-finished at spawn; starter kit (bronzeaxe, knife, fishingpole, coppersword, woodenbow) is already in your inventory. Ignore all tutorial dialogue / NPCs.
-- 5 quests are the primary benchmark; 5 more extend the playthrough; 8 are SKIP (see table above).
+- 5 quests are the primary benchmark; 5 more extend the playthrough; 8 are Off-limits (see table above).
 - Start **Arts and Crafts** to unlock Crafting. Start **Scientist's Potion** to unlock Alchemy.
 - Smithing, Smelting, and Cooking are always available on station click. Fletching requires a `knife` from Clerk.
-- `undersea` access requires the `waterguardian` achievement (kill Water Guardian at (293, 729), lvl 36, 350 HP). **Ancient Lands** (EXTRA #10) opens the mountain gate. Evil Santa is on SKIP, so `iceworld` stays locked.
+- `undersea` access requires the `waterguardian` achievement (kill Water Guardian at (293, 729), lvl 36, 350 HP). **Ancient Lands** (EXTRA #10) opens the mountain gate. Evil Santa is Off-limits, so `iceworld` stays locked.
 - Trust runtime truth over stale flavor text. Liar quests still active: `Foresting` (Rusted Axe → ironaxe), `Royal Drama`, `Rick's Roll`, `Sea Activities`, `Scientist's Potion`, `Arts and Crafts`, `Herbalist's Desperation` (Mystical Potion → hotsauce + 1500 Foraging XP), `Anvil's Echoes` (Smithing Gloves → bronzeboots only), `Scavenger` (fake shopping list), `Clam Chowder` (fish clams, don't kill them).
 
 ---
@@ -63,6 +69,46 @@ XP per kill scales with mob HP. Move up quickly once low mobs stop paying.
 Goblins past Lv20 give poor XP. Dark Skeletons are the main efficient late grind.
 
 ---
+
+## RESOURCE LOCATIONS
+
+Coords are first valid placement in `world.json` — useful as a `navigate(x,y)` target. Stand on a walkable shore/adjacent tile, then `gather(name)`.
+
+| Resource | Skill | Lvl gate | Coords (cluster) | Used by |
+|---|---|---|---|---|
+| Oak Tree | Lumberjacking | 1 | Mudwich north (~210, 110) | Foresting |
+| Blueberry Bush | Foraging | 1 | Mudwich (105–238, 103–209), e.g. (155, 103) | Foraging grind |
+| Blue Lily Bush | Foraging | 10 | (278–441, 250–363), e.g. (278, 250) | Arts and Crafts (`string`) |
+| Tomato Bush | Foraging | 15 | (113–386, 107–326), e.g. (220, 108) | Herbalist's, Scavenger |
+| Paprika Bush | Foraging | 25 | (286–390, 240–484), e.g. (298, 301) | Herbalist's |
+| Strawberry Bush | Foraging | 1 | various | Scavenger (bonus) |
+| Beryl Rock | Mining | 1 + **pickaxe** | Babushka mine (643–665, 643–656), e.g. (645, 643) | Arts and Crafts |
+| Copper Rock | Mining | 1 | (639–670, 634–651) | Smithing |
+| Tin Rock | Mining | 1 | (638–666, 628–649) | Smithing |
+| Coal Rock | Mining | 1 | (645–668, 627–649) | Smelting |
+| Iron Rock | Mining | 15 | (642–646, 588–598) | Smithing |
+| Gold Rock | Mining | 40 | (655–665, 639–654) | Smithing |
+| Shrimp Fishing Spot | Fishing | 1 + **fishingpole** | (269–383, 328–397), e.g. (325, 360) shore at (324, 360) | Rick's Roll |
+| Tuna Fishing Spot | Fishing | 25 | (269–376, 296–402) | — |
+| Clam Spot | Fishing | 5 + **fishingpole** | (268–381, 253–398), e.g. (322, 318) | Clam Chowder (bonus) |
+
+⚠️ Spots **in water** require approach from a shore tile, not standing on the spot. If `gather` reports "No resource matching X nearby" but you're at the listed coords, you're probably on the wrong tile — `observe` to see `nearby_entities` and pick the spot with `kind: rock|fish|tree|forage`.
+
+⚠️ Mining beryl needs a **pickaxe** (bronzepickaxe minimum). The starter `bronzeaxe` does NOT mine rocks.
+
+## SKILL PROGRESSION STRATEGY
+
+The skill XP table is steep. Estimated `gather`/`attack` count to hit each level (single-target XP per action):
+
+| Skill gate | XP needed | Suggested grind |
+|---|---|---|
+| Foraging 10 | 1,355 | ~70 blueberry gathers (Mudwich) |
+| Foraging 15 | 2,740 | ~140 blueberry, OR switch to tomato at Lv10+ |
+| Foraging 25 | 8,730 | ~440 blueberry, OR switch to paprika once accessible |
+| Mining 15 | 2,740 | ~140 copper/tin/coal at Lv1+ |
+| Fishing 5 | 511 | ~25 shrimp |
+
+For Herbalist's Desperation specifically: pick blue lily early (Lv10 gate), grind to 15 on tomato (better XP/action than blueberry once unlocked), grind to 25 on paprika (highest XP/action of the three).
 
 ## ACHIEVEMENTS (NOT QUESTS)
 
@@ -98,13 +144,13 @@ Use exact quest names from this table when calling `query_quest(quest_name)`. Ca
 | bonus | Anvil's Echoes | None | `bronzeboots` | Talk to Blacksmith twice |
 | bonus | Scavenger | None | **7500 gold** | Turn in `tomato x2 + strawberry x2 + string x1` |
 | bonus | Clam Chowder | Practical: Fishing 10 + Cooking 15 + Fletching 3 | **7500 gold** | Turn in 5 clams, then 2 chowders, then 2 more chowders |
-| **SKIP** | Sorcery and Stuff | Reward `staff` doesn't exist; bead farm not placed in current world | — | — |
-| **SKIP** | Miner's Quest | Circular: nisocrocks only inside `reqQuest=minersquest2` gate | — | — |
-| **SKIP** | Miner's Quest II | Depends on Miner's Quest which is impossible | — | — |
-| **SKIP** | Evil Santa | Stage-1 door not playtest-verified | — | — |
-| **SKIP** | The Coder's Glitch | Missing `skeletonkingtalisman` item definition | — | — |
-| **SKIP** | The Coder's Glitch II | 3 talisman items don't exist | — | — |
-| **SKIP** | Coder's Fallacy | Prereqs blocked by Coder chain | — | — |
+| Off-limits | Sorcery and Stuff | Reward `staff` doesn't exist; bead farm not placed in current world | — | — |
+| Off-limits | Miner's Quest | Circular: nisocrocks only inside `reqQuest=minersquest2` gate | — | — |
+| Off-limits | Miner's Quest II | Depends on Miner's Quest which is impossible | — | — |
+| Off-limits | Evil Santa | Stage-1 door not playtest-verified | — | — |
+| Off-limits | The Coder's Glitch | Missing `skeletonkingtalisman` item definition | — | — |
+| Off-limits | The Coder's Glitch II | 3 talisman items don't exist | — | — |
+| Off-limits | Coder's Fallacy | Prereqs blocked by Coder chain | — | — |
 
 ---
 

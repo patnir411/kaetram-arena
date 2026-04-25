@@ -75,7 +75,17 @@
     ],
     "walkthrough": "Talk to Forester, collect 10 logs, turn them in, then collect and turn in 10 more logs.",
     "items_needed": "20 logs total",
-    "tips": "Use gather('Oak') near Mudwich."
+    "tips": "Use gather('Oak') near Mudwich.",
+    "walkthrough_steps": [
+      "Talk to Forester at (216, 114). The first time, call interact_npc(name='Forester', accept_quest_offer=True).",
+      "Equip your starter bronzeaxe (slot 0). gather(resource_name='Oak Tree') near Mudwich north (cluster ~210, 110) until you have 10 logs.",
+      "Return to Forester. interact_npc('Forester') \u2014 turn-in is automatic when you have 10 logs.",
+      "Gather 10 more logs from the same Oak cluster.",
+      "Return to Forester one more time. Quest finishes; you receive `ironaxe` (popup text says 'Rusted Axe' \u2014 that's a typo, the actual item is ironaxe)."
+    ],
+    "item_sources": {
+      "Logs": "gather Oak Tree near Mudwich north (~210, 110). Bronze axe sufficient."
+    }
   },
   "Desert Quest": {
     "name": "Desert Quest",
@@ -304,7 +314,16 @@
       "Raw Shrimp": "Fish shrimp spots.",
       "Cooked Shrimp": "Cook `rawshrimp` at a cooking station."
     },
-    "tips": "This is the first quest that forces a simple fishing plus cooking chain."
+    "tips": "This is the first quest that forces a simple fishing plus cooking chain.",
+    "walkthrough_steps": [
+      "Rick at (1088, 833) is in a region disjoint from Mudwich. Use the warp+door route: warp(location='mudwich') (or just stay there at start), navigate from Mudwich southeast through the corridor, step on door 1025 at (379, 388) which teleports you to (1138, 800), then walk west to Rick.",
+      "Once adjacent to Rick: interact_npc(name='Rick', accept_quest_offer=True).",
+      "Equip the starter fishingpole (slot 2 of starter kit). gather('Shrimp Fishing Spot') from a shore tile \u2014 e.g. seed-friendly approach is (324, 360) standing west of spot (325, 360). Repeat until you have 5 rawshrimp.",
+      "Walk to a cooking station (Babushka's room near (706, 605) is the closest). craft_item(skill='cooking', recipe_key='cookedshrimp', count=5).",
+      "Return to Rick (interact_npc). He takes the 5 cookedshrimp and gives you a `seaweedroll` plus advances you to stage 2.",
+      "Step on the stage-2 quest door at (260, 229) \u2014 teleports you to (425, 909) on Lena's side.",
+      "Walk to Lena (a.k.a. `rickgf`) and interact_npc. Quest finishes; receive 1987 gold (the popup text mentions Cooking XP \u2014 that's a typo, the actual reward is gold)."
+    ]
   },
   "Sea Activities": {
     "name": "Sea Activities",
@@ -358,7 +377,15 @@
       "hp": 1250,
       "notes": "Sea Cucumber fight during stage 4."
     },
-    "tips": "Do not start this until `waterguardian` gives you reliable Undersea access."
+    "tips": "Do not start this until `waterguardian` gives you reliable Undersea access.",
+    "walkthrough_steps": [
+      "Hard prerequisite: kill the Water Guardian at (293, 729) to earn the `waterguardian` achievement. Without it, warp(location='undersea') silently fails. Water Guardian is lvl 36, 350 HP \u2014 bring at least mid-tier gear (coppersword + Strength Lv30+).",
+      "Once `waterguardian` is earned: warp(location='undersea') lands you near (43, 313). Sponge is at (52, 310).",
+      "Stage 0 \u2192 1: interact_npc(name='Sponge', accept_quest_offer=True).",
+      "Stages 1\u21943 dialogue chain (Sponge \u2194 Pickle): Pickle is at (691, 838), in a region disjoint from Sponge. Route: navigate to door 539 at (46, 363) \u2192 teleports to (665, 836). Then navigate to door 556 at (683, 844) \u2014 REQUIRES `mermaidguard` achievement, earn it by defeating the mermaid guarding the Sea Cucumber. Door 556 teleports to (688, 844) inside the picklemob arena. Walk to Pickle (691, 838) and interact_npc \u2014 that's stage 2. Walk back the same way (door 557 \u2192 door 538) and interact_npc('Sponge') for stage 3. Then back to Pickle for stage 4.",
+      "Stage 4: kill the picklemob (display name 'Sea Cucumber') in the arena. Lvl 88, 1250 HP \u2014 needs mid-route gear at minimum. Use attack(mob_name='Sea Cucumber') in a swing loop until killed:true.",
+      "Stages 5\u20137: talk Pickle (receives 1 gold), walk back to Sponge, interact_npc \u2014 final reward is 10,000 gold net (the 1 gold from stage 5 is consumed at stage 6)."
+    ]
   },
   "Scientist's Potion": {
     "name": "Scientist's Potion",
@@ -445,7 +472,15 @@
       "bowlsmall": "stick x2 at Fletching Lv3",
       "stew": "bowlmedium x1 + mushroom1 x1 + tomato x1"
     },
-    "tips": "Babushka's ingredients store is inconvenient while her NPC slot is claimed by this quest, so source the final mushroom from drops."
+    "tips": "Babushka's ingredients store is inconvenient while her NPC slot is claimed by this quest, so source the final mushroom from drops.",
+    "walkthrough_steps": [
+      "Babushka at (702, 608) is in a region disjoint from Mudwich. The canonical route requires the Aynor warp (gated by ancientlands quest) plus door 463 at (406, 292) \u2192 (433, 270), then walk to door (483, 275) which teleports to (702, 613) inside her room.",
+      "Without ancientlands, an alternate route is: get to door (483, 275) on the Babushka exterior region somehow (no overland path from Mudwich exists per the static map). For a vanilla agent the practical route is: complete enough other quests to unlock a connecting warp, OR seed the agent at Babushka.",
+      "Once adjacent to Babushka: interact_npc(name='Babushka', accept_quest_offer=True). This UNLOCKS Crafting on quest start (the unlock fires before you complete).",
+      "Stage 1 \u2192 2 (berylpendant): gather('Blue Lily Bush') at (278, 250) for 1 bluelily, then craft_item(skill='crafting', recipe_key='string'). Mine beryl with a bronzepickaxe (NOT bronzeaxe) at (645, 643) for 1 beryl. craft_item(skill='crafting', recipe_key='berylpendant'). interact_npc('Babushka') to turn in.",
+      "Stage 2 \u2192 3 (bowlsmall): collect 1 logs (Foraging Lv1, Oak Tree near Mudwich). craft_item(skill='fletching', recipe_key='stick', count=1) \u2192 4 sticks. craft_item(skill='fletching', recipe_key='bowlsmall', count=1) (needs 2 sticks). interact_npc('Babushka') to turn in.",
+      "Stage 3 \u2192 4 (stew): NOTE \u2014 server actually wants `bowlmedium`, not `bowlsmall`, for the final stew despite Babushka taking bowlsmall at stage 2. craft_item(skill='fletching', recipe_key='bowlmedium', count=1) (4 sticks). gather one tomato (220, 108) and one mushroom1 (drops from goblins/ogres/etc \u2014 slow, ~0.75% per kill; consider Babushka's store after the quest finishes). craft_item(skill='cooking', recipe_key='stew', count=1) using bowlmedium + tomato + mushroom1. interact_npc('Babushka') to finish."
+    ]
   },
   "Miner's Quest": {
     "name": "Miner's Quest",
@@ -577,11 +612,20 @@
     "walkthrough": "Talk to the Herbalist, turn in 3 blue lilies, then 2 paprikas and 2 tomatoes.",
     "items_needed": "3 bluelily, 2 paprika, 2 tomato",
     "item_sources": {
-      "Blue Lily": "Forage blue lily bushes at Foraging 10.",
-      "Tomato": "Forage tomato bushes at Foraging 15 or source from drops/store.",
-      "Paprika": "Forage paprika bushes at Foraging 25."
+      "Blue Lily": "Forage Blue Lily Bush at Foraging 10. First placement (278, 250). Cluster spans (278\u2013441, 250\u2013363).",
+      "Tomato": "Forage Tomato Bush at Foraging 15. Cluster near Mudwich at (113\u2013386, 107\u2013326), e.g. (220, 108). Best XP/gather of the three.",
+      "Paprika": "Forage Paprika Bush at Foraging 25. Cluster (286\u2013390, 240\u2013484), e.g. (298, 301)."
     },
-    "tips": "This is the highest hard Foraging gate in the working quest route."
+    "tips": "This is the highest hard Foraging gate in the working quest route.",
+    "walkthrough_steps": [
+      "Talk to Herbalist (333, 281) and accept_quest_offer=True.",
+      "Grind Foraging on Blueberry Bush at Mudwich (155, 103). ~70 gathers to Lv10 unlocks Blue Lily.",
+      "Walk to Blue Lily Bush (278, 250). Gather 3x bluelily.",
+      "Return to Herbalist and turn in the lilies via interact_npc.",
+      "Continue grinding Foraging \u2014 switch to Tomato Bush (220, 108) once at Lv15. Pick 2 tomatoes.",
+      "At Foraging Lv25, walk to Paprika Bush (298, 301). Pick 2 paprika.",
+      "Return to Herbalist for final turn-in."
+    ]
   },
   "Scavenger": {
     "name": "Scavenger",
