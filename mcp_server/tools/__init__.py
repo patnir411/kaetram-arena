@@ -10,4 +10,5 @@ from mcp_server.tools import (  # noqa: F401
     gathering,
     crafting,
     quest,
+    recovery,
 )

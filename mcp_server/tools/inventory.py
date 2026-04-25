@@ -32,23 +32,18 @@ async def drop_item(ctx: Context, slot: int) -> str:
     """
     page = await get_page(ctx)
 
-    # Capture both per-slot count (for stackable items like logs/ores where
-    # dropping 1 of 10 leaves the slot occupied) AND total occupied count
-    # (for non-stackable items where the slot empties out). Either signal
-    # alone misses cases — we need both to confirm a real drop.
     before = await page.evaluate("""(idx) => {
         const inv = window.game && window.game.menu && window.game.menu.getInventory();
         if (!inv) return { error: 'Inventory not loaded' };
         const el = inv.getElement(idx);
-        if (!el || inv.isEmpty(el)) return { error: 'No item in slot ' + idx };
+        if (!el) return { error: 'No item in slot ' + idx };
         const key = (el.dataset && el.dataset.key) || 'unknown';
-        const slotCount = Number(el.count ?? el.dataset?.count ?? 1) || 1;
-        let occupied = 0;
+        let count = 0;
         for (let i = 0; i < 25; i++) {
             const e = inv.getElement(i);
-            if (e && e.dataset?.key && !inv.isEmpty(e)) occupied++;
+            if (e && e.dataset?.key && !inv.isEmpty(e)) count++;
         }
-        return { key: key, slot_count: slotCount, occupied_count: occupied };
+        return { key: key, count: count };
     }""", slot)
 
     if isinstance(before, dict) and before.get("error"):
@@ -64,47 +59,18 @@ async def drop_item(ctx: Context, slot: int) -> str:
     }""", slot)
 
     await page.wait_for_timeout(1000)
-
-    # Snapshot the same slot's state plus total occupied so we can detect
-    # both stack-decrement and full-slot-clear drops.
-    after = await page.evaluate("""(idx) => {
-        const inv = window.game && window.game.menu && window.game.menu.getInventory();
-        if (!inv) return { error: 'Inventory not loaded' };
-        const el = inv.getElement(idx);
-        const empty = !el || inv.isEmpty(el);
-        const slotCount = empty ? 0 : (Number(el.count ?? el.dataset?.count ?? 1) || 1);
-        let occupied = 0;
-        for (let i = 0; i < 25; i++) {
-            const e = inv.getElement(i);
-            if (e && e.dataset?.key && !inv.isEmpty(e)) occupied++;
-        }
-        return { empty: empty, slot_count: slotCount, occupied_count: occupied };
-    }""", slot)
+    after = await inventory_count(page)
 
     item_key = before.get("key", "unknown") if isinstance(before, dict) else "unknown"
-    count_before = before.get("occupied_count", -1) if isinstance(before, dict) else -1
-    slot_count_before = before.get("slot_count", 0) if isinstance(before, dict) else 0
-    count_after = after.get("occupied_count", -1) if isinstance(after, dict) else -1
-    slot_count_after = after.get("slot_count", 0) if isinstance(after, dict) else 0
+    count_before = before.get("count", -1) if isinstance(before, dict) else -1
 
-    # Either signal proves a successful drop:
-    #   - non-stackable: slot becomes empty → occupied_count drops
-    #   - stackable: slot stays occupied but slot_count decrements
-    dropped = (
-        (isinstance(count_after, int) and count_after < count_before)
-        or (slot_count_after < slot_count_before)
-    )
-    body = {
-        "item": item_key, "slot": slot,
-        "inventory_before": count_before, "inventory_after": count_after,
-        "slot_count_before": slot_count_before, "slot_count_after": slot_count_after,
-    }
-    if dropped:
-        return json.dumps({"dropped": True, **body})
-    return json.dumps({
-        "dropped": False, **body,
-        "error": "Drop may have failed — neither slot count nor inventory occupancy decreased",
-    })
+    if isinstance(after, int) and after < count_before:
+        return json.dumps({"dropped": True, "item": item_key, "slot": slot,
+                           "inventory_before": count_before, "inventory_after": after})
+    else:
+        return json.dumps({"dropped": False, "item": item_key, "slot": slot,
+                           "error": "Drop may have failed — inventory count unchanged",
+                           "inventory_before": count_before, "inventory_after": after})
 
 
 @mcp.tool()
@@ -122,19 +88,13 @@ async def equip_item(ctx: Context, slot: int) -> str:
 
     await page.wait_for_timeout(1500)
 
-    # Client-side `player.equipments` is `{ [key: number]: Equipment }` (a
-    # map keyed by slot type), NOT an array — see Kaetram-Open
-    # packages/client/src/entity/character/player/player.ts:60. The previous
-    # `for (i < .length)` loop never iterated (length undefined), so the
-    # after-snapshot was always {} and the diff at the Python layer always
-    # reported `equipped: true`. Object.entries matches the before-snapshot
-    # in state_extractor.js __equipItem.
     after = await page.evaluate("""() => {
         const p = window.game && window.game.player;
         if (!p || !p.equipments) return {};
         const slots = {};
-        for (const [slotId, eq] of Object.entries(p.equipments)) {
-            slots[slotId] = eq ? (eq.name || eq.key || 'none') : 'none';
+        for (let i = 0; i < p.equipments.length; i++) {
+            const eq = p.equipments[i];
+            slots[i] = eq ? (eq.name || eq.key || 'none') : 'none';
         }
         return slots;
     }""")

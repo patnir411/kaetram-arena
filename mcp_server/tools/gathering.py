@@ -152,9 +152,7 @@ async def loot(ctx: Context) -> str:
 
     if targeting.get("type") == 8 or lootbag_opened:
         if isinstance(lootbag_ready, dict) and lootbag_ready.get("visible"):
-            # 5 iters × (250 ms send + 200 ms wait) ≈ 2.25 s worst case;
-            # loop breaks as soon as item_count drops to 0.
-            for _ in range(5):
+            for _ in range(10):
                 await page.evaluate("""async () => {
                     const game = window.game; const list = document.querySelector('#lootbag-items > ul');
                     const entries = [];
@@ -167,7 +165,7 @@ async def loot(ctx: Context) -> str:
                     await new Promise(r => setTimeout(r, 250));
                     return { clicked: next.index };
                 }""")
-                await page.wait_for_timeout(200)
+                await page.wait_for_timeout(350)
                 lootbag_ready = await page.evaluate("""() => {
                     try {
                         const game = window.game; const menu = game && game.menu;

@@ -46,7 +46,7 @@ _DIALOGUE_STATE_JS = """() => {
 
 # ── Shared dialogue loop ────────────────────────────────────────────────────
 
-async def _run_dialogue_loop(page, instance_id: str) -> dict:
+async def _run_dialogue_loop(page, instance_id: str, accept_quest_offer: bool = False) -> dict:
     """Drive NPC dialogue to completion using a read-first, talk-second approach.
 
     The game server wraps talkIndex around when dialogue is exhausted — the NPC
@@ -56,7 +56,13 @@ async def _run_dialogue_loop(page, instance_id: str) -> dict:
       3. Getting no bubble text for 2 consecutive reads (dialogue dismissed)
       4. Quest panel appearing (quest offered)
 
-    Returns a dict with dialogue_lines, dialogue_complete, quest_opened, etc.
+    When a quest panel appears, behavior depends on `accept_quest_offer`:
+      - True:  click "Start Quest" to accept; return quest_accepted=True
+      - False: dismiss the panel via Escape; return quest_offered=<btn_text>
+               so the caller knows a quest was available without committing.
+
+    Returns a dict with dialogue_lines, dialogue_complete, quest_opened,
+    quest_accepted, quest_offered, last_dialogue.
     """
     quest_opened = False
     dialogue_lines: list[str] = []
@@ -74,17 +80,31 @@ async def _run_dialogue_loop(page, instance_id: str) -> dict:
     if isinstance(state, dict) and state.get("quest_panel"):
         quest_opened = True
         btn_text = state.get("quest_btn_text", "")
-        dialogue_lines.append(f"[Quest panel opened: {btn_text}]")
-        await page.evaluate(
-            "() => { const btn = document.getElementById('quest-button'); if (btn) btn.click(); }"
-        )
+        if accept_quest_offer:
+            dialogue_lines.append(f"[Quest panel opened: {btn_text} — accepted]")
+            await page.evaluate(
+                "() => { const btn = document.getElementById('quest-button'); if (btn) btn.click(); }"
+            )
+            quest_accepted = True
+        else:
+            dialogue_lines.append(f"[Quest panel opened: {btn_text} — not accepted]")
+            await page.evaluate(
+                "() => { document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', keyCode: 27})); "
+                "        const panel = document.getElementById('quest'); if (panel) panel.style.display = 'none'; }"
+            )
+            quest_accepted = False
         await page.wait_for_timeout(500)
         return {
             "dialogue_lines": len(dialogue_lines),
             "dialogue": dialogue_lines,
             "dialogue_complete": True,
             "quest_opened": True,
+            "quest_accepted": quest_accepted,
+            "quest_offered": btn_text if not accept_quest_offer else None,
         }
+
+    quest_accepted = False
+    quest_offered: str | None = None
 
     if text:
         dialogue_lines.append(text)
@@ -105,14 +125,25 @@ async def _run_dialogue_loop(page, instance_id: str) -> dict:
         state = await page.evaluate(_DIALOGUE_STATE_JS)
         text = state.get("text") if isinstance(state, dict) else None
 
-        # Quest panel takes priority — accept and stop immediately
+        # Quest panel takes priority. Either accept (click Start Quest) or
+        # dismiss without committing (Escape + hide panel). The choice is
+        # the caller's via `accept_quest_offer`.
         if isinstance(state, dict) and state.get("quest_panel"):
             quest_opened = True
             btn_text = state.get("quest_btn_text", "")
-            dialogue_lines.append(f"[Quest panel opened: {btn_text}]")
-            await page.evaluate(
-                "() => { const btn = document.getElementById('quest-button'); if (btn) btn.click(); }"
-            )
+            if accept_quest_offer:
+                dialogue_lines.append(f"[Quest panel opened: {btn_text} — accepted]")
+                await page.evaluate(
+                    "() => { const btn = document.getElementById('quest-button'); if (btn) btn.click(); }"
+                )
+                quest_accepted = True
+            else:
+                dialogue_lines.append(f"[Quest panel opened: {btn_text} — not accepted]")
+                await page.evaluate(
+                    "() => { document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', keyCode: 27})); "
+                    "        const panel = document.getElementById('quest'); if (panel) panel.style.display = 'none'; }"
+                )
+                quest_offered = btn_text or None
             await page.wait_for_timeout(500)
             break
 
@@ -143,6 +174,8 @@ async def _run_dialogue_loop(page, instance_id: str) -> dict:
         "dialogue": dialogue_lines,
         "dialogue_complete": True,
         "quest_opened": quest_opened,
+        "quest_accepted": quest_accepted,
+        "quest_offered": quest_offered,
         "last_dialogue": dialogue_lines[-1] if dialogue_lines else None,
     }
 
@@ -318,25 +351,46 @@ async def _resolve_shop_interaction(page, npc_name: str, store_key: str | None =
 # ── MCP Tools ───────────────────────────────────────────────────────────────
 
 @mcp.tool()
-async def interact_npc(ctx: Context, npc_name: str, expect: str = "dialogue", include_ui_state: bool = True) -> str:
-    """Walk to an NPC, talk through ALL dialogue lines, and auto-accept quest if offered.
+async def interact_npc(
+    ctx: Context,
+    npc_name: str,
+    expect: str = "dialogue",
+    include_ui_state: bool = True,
+    accept_quest_offer: bool = False,
+) -> str:
+    """Walk to an NPC and read dialogue. Quest offers are NOT accepted unless
+    you explicitly opt in via `accept_quest_offer=True`.
 
-    This handles the full NPC interaction flow:
-    1. Walk to NPC if not adjacent (targets orthogonal neighbor tile)
-    2. Verify adjacency (Manhattan distance < 2, server requirement)
-    3. Read all dialogue lines until the NPC cycles or stops
-    4. Click quest-button if quest panel opens
+    Flow:
+    1. Walk to NPC if not adjacent (targets orthogonal neighbor tile).
+    2. Verify adjacency (Manhattan distance < 2, server requirement).
+    3. Read all dialogue lines until the NPC cycles or stops.
+    4. If a quest panel opens:
+         - `accept_quest_offer=True` → click "Start Quest"; result has
+           `quest_accepted=True`.
+         - default → dismiss the panel; result has `quest_offered=<name>`
+           so you can decide and call again with the flag set.
+
+    Quest TURN-INS happen via normal dialogue progression and do NOT
+    require the flag — the server consumes inventory items automatically
+    when you talk to a quest NPC at the right stage.
 
     Returns dialogue_complete=true when all unique dialogue has been exhausted.
     Do NOT call interact_npc again on the same NPC after dialogue_complete=true
     unless you need to trigger a different quest stage or shop.
 
     Args:
-        npc_name: Name of the NPC (e.g. 'Forester', 'Blacksmith', 'Village Girl')
-        expect: Expected interaction result: 'dialogue' (default), 'shop', or 'any'
-        include_ui_state: Include a best-effort snapshot of the visible UI state
+        npc_name: Name of the NPC (e.g. 'Forester', 'Blacksmith', 'Village Girl').
+        expect: Expected interaction result: 'dialogue' (default), 'shop', or 'any'.
+        include_ui_state: Include a best-effort snapshot of the visible UI state.
+        accept_quest_offer: When True, accept (click Start Quest) any quest
+            offered during this interaction. When False (default), the panel
+            is dismissed and the quest stays unstarted.
     """
-    log_tool("interact_npc", args={"npc_name": npc_name, "expect": expect})
+    log_tool("interact_npc", args={
+        "npc_name": npc_name, "expect": expect,
+        "accept_quest_offer": accept_quest_offer,
+    })
     page = await get_page(ctx)
 
     if expect == "shop":
@@ -402,7 +456,7 @@ async def interact_npc(ctx: Context, npc_name: str, expect: str = "dialogue", in
         await page.wait_for_timeout(300)
 
     # Drive dialogue to completion
-    dialogue_result = await _run_dialogue_loop(page, instance_id)
+    dialogue_result = await _run_dialogue_loop(page, instance_id, accept_quest_offer=accept_quest_offer)
 
     # Get final player position
     player_end = await page.evaluate("""() => {
@@ -436,14 +490,16 @@ async def interact_npc(ctx: Context, npc_name: str, expect: str = "dialogue", in
     return json.dumps(response)
 
 
-async def talk_npc(ctx: Context, instance_id: str) -> str:
+async def talk_npc(ctx: Context, instance_id: str, accept_quest_offer: bool = False) -> str:
     """Click through ALL remaining NPC dialogue lines until quest panel opens or dialogue ends.
 
-    Player must be adjacent (Manhattan distance < 2) to the NPC.
-    Auto-accepts quest if quest panel opens.
+    Player must be adjacent (Manhattan distance < 2) to the NPC. Quest
+    offers are NOT accepted unless `accept_quest_offer=True`.
 
     Args:
         instance_id: NPC instance ID from game state (e.g. '1-33362128')
+        accept_quest_offer: When True, accept (click Start Quest) any
+            quest offered. Default False — panel is dismissed.
     """
     page = await get_page(ctx)
 
@@ -491,7 +547,7 @@ async def talk_npc(ctx: Context, instance_id: str) -> str:
     await page.evaluate("(id) => window.__talkToNPC(id)", instance_id)
 
     # Drive dialogue to completion
-    dialogue_result = await _run_dialogue_loop(page, instance_id)
+    dialogue_result = await _run_dialogue_loop(page, instance_id, accept_quest_offer=accept_quest_offer)
 
     quests_after = await page.evaluate(
         "() => JSON.stringify((window.__extractGameState() || {}).quests || [])"

@@ -29,26 +29,13 @@ async def observe(ctx: Context) -> str:
 
     result = await page.evaluate(OBSERVE_SCRIPT)
 
-    # Atomic JPEG write: tmp + os.replace so dashboard readers never see a
-    # partial file. Writes still must not block the tool response.
-    try:
-        os.makedirs(screenshot_dir, exist_ok=True)
-        jpg_final = os.path.join(screenshot_dir, "live_screen.jpg")
-        jpg_tmp = jpg_final + ".tmp"
-        await page.screenshot(path=jpg_tmp, type="jpeg", quality=70)
-        os.replace(jpg_tmp, jpg_final)
-    except Exception:
-        pass
-
-    # Atomic game_state.json write.
+    # Write game_state.json for dashboard (live state, no log parsing needed)
     try:
         gs_json = result.split("\n\nASCII_MAP:")[0] if "\n\nASCII_MAP:" in result else result
         if not gs_json.startswith("ERROR"):
-            gs_final = os.path.join(screenshot_dir, "game_state.json")
-            gs_tmp = gs_final + ".tmp"
-            with open(gs_tmp, "w") as f:
+            gs_path = os.path.join(screenshot_dir, "game_state.json")
+            with open(gs_path, "w") as f:
                 f.write(gs_json)
-            os.replace(gs_tmp, gs_final)
     except Exception:
         pass
 

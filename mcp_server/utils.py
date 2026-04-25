@@ -152,6 +152,7 @@ def build_quest_query_response(matched_name: str, quest: dict) -> dict:
         "prereqs",
         "stage_summary",
         "walkthrough",
+        "walkthrough_steps",
         "items_needed",
         "item_sources",
         "crafting_chain",

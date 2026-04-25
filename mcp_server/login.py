@@ -160,11 +160,10 @@ async def login_impl(ctx: Context, page) -> str:
         log(f"[mcp] Login failed for {username}{detail}")
         log_tool("login", success=False, error=login_error or "game did not load")
         ctx.request_context.lifespan_context["logged_in"] = False
-        ws_port = os.environ.get("KAETRAM_PORT", "(unset)")
         return (
             f"Login FAILED for {username}{detail}. "
             "Check KAETRAM_PASSWORD env matches the seeded bcrypt hash; "
-            f"make sure the game server on :{ws_port} is reachable and no other "
+            "make sure the game server on :9001 is reachable and no other "
             "session holds this username."
         )
 
@@ -259,18 +258,15 @@ async def login_impl(ctx: Context, page) -> str:
         }""")
         log(f"[mcp][debug_login] tutorial auto-warp check: {json.dumps(tutorial_state, sort_keys=True)[:1000]}")
         pos = (tutorial_state or {}).get("pos")
-        # Auto-warp anyone parked at the tutorial spawn (Programmer's house).
-        # Pre-seeded accounts via tests/e2e/helpers/seed.py mark the tutorial
-        # finished but still spawn the character at (328, 892), so the prior
-        # `tutorial_unfinished`-only check left fresh-seeded bots stuck in the
-        # corner. The coordinate gate alone is sufficient — no real gameplay
-        # happens at those tiles.
+        tutorial = (tutorial_state or {}).get("tutorial")
+        tutorial_unfinished = bool(tutorial and not tutorial.get("finished"))
         if (
-            pos
+            tutorial_unfinished
+            and pos
             and 300 <= pos.get("x", 0) <= 360
             and 860 <= pos.get("y", 0) <= 920
         ):
-            log(f"[mcp] Tutorial-spawn coords detected at {pos}; auto-warping to Mudwich")
+            log(f"[mcp] Tutorial spawn detected at {pos}; auto-warping to Mudwich")
             await page.evaluate("(id) => window.__safeWarp(id)", 0)
             await page.wait_for_timeout(2500)
     except Exception as e:
