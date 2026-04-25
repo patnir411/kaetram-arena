@@ -56,12 +56,20 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
 
     # ── Local-only ingest endpoints (MCP heartbeat → WS relay) ──
 
+    # Hard cap on /ingest/* request bodies. Loopback-only mitigates external
+    # DoS, but a runaway page.evaluate returning a huge DOM dump could OOM
+    # the dashboard. Anything bigger than this gets a 413.
+    INGEST_MAX_BYTES = 2 * 1024 * 1024  # 2 MB
+
     def _is_loopback(self) -> bool:
         ip = (self.client_address[0] or "").lower()
         return ip in ("127.0.0.1", "::1", "localhost")
 
     def _read_json_body(self):
         clen = int(self.headers.get("Content-Length", 0) or 0)
+        if clen > self.INGEST_MAX_BYTES:
+            # Sentinel — caller checks for it and emits 413.
+            return "_TOO_LARGE_"
         raw = self.rfile.read(clen) if clen else b""
         try:
             return json.loads(raw) if raw else {}
@@ -78,6 +86,8 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
         qs = urllib.parse.parse_qs(parsed.query)
         agent = qs.get("agent", [None])[0]
         body = self._read_json_body()
+        if body == "_TOO_LARGE_":
+            return self.send_error(413)
         if body is None:
             return self.send_error(400)
         try:
@@ -97,6 +107,8 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
         qs = urllib.parse.parse_qs(parsed.query)
         agent = qs.get("agent", [None])[0]
         body = self._read_json_body()
+        if body == "_TOO_LARGE_":
+            return self.send_error(413)
         if body is None:
             return self.send_error(400)
         events = body if isinstance(body, list) else body.get("events", [])

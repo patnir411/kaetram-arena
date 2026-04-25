@@ -37,7 +37,6 @@ Decorators register tools when `tools/__init__.py` is imported. Search for
 | `tools/gathering.py` | `gather`, `loot` |
 | `tools/crafting.py` | `craft_item` |
 | `tools/quest.py` | `query_quest` |
-| `tools/recovery.py` | Legacy `clear_combat`, `click_tile` — present for log replay only, not decorated. Do not re-expose without auditing the model-visible surface (SOTA prompting cap is high-teens; see `prompts/system.md`). |
 
 If you add a tool, decorate with `@mcp.tool()` and update `prompts/system.md`
 + the action vocabulary in `dataset/DATA.md` so extraction and training stay

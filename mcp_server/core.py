@@ -115,12 +115,19 @@ async def game_lifespan(server: FastMCP):
     state = {
         "page": None, "browser": None, "pw": None,
         "logged_in": False, "_lock": asyncio.Lock(),
+        "_heartbeat_tasks": [],
     }
     log("[mcp] Server ready (browser will launch on first tool call)")
     try:
         yield state
     finally:
         log_stats()
+        # Cancel heartbeat tasks first so they stop poking the (about-to-die) page.
+        tasks = state.get("_heartbeat_tasks") or []
+        for t in tasks:
+            t.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         if state["browser"]:
             log("[mcp] Shutting down browser")
             await state["browser"].close()
@@ -216,13 +223,17 @@ async def _ensure_browser(state: dict):
 
         # Start the dashboard heartbeats once. They run for the lifetime of
         # the MCP server and are best-effort — never crash the agent.
+        # Handles are tracked in state["_heartbeat_tasks"] so the lifespan
+        # finally block can cancel them cleanly on shutdown.
         if not state.get("_heartbeats_started"):
             try:
                 from mcp_server.state_heartbeat import (
                     state_heartbeat_loop, activity_heartbeat_loop,
                 )
-                asyncio.create_task(state_heartbeat_loop(state))
-                asyncio.create_task(activity_heartbeat_loop(state))
+                state["_heartbeat_tasks"].extend([
+                    asyncio.create_task(state_heartbeat_loop(state)),
+                    asyncio.create_task(activity_heartbeat_loop(state)),
+                ])
                 state["_heartbeats_started"] = True
                 log("[mcp] Dashboard heartbeats started")
             except Exception as e:

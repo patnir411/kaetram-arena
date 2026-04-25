@@ -15,6 +15,9 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/_kill_helpers.sh
+source "$SCRIPT_DIR/_kill_helpers.sh"
 
 # Parse args (same flags as restart-agent.sh)
 N_GRINDER=""
@@ -71,39 +74,33 @@ if pgrep -f "python3 orchestrate.py" > /dev/null 2>&1; then
 fi
 
 # ── Step 1b: Clean up orphaned processes from previous runs ──
-# Kill agent CLI processes (SIGTERM then SIGKILL) — all harnesses
-pkill -f "claude -p.*You play\|claude -p.*ClaudeBot\|claude -p.*play the game\|claude -p.*IMPORTANT" 2>/dev/null || true
-pkill -f "codex.*exec" 2>/dev/null || true
-pkill -f "gemini.*-p" 2>/dev/null || true
-pkill -f "opencode run" 2>/dev/null || true
-pkill -f "timeout .* opencode" 2>/dev/null || true
-pkill -f "play.sh" 2>/dev/null || true
-pkill -f "play_qwen.py" 2>/dev/null || true
+# All scoped to data-collection sandboxes — eval/test lanes are spared.
+kill_scoped "claude -p"            TERM
+kill_scoped "codex.*exec"          TERM
+kill_scoped "gemini.*-p"           TERM
+kill_scoped "opencode run"         TERM
+kill_scoped "timeout .* opencode"  TERM
+kill_scoped "play.sh"              TERM
+kill_scoped "play_qwen.py"         TERM
 sleep 2
-pkill -9 -f "claude -p.*You play\|claude -p.*ClaudeBot\|claude -p.*play the game\|claude -p.*IMPORTANT" 2>/dev/null || true
-pkill -9 -f "codex.*exec" 2>/dev/null || true
-pkill -9 -f "gemini.*-p" 2>/dev/null || true
-# Kill MCP servers
-pkill -f "mcp_game_server.py" 2>/dev/null || true
-# Kill Playwright (all forms)
-pkill -f "playwright/driver/node" 2>/dev/null || true
-pkill -f "npm exec @playwright" 2>/dev/null || true
-pkill -f "playwright-mcp" 2>/dev/null || true
-pkill -f "game_driver.py" 2>/dev/null || true
-# Kill Chrome process groups
-for cpid in $(pgrep -f "chrome-headless-shell" 2>/dev/null); do
-  pgid=$(ps -o pgid= -p "$cpid" 2>/dev/null | tr -d ' ')
-  [ -n "$pgid" ] && [ "$pgid" != "0" ] && kill -- -"$pgid" 2>/dev/null
-done
+kill_scoped "claude -p"            KILL
+kill_scoped "codex.*exec"          KILL
+kill_scoped "gemini.*-p"           KILL
+# MCP + Playwright + game_driver — scoped.
+kill_scoped "mcp_game_server.py"     TERM
+kill_scoped "playwright/driver/node" TERM
+kill_scoped "npm exec @playwright"   TERM
+kill_scoped "playwright-mcp"         TERM
+kill_scoped "game_driver.py"         TERM
+kill_scoped_chrome_pgroup TERM
 sleep 1
-# Force-kill survivors
-pkill -9 -f "mcp_game_server.py" 2>/dev/null || true
-pkill -9 -f "playwright/driver/node" 2>/dev/null || true
-pkill -9 -f "npm exec @playwright" 2>/dev/null || true
-pkill -9 -f "playwright-mcp" 2>/dev/null || true
-pkill -9 -f "chrome-headless-shell" 2>/dev/null || true
-# Kill stale game servers on agent ports
-for port in $(seq 9001 10 9071); do
+kill_scoped "mcp_game_server.py"     KILL
+kill_scoped "playwright/driver/node" KILL
+kill_scoped "npm exec @playwright"   KILL
+kill_scoped "playwright-mcp"         KILL
+kill_scoped_chrome_pgroup KILL
+# Stale game servers on data-collection ports only (never 9061/9071/9191).
+for port in "${KAETRAM_DATA_PORTS[@]}"; do
   pid=$(ss -tlnp "sport = :$port" 2>/dev/null | grep -oP 'pid=\K[0-9]+' || true)
   if [ -n "$pid" ]; then
     kill "$pid" 2>/dev/null || true

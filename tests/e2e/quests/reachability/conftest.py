@@ -7,8 +7,6 @@ separate from:
 
   - `core/` stage-transition tests: pre-seed every prereq to isolate runtime
     quest-system transitions.
-  - `core/integration/`: compose stages into an end-to-end quest run (still
-    pre-seeds resource counts to keep runtime bounded).
 
 Reachability tests deliberately MINIMIZE the seed. They exist to catch
 benchmark fairness bugs — hidden region gates, stale NPC coords, missing

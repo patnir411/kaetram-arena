@@ -364,6 +364,9 @@ class AgentInstance:
     # Per-agent livestream pipeline (None when HLS_ENABLED is False or boot failed).
     xvfb: "XvfbProcess | None" = None
     ffmpeg: "FfmpegEncoder | None" = None
+    # Cache for opencode internal log path — invalidated when stale.
+    _opencode_log_path: "Path | None" = None
+    _opencode_log_mtime: float = 0.0
 
     def setup(self):
         """Create sandbox directory with CLI config and state/."""
@@ -805,19 +808,61 @@ class AgentInstance:
         opencode keeps API errors in ~/.local/share/opencode/log/<ts>.log,
         completely separate from the agent session log. We read only the tail
         and only the most recent file to keep this cheap.
+
+        Caches the most-recent log path on the instance: a single os.scandir
+        pass replaces sorting all entries by mtime. The cache is invalidated
+        when the cached file disappears or when scandir finds a newer one.
         """
         log_dir = Path.home() / ".local/share/opencode/log"
         if not log_dir.is_dir():
             return None
         try:
-            files = sorted(log_dir.glob("*.log"),
-                           key=lambda p: p.stat().st_mtime, reverse=True)
-            if not files:
+            # Refresh cache if missing or any newer *.log appeared.
+            need_refresh = (
+                self._opencode_log_path is None
+                or not self._opencode_log_path.is_file()
+            )
+            newest_path: Path | None = None
+            newest_mtime = 0.0
+            if not need_refresh:
+                # Cheap check: scandir + early-out when we find any *.log
+                # newer than the cached mtime.
+                with os.scandir(log_dir) as it:
+                    for entry in it:
+                        if not entry.name.endswith(".log"):
+                            continue
+                        try:
+                            mt = entry.stat().st_mtime
+                        except OSError:
+                            continue
+                        if mt > self._opencode_log_mtime:
+                            need_refresh = True
+                            break
+            if need_refresh:
+                with os.scandir(log_dir) as it:
+                    for entry in it:
+                        if not entry.name.endswith(".log"):
+                            continue
+                        try:
+                            mt = entry.stat().st_mtime
+                        except OSError:
+                            continue
+                        if mt > newest_mtime:
+                            newest_mtime = mt
+                            newest_path = Path(entry.path)
+                if newest_path is None:
+                    return None
+                self._opencode_log_path = newest_path
+                self._opencode_log_mtime = newest_mtime
+
+            log_file = self._opencode_log_path
+            if log_file is None or not log_file.is_file():
                 return None
-            log_file = files[0]
             # Only consider the log if it was modified in the last 5 minutes
             # — stale 429s from a prior run shouldn't trip the guard now.
-            if time.time() - log_file.stat().st_mtime > 300:
+            mtime_now = log_file.stat().st_mtime
+            self._opencode_log_mtime = mtime_now
+            if time.time() - mtime_now > 300:
                 return None
             size = log_file.stat().st_size
             with open(log_file, "r", errors="replace") as f:

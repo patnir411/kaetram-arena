@@ -19,6 +19,9 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/_kill_helpers.sh
+source "$SCRIPT_DIR/_kill_helpers.sh"
 
 # Defaults
 N_AGENTS=""
@@ -124,44 +127,44 @@ echo "  Hours:  ${HOURS}"
 echo ""
 
 # ── Step 1: Kill orchestrator + agents + MCP servers + browsers ──
+# All kill_scoped calls below are gated by scripts/_kill_helpers.sh — they
+# only target data-collection processes (sandbox /tmp/kaetram_agent_<N> or
+# data-collection ports 9001..9051) and explicitly skip eval lanes
+# (9061/9071) and the e2e test lane (9191).
 echo "Stopping orchestrator and agents..."
 # Kill orchestrate.py process specifically (not tmux/shell wrappers)
 pkill -f "python3 orchestrate.py" 2>/dev/null || true
 sleep 1
 # Kill the datacol tmux session (holds shell wrappers)
 tmux kill-session -t datacol 2>/dev/null || true
-# Kill any remaining claude -p agent processes (SIGTERM then SIGKILL)
-pkill -f "claude -p.*You play\|claude -p.*ClaudeBot\|claude -p.*play the game\|claude -p.*IMPORTANT" 2>/dev/null || true
-pkill -f "codex.*exec" 2>/dev/null || true
-pkill -f "gemini.*-p" 2>/dev/null || true
-pkill -f "opencode run" 2>/dev/null || true
-pkill -f "timeout .* opencode" 2>/dev/null || true
-pkill -f "play.sh" 2>/dev/null || true
-pkill -f "play_qwen.py" 2>/dev/null || true
-pkill -f "claude -p.*Login" 2>/dev/null || true
+# SIGTERM round (scoped)
+kill_scoped "claude -p"            TERM
+kill_scoped "codex.*exec"          TERM
+kill_scoped "gemini.*-p"           TERM
+kill_scoped "opencode run"         TERM
+kill_scoped "timeout .* opencode"  TERM
+kill_scoped "play.sh"              TERM
+kill_scoped "play_qwen.py"         TERM
 sleep 2
-pkill -9 -f "claude -p.*You play\|claude -p.*ClaudeBot\|claude -p.*play the game\|claude -p.*IMPORTANT" 2>/dev/null || true
-pkill -9 -f "opencode run" 2>/dev/null || true
-pkill -9 -f "timeout .* opencode" 2>/dev/null || true
-# Kill MCP game servers (orphaned from previous runs)
-pkill -f "mcp_game_server.py" 2>/dev/null || true
-# Kill Playwright browser drivers spawned by MCP servers
-pkill -f "playwright/driver/node" 2>/dev/null || true
-pkill -f "npm exec @playwright" 2>/dev/null || true
-pkill -f "playwright-mcp" 2>/dev/null || true
-pkill -f "game_driver.py" 2>/dev/null || true
-# Kill Chrome process groups (Playwright spawns Chrome in its own PGID)
-for cpid in $(pgrep -f "chrome-headless-shell" 2>/dev/null); do
-  pgid=$(ps -o pgid= -p "$cpid" 2>/dev/null | tr -d ' ')
-  [ -n "$pgid" ] && [ "$pgid" != "0" ] && kill -- -"$pgid" 2>/dev/null
-done
+# SIGKILL round
+kill_scoped "claude -p"            KILL
+kill_scoped "opencode run"         KILL
+kill_scoped "timeout .* opencode"  KILL
+# MCP servers, Playwright, game_driver — scoped.
+kill_scoped "mcp_game_server.py"   TERM
+kill_scoped "playwright/driver/node" TERM
+kill_scoped "npm exec @playwright" TERM
+kill_scoped "playwright-mcp"       TERM
+kill_scoped "game_driver.py"       TERM
+# Chrome process groups — scoped via pgid.
+kill_scoped_chrome_pgroup TERM
 sleep 2
-# Force-kill any surviving MCP/Playwright/Chrome processes
-pkill -9 -f "mcp_game_server.py" 2>/dev/null || true
-pkill -9 -f "playwright/driver/node" 2>/dev/null || true
-pkill -9 -f "npm exec @playwright" 2>/dev/null || true
-pkill -9 -f "playwright-mcp" 2>/dev/null || true
-pkill -9 -f "chrome-headless-shell" 2>/dev/null || true
+# Force-kill any surviving MCP/Playwright/Chrome processes (still scoped).
+kill_scoped "mcp_game_server.py"     KILL
+kill_scoped "playwright/driver/node" KILL
+kill_scoped "npm exec @playwright"   KILL
+kill_scoped "playwright-mcp"         KILL
+kill_scoped_chrome_pgroup KILL
 
 # ── Livestream pipeline cleanup: Xvfb + ffmpeg + HLS segments ──
 # Per-agent Xvfb runs on display 99 + agent_id (so :99..:108 covers slots 0-9).
@@ -174,9 +177,10 @@ for i in $(seq 0 $((TOTAL_AGENTS - 1))); do
   mkdir -p "/tmp/hls/agent_$i" 2>/dev/null || true
 done
 
-# ── Step 2: Kill game server instances (not the client on 9000) ──
-echo "Stopping game servers (preserving client on :9000)..."
-for port in $(seq 9001 10 9071); do
+# ── Step 2: Kill game server instances (data-collection ports only) ──
+# Never touch :9000 (client), :9061/:9071 (eval lanes), or :9191 (e2e tests).
+echo "Stopping data-collection game servers (preserving client/eval/test)..."
+for port in "${KAETRAM_DATA_PORTS[@]}"; do
   pid=$(ss -tlnp "sport = :$port" 2>/dev/null | grep -oP 'pid=\K[0-9]+' || true)
   if [ -n "$pid" ]; then
     kill "$pid" 2>/dev/null || true
@@ -246,9 +250,9 @@ done
 
 # Clean stale Claude Code project memory for agent sandboxes (prevents MCP bypass behavior)
 rm -rf /home/patnir41/.claude/projects/-tmp-kaetram-agent-*/memory/ 2>/dev/null && echo "  Cleared agent project memories"
-# Kill orphaned Chrome/chromium processes from agent sandboxes
-pkill -f "chrome-headless-shell" 2>/dev/null || true
-pkill -f "chromium.*kaetram\|chromium.*headless" 2>/dev/null || true
+# Kill orphaned Chrome/chromium processes from agent sandboxes (scoped).
+kill_scoped_chrome_pgroup TERM
+kill_scoped "chromium.*kaetram" TERM
 
 # Also clear single-agent state
 rm -f "$PROJECT_DIR/state/screenshot.png" \

@@ -107,8 +107,9 @@ Full reference: `dashboard/DASHBOARD.md`.
 
 ## Ports
 
-Game-server port `P` reserves `P+2` for `apiPort` (currently dormant). Agents
-stride by `+10` (`orchestrate.py:65-67`).
+Game-server port `P` reserves `P+1` for `apiPort` (currently dormant; matches
+`start-test-kaetram.sh:45` and `orchestrate.py`). Agents stride by `+10`
+(`orchestrate.py:65-67`).
 
 | Port | What |
 |------|------|

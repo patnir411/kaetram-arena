@@ -15,7 +15,6 @@ import asyncio
 import json
 import logging
 import os
-import time
 import urllib.error
 import urllib.request
 
@@ -70,7 +69,6 @@ async def state_heartbeat_loop(state: dict, interval: float = 0.3) -> None:
     agent_id = _resolve_agent_id()
     qs = f"?agent={agent_id}" if agent_id is not None else ""
     consecutive_misses = 0
-    last_push_ts = 0.0
 
     while True:
         try:
@@ -97,7 +95,6 @@ async def state_heartbeat_loop(state: dict, interval: float = 0.3) -> None:
                 await asyncio.get_event_loop().run_in_executor(
                     None, _post_json, f"/ingest/state{qs}", payload
                 )
-                last_push_ts = time.time()
 
             await asyncio.sleep(interval)
         except asyncio.CancelledError:
@@ -136,6 +133,7 @@ async def activity_heartbeat_loop(state: dict, interval: float = 1.0) -> None:
         return
 
     offsets: dict[str, int] = {}
+    tick = 0
     while True:
         try:
             try:
@@ -146,6 +144,12 @@ async def activity_heartbeat_loop(state: dict, interval: float = 1.0) -> None:
             if not logs:
                 await asyncio.sleep(interval * 4)
                 continue
+            tick += 1
+            # Every ~60 ticks (≈1 min at interval=1.0s), drop offsets for log
+            # files that have been deleted or rotated out — prevents unbounded
+            # growth across long runs.
+            if tick % 60 == 0 and offsets:
+                offsets = {k: v for k, v in offsets.items() if os.path.exists(k)}
             latest = max(logs, key=os.path.getmtime)
             offset = offsets.get(latest, 0)
             try:

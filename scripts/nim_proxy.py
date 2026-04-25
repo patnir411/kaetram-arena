@@ -52,18 +52,28 @@ def _flatten_extra_body(body: dict) -> dict:
     return body
 
 
-def _rewrite_sse_line(line: bytes) -> bytes:
-    """Map ``delta.reasoning_content`` → ``delta.content`` in one SSE line.
+def _rewrite_sse_line(line: bytes, stream_state: dict) -> bytes:
+    """Map ``delta.reasoning_content`` → ``delta.content`` and wrap the
+    reasoning span in ``<think>...</think>`` so downstream extractors
+    (extract_turns.py, Qwen3 chat-template) can split CoT from action.
 
-    Only rewrites when ``content`` would otherwise be empty. The final-answer
-    deltas (which carry real ``content`` and no ``reasoning_content``) are
-    untouched, so the consumer sees a single linear text stream of
-    "thinking → final answer".
+    State machine (per stream, keyed by ``stream_state`` dict):
+      - First reasoning chunk → prepend ``<think>`` to delta.content; set in_think.
+      - Content arrives while in_think → prepend ``</think>`` to that content;
+        clear in_think.
+      - On ``[DONE]`` with in_think still set → caller emits a final
+        ``</think>`` frame (see ``_finalize_think``).
+
+    Only rewrites when ``content`` would otherwise be empty for that delta —
+    the model's final-answer ``content`` deltas pass through untouched (just
+    prefixed with ``</think>`` on the first one if we were still thinking).
     """
     if not line.startswith(b"data: "):
         return line
     payload = line[6:].strip()
-    if not payload or payload == b"[DONE]":
+    if not payload:
+        return line
+    if payload == b"[DONE]":
         return line
     try:
         obj = json.loads(payload)
@@ -73,12 +83,33 @@ def _rewrite_sse_line(line: bytes) -> bytes:
     for c in obj.get("choices") or []:
         delta = c.get("delta") or {}
         reasoning = delta.get("reasoning_content") or delta.get("reasoning")
-        if reasoning and not delta.get("content"):
-            delta["content"] = reasoning
+        existing_content = delta.get("content") or ""
+        if reasoning and not existing_content:
+            # Reasoning delta. Open <think> exactly once per stream.
+            prefix = "<think>" if not stream_state.get("in_think") else ""
+            delta["content"] = prefix + reasoning
+            stream_state["in_think"] = True
+            rewritten = True
+        elif existing_content and stream_state.get("in_think"):
+            # First post-reasoning content delta — close </think> ahead of it.
+            delta["content"] = "</think>" + existing_content
+            stream_state["in_think"] = False
             rewritten = True
     if not rewritten:
         return line
     return b"data: " + json.dumps(obj, separators=(",", ":")).encode() + b"\n"
+
+
+def _finalize_think(stream_state: dict) -> bytes:
+    """Emit a synthetic SSE frame closing an open ``<think>`` if the stream
+    ended without surfacing any post-reasoning content. Returns b"" if the
+    state machine is already closed.
+    """
+    if not stream_state.get("in_think"):
+        return b""
+    stream_state["in_think"] = False
+    frame = {"choices": [{"index": 0, "delta": {"content": "</think>"}}]}
+    return b"data: " + json.dumps(frame, separators=(",", ":")).encode() + b"\n\n"
 
 
 async def proxy(request: web.Request) -> web.StreamResponse:
@@ -122,28 +153,38 @@ async def proxy(request: web.Request) -> web.StreamResponse:
         await resp.prepare(request)
 
         if is_sse:
+            stream_state: dict = {"in_think": False}
             buf = b""
             async for chunk in upstream.content.iter_any():
                 buf += chunk
                 while b"\n" in buf:
                     line, _, buf = buf.partition(b"\n")
-                    out = _rewrite_sse_line(line)
+                    out = _rewrite_sse_line(line, stream_state)
                     await resp.write(out + b"\n")
             if buf:
-                await resp.write(_rewrite_sse_line(buf))
+                await resp.write(_rewrite_sse_line(buf, stream_state))
+            # If the stream ended mid-thinking (no final-answer content),
+            # close the </think> tag so the consumer doesn't see an
+            # unclosed CoT block.
+            tail = _finalize_think(stream_state)
+            if tail:
+                await resp.write(tail)
         else:
             data = await upstream.read()
             # Non-streaming chat-completions: copy reasoning_content into
             # content if content is empty, so non-streaming consumers also
-            # see the thinking.
+            # see the thinking — wrapped in <think>...</think>.
             if path.endswith("chat/completions"):
                 try:
                     obj = json.loads(data)
                     for c in obj.get("choices", []):
                         msg = c.get("message", {})
                         rc = msg.get("reasoning_content") or msg.get("reasoning")
-                        if rc and not msg.get("content"):
-                            msg["content"] = rc
+                        existing = msg.get("content") or ""
+                        if rc and not existing:
+                            msg["content"] = f"<think>{rc}</think>"
+                        elif rc and existing:
+                            msg["content"] = f"<think>{rc}</think>{existing}"
                     data = json.dumps(obj, separators=(",", ":")).encode()
                 except (ValueError, TypeError):
                     pass
