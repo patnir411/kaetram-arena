@@ -171,7 +171,7 @@ python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
 | `navigate(x, y)` | BFS pathfinding to grid coords |
 | `warp(location)` | Fast travel (mudwich, aynor, lakesworld, crullfield, patsow, undersea). Auto-waits combat cooldown. |
 | `cancel_nav` | Cancel navigation |
-| `interact_npc(npc_name)` | Walk to NPC, talk through all dialogue, auto-accept quest |
+| `interact_npc(npc_name, accept_quest_offer=False)` | Walk to NPC, advance through dialogue, turn in eligible quests. Quest offers are read-only by default; pass `accept_quest_offer=True` to actually accept. |
 | `buy_item(npc_name, item_index, count)` | Buy an item from an NPC shop |
 | `eat_food(slot)` | Eat food to heal (fails at full HP) |
 | `drop_item(slot)` | Drop item to free inventory space |
@@ -190,7 +190,7 @@ python3 convert_to_qwen.py --input dataset/extracted/ --output dataset/qwen_sft/
 ```
 kaetram-agent/
 ├── mcp_game_server.py       # 19-line stub — entry point that imports mcp_server.tools
-├── mcp_server/              # Modular MCP package (15+ files, 17 typed tools). See README.
+├── mcp_server/              # Modular MCP package (17 typed tools). See README.
 ├── cli_adapter.py           # Harness abstraction (Claude = production; Codex, Gemini, OpenCode = experimental)
 ├── play.sh                  # Claude Code agent loop (resolves .mcp.template.json)
 ├── play_qwen.py             # Finetuned-model agent loop — same MCP server

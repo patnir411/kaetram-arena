@@ -31,12 +31,13 @@ Decorators register tools when `tools/__init__.py` is imported. Search for
 | `tools/observe.py` | `observe` |
 | `tools/combat.py` | `attack`, `set_attack_style`, `respawn` |
 | `tools/navigation.py` | `navigate`, `warp`, `cancel_nav`, `stuck_reset` |
-| `tools/npc.py` | `interact_npc` (also has internal `talk_npc` / `accept_quest` helpers — not exported) |
+| `tools/npc.py` | `interact_npc` (read-only by default; pass `accept_quest_offer=True` to commit. Internal `talk_npc` / `accept_quest` helpers — not exported.) |
 | `tools/inventory.py` | `eat_food`, `drop_item`, `equip_item` |
 | `tools/shop.py` | `buy_item` |
 | `tools/gathering.py` | `gather`, `loot` |
 | `tools/crafting.py` | `craft_item` |
 | `tools/quest.py` | `query_quest` |
+| `tools/recovery.py` | `clear_combat`, `click_tile` — hidden recovery helpers (not decorated with `@mcp.tool()`; reachable only via internal call sites). |
 
 If you add a tool, decorate with `@mcp.tool()` and update `prompts/system.md`
 + the action vocabulary in `dataset/DATA.md` so extraction and training stay

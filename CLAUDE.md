@@ -88,7 +88,7 @@ Full reference: `dashboard/DASHBOARD.md`.
 
 | Path | Purpose |
 |------|---------|
-| `mcp_server/` | Modular MCP package (10 Python files + `tools/` subdir, 17 model-visible tools). See `mcp_server/README.md`. |
+| `mcp_server/` | Modular MCP package (6 root + 11 `tools/` Python files, 17 model-visible tools). See `mcp_server/README.md`. |
 | `mcp_game_server.py` | 19-line stub — entry point that imports `mcp_server.tools` and runs the FastMCP loop. |
 | `.mcp.template.json` | Template with placeholders (`__VENV_PYTHON__`, `__PROJECT_DIR__`, …). Resolved per-sandbox to `.mcp.json` by `cli_adapter.py` / `play.sh`. |
 | `cli_adapter.py` | Harness abstraction: `ClaudeAdapter`, `CodexAdapter`, `GeminiAdapter`, `OpenCodeAdapter`. |
