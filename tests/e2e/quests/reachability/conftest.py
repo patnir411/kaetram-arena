@@ -7,6 +7,8 @@ separate from:
 
   - `core/` stage-transition tests: pre-seed every prereq to isolate runtime
     quest-system transitions.
+  - `core/integration/`: compose stages into an end-to-end quest run (still
+    pre-seeds resource counts to keep runtime bounded).
 
 Reachability tests deliberately MINIMIZE the seed. They exist to catch
 benchmark fairness bugs — hidden region gates, stale NPC coords, missing
@@ -132,6 +134,10 @@ async def navigate_long(
     import time as _time
     if debug is None:
         debug = get_current_test_debug()
+    _phase_start_t = _time.monotonic()
+    if debug is not None:
+        debug.event("phase_start", phase="navigate_long",
+                    target=(target_x, target_y), max_step=max_step, max_hops=max_hops)
 
     async def _capture_failure_probe(label: str, **fields: Any) -> None:
         if debug is None:

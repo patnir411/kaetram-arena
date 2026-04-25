@@ -66,16 +66,34 @@ async def test_h1_navigate_mudwich_to_herbalist(test_username, test_debug):
     seed_player(test_username, **vanilla_seed_kwargs())
     try:
         async with mcp_session(username=test_username) as session:
+            # Pin chain along the actual reachable corridor (verified via
+            # offline full-map BFS over world.json: Mudwich→Herbalist is in
+            # the same connected region but the route detours significantly
+            # — single 50-tile hops stall on the wall pattern around (290,260)).
+            # Smaller hops + explicit pins keep BFS bounded-radius happy.
+            for pin_x, pin_y in [
+                (245, 170),
+                (285, 190),
+                (293, 242),
+                (311, 254),
+                (327, 268),
+            ]:
+                await navigate_long(
+                    session,
+                    target_x=pin_x,
+                    target_y=pin_y,
+                    max_step=25,
+                    max_hops=8,
+                    arrive_tolerance=4,
+                    debug=test_debug,
+                )
             await navigate_long(
                 session,
                 target_x=HERBALIST_POS[0],
                 target_y=HERBALIST_POS[1],
-                max_step=50,
-                max_hops=25,
-                arrive_tolerance=5,
-                per_hop_timeout_s=90.0,
-                poll_interval_s=2.0,
-                no_progress_timeout_s=REACHABILITY_NO_PROGRESS_TIMEOUT_S,
+                max_step=20,
+                max_hops=6,
+                arrive_tolerance=4,
                 debug=test_debug,
             )
             await assert_pos_within(
@@ -103,7 +121,8 @@ async def test_h2_accept_herbalist_quest(test_username):
     try:
         async with mcp_session(username=test_username) as session:
             result = await session.call_tool(
-                "interact_npc", {"npc_name": "Herby Mc. Herb"}
+                "interact_npc",
+                {"npc_name": "Herby Mc. Herb", "accept_quest_offer": True},
             )
             assert not result.is_error, result.text[:300]
         await wait_for_quest_state(

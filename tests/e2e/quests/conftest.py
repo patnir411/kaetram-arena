@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 from typing import Any
 
 from bench.seed import snapshot_player
@@ -229,6 +230,21 @@ async def traverse_door(
     tiles and retry the door step before failing.
     """
     debug = get_current_test_debug()
+    phase_cm = (
+        debug.phase("traverse_door", door=(door_x, door_y), exit=(exit_x, exit_y))
+        if debug is not None
+        else nullcontext()
+    )
+    with phase_cm:
+        return await _traverse_door_inner(
+            session, door_x=door_x, door_y=door_y, exit_x=exit_x, exit_y=exit_y,
+            max_distance=max_distance, polls=polls, delay_s=delay_s, debug=debug,
+        )
+
+
+async def _traverse_door_inner(
+    session, *, door_x, door_y, exit_x, exit_y, max_distance, polls, delay_s, debug,
+) -> dict[str, Any]:
     approach_tiles = [
         (door_x, door_y + 1),
         (door_x + 1, door_y),
@@ -313,6 +329,35 @@ async def gather_until_count(
     delay_after_gather_s: float = 0.5,
 ) -> dict[str, Any]:
     debug = get_current_test_debug()
+    phase_cm = (
+        debug.phase("gather_until_count", resource=resource_name, item=item_key, target=target_count)
+        if debug is not None
+        else nullcontext()
+    )
+    with phase_cm:
+        return await _gather_until_count_inner(
+            session,
+            resource_name=resource_name,
+            item_key=item_key,
+            target_count=target_count,
+            attempts=attempts,
+            polls_after_gather=polls_after_gather,
+            delay_after_gather_s=delay_after_gather_s,
+            debug=debug,
+        )
+
+
+async def _gather_until_count_inner(
+    session,
+    *,
+    resource_name: str,
+    item_key: str,
+    target_count: int,
+    attempts: int | None,
+    polls_after_gather: int,
+    delay_after_gather_s: float,
+    debug,
+) -> dict[str, Any]:
     max_attempts = attempts or target_count + 3
     last_obs = await live_observe(session)
     current = count_live_inventory(last_obs.get("inventory") or [], item_key)
@@ -360,6 +405,16 @@ async def gather_until_count(
 
 async def craft_recipe(session, *, skill: str, recipe_key: str, count: int) -> dict[str, Any]:
     debug = get_current_test_debug()
+    phase_cm = (
+        debug.phase("craft_recipe", skill=skill, recipe=recipe_key, count=count)
+        if debug is not None
+        else nullcontext()
+    )
+    with phase_cm:
+        return await _craft_recipe_inner(session, skill=skill, recipe_key=recipe_key, count=count, debug=debug)
+
+
+async def _craft_recipe_inner(session, *, skill, recipe_key, count, debug) -> dict[str, Any]:
     result = await session.call_tool(
         "craft_item",
         {"skill": skill, "recipe_key": recipe_key, "count": count},

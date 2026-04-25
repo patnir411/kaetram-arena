@@ -15,6 +15,7 @@ Integration points:
 """
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import json
 import os
@@ -161,6 +162,29 @@ class TestDebugLog:
             "label": label,
             "text": text[:2000],
         })
+
+    @contextlib.contextmanager
+    def phase(self, name: str, **fields: Any):
+        """Mark a named phase. Emits `phase_start` / `phase_end` with elapsed.
+
+        Usage:
+            with debug.phase("seed"):
+                seed_player(...)
+            with debug.phase("navigate_to_npc", npc="babushka"):
+                await navigate_long(session, ...)
+        """
+        start = _time.monotonic()
+        self._write({"event": "phase_start", "phase": name, **fields})
+        try:
+            yield
+        finally:
+            elapsed = _time.monotonic() - start
+            self._write({
+                "event": "phase_end",
+                "phase": name,
+                "elapsed_s": round(elapsed, 3),
+                **fields,
+            })
 
     def close(self, status: str = "?"):
         if not self.enabled:
