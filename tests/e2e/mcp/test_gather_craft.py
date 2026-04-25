@@ -25,7 +25,6 @@ def _inventory_count(state: dict, key: str) -> int:
 async def test_layerB_gather_happy_path(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=FORESTER_ADJACENT,
         skills=[{"type": 15, "experience": 100_000}],
     )
@@ -39,14 +38,13 @@ async def test_layerB_gather_happy_path(isolated_lane, unique_username):
         assert payload.get("resource", "").lower().startswith("tomato"), payload
         assert _inventory_count(state, "tomato") >= 1, (payload, state)
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_craft_item_happy_path(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=MUDWICH_CENTER,
         inventory=[
             {"key": "knife", "count": 1},
@@ -70,4 +68,4 @@ async def test_layerB_craft_item_happy_path(isolated_lane, unique_username):
         assert _inventory_count(state, "stick") >= 4, (payload, state)
         assert _inventory_count(state, "logs") == 0, (payload, state)
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)

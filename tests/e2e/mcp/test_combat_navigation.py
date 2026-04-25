@@ -37,7 +37,6 @@ async def _observe_until_position(
 async def test_layerB_attack_happy_path(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=MUDWICH_CENTER,
     )
     try:
@@ -57,14 +56,13 @@ async def test_layerB_attack_happy_path(isolated_lane, unique_username):
             or target.get("name", "").lower() == "rat"
         ), (payload, state)
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_navigate_short_range_happy_path(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=MUDWICH_CENTER,
     )
     try:
@@ -81,14 +79,13 @@ async def test_layerB_navigate_short_range_happy_path(isolated_lane, unique_user
             "y": FORESTER_TILE[1],
         }, state
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_warp_happy_path(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=FORESTER_TILE,
     )
     try:
@@ -101,14 +98,13 @@ async def test_layerB_warp_happy_path(isolated_lane, unique_username):
         assert payload.get("error") is None, payload
         assert _distance_to(state, MUDWICH_CENTER) <= 6, state
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_set_attack_style_returns_requested_mapping(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=MUDWICH_CENTER,
     )
     try:
@@ -119,14 +115,13 @@ async def test_layerB_set_attack_style_returns_requested_mapping(isolated_lane, 
         assert "defensive" in result.text.lower(), result.text
         assert "id=3" in result.text.lower(), result.text
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_cancel_nav_stops_active_route(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=MUDWICH_CENTER,
     )
     try:
@@ -142,14 +137,13 @@ async def test_layerB_cancel_nav_stops_active_route(isolated_lane, unique_userna
         assert after.get("navigation", {}).get("active") is False, after
         assert after.get("navigation", {}).get("status") == "idle", after
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_stuck_reset_clears_stuck_flag(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=MUDWICH_CENTER,
     )
     try:
@@ -165,4 +159,4 @@ async def test_layerB_stuck_reset_clears_stuck_flag(isolated_lane, unique_userna
         assert reset.text.strip() == "Stuck state reset", reset.text
         assert observe_5.observe_stuck_check().get("stuck") is False
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)

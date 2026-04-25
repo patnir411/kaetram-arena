@@ -21,7 +21,6 @@ from tests.e2e.helpers.seed import cleanup_player, seed_player
 async def test_layerB_full_ooda_smoke(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=adjacent_to("forestnpc"),
         hit_points=69,
         inventory=[
@@ -66,4 +65,4 @@ async def test_layerB_full_ooda_smoke(isolated_lane, unique_username):
                 f"warp to mudwich landed off-target: {fpos}"
             )
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)

@@ -46,7 +46,6 @@ async def _observe_until_moved(
 async def test_layerB_interact_npc_happy_path(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=BLACKSMITH_ADJACENT,
     )
     try:
@@ -59,14 +58,13 @@ async def test_layerB_interact_npc_happy_path(isolated_lane, unique_username):
         assert payload.get("arrived") is True, payload
         assert payload.get("dialogue_lines", 0) >= 1 or payload.get("quest_opened") is True, payload
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_eat_food_happy_path(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=MUDWICH_CENTER,
         hit_points=20,
         inventory=[{"key": "burger", "count": 1}],
@@ -83,14 +81,13 @@ async def test_layerB_eat_food_happy_path(isolated_lane, unique_username):
         assert payload.get("eating") is True, payload
         assert after.get("player_stats", {}).get("hp", 0) > 20, after
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_loot_round_trip_after_drop(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=MUDWICH_CENTER,
         inventory=[{"key": "mushroom1", "count": 1}],
     )
@@ -112,14 +109,13 @@ async def test_layerB_loot_round_trip_after_drop(isolated_lane, unique_username)
         assert any(state.get("state") != "nothing_nearby" for state in states), states
         assert _inventory_count(observed, "mushroom1") >= 1, (states, observed)
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_respawn_warps_to_mudwich(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=FORESTER_ADJACENT,
     )
     try:
@@ -131,14 +127,13 @@ async def test_layerB_respawn_warps_to_mudwich(isolated_lane, unique_username):
         assert "respawned and combat cleared" in result.text.lower(), result.text
         assert _distance_to(state, MUDWICH_CENTER) <= 6, state
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_query_quest_exact_match(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=BLACKSMITH_ADJACENT,
     )
     try:
@@ -152,4 +147,4 @@ async def test_layerB_query_quest_exact_match(isolated_lane, unique_username):
         assert payload.get("status"), payload
         assert payload.get("walkthrough"), payload
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)

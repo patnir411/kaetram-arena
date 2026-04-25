@@ -29,10 +29,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
 from playwright.async_api import Page
-
-from .seed import ALL_COLLECTIONS, DEFAULT_HELPER_URL
 
 _SNAPSHOT_JS = r"""
 () => {
@@ -215,24 +212,3 @@ _SNAPSHOT_JS = r"""
 async def observe_via_browser(page: Page) -> dict[str, Any]:
     """Evaluate the snapshot JS in the page and return the decoded dict."""
     return await page.evaluate(_SNAPSHOT_JS)
-
-
-def observe_via_db(
-    username: str,
-    helper_url: str = DEFAULT_HELPER_URL,
-) -> dict[str, Any]:
-    """Read every player collection for this username from the REST helper."""
-    result: dict[str, Any] = {}
-    for collection in ALL_COLLECTIONS:
-        url = f"{helper_url}/{collection}/username/{username}"
-        try:
-            response = httpx.get(url, timeout=10.0)
-            if response.status_code == 404:
-                result[collection] = None
-                continue
-            response.raise_for_status()
-            data = response.json()
-            result[collection] = data[0] if isinstance(data, list) and data else data
-        except httpx.HTTPError as exc:
-            result[collection] = {"__error__": str(exc)}
-    return result

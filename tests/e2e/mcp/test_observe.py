@@ -23,7 +23,6 @@ from tests.e2e.helpers.seed import cleanup_player, seed_player
 async def test_layerA_observe_happy_path(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(199, 169),
         inventory=[{"key": "apple", "count": 1}],
     )
@@ -45,14 +44,13 @@ async def test_layerA_observe_happy_path(isolated_lane, unique_username):
         assert "skills" in snapshot
         assert "equipment" in snapshot
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_observe_happy_path(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(199, 169),
     )
     try:
@@ -65,4 +63,4 @@ async def test_layerB_observe_happy_path(isolated_lane, unique_username):
         assert not result.is_error, result.text
         assert result.text, "observe returned empty content"
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)

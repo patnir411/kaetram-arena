@@ -32,7 +32,6 @@ from tests.e2e.helpers.seed import cleanup_player, seed_player
 async def test_layerB_equip_item_happy_path(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(199, 169),
         inventory=[{"key": "tinsword", "count": 1}],
     )
@@ -50,14 +49,13 @@ async def test_layerB_equip_item_happy_path(isolated_lane, unique_username):
         changes = payload.get("changes") or {}
         assert changes, f"expected at least one equipment slot to change, got {payload}"
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_equip_item_stat_req_not_met(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(199, 169),
         inventory=[{"key": "ironaxe", "count": 1}],
         skills=[
@@ -81,14 +79,13 @@ async def test_layerB_equip_item_stat_req_not_met(isolated_lane, unique_username
             f"expected stat/level hint in error so agent stops retrying, got {payload}"
         )
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_equip_item_empty_slot(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(199, 169),
     )
     try:
@@ -103,4 +100,4 @@ async def test_layerB_equip_item_empty_slot(isolated_lane, unique_username):
         assert payload.get("equipped") is not True, payload
         assert "error" in payload or payload.get("equipped") is False, payload
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)

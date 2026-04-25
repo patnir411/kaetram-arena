@@ -20,7 +20,6 @@ async def test_layerB_warp_all_documented_locations(isolated_lane, unique_userna
     waterguardian). Never a crash/silent failure."""
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(188, 157),
         inventory=[{"key": "bronzeaxe", "count": 1}],
     )
@@ -38,7 +37,7 @@ async def test_layerB_warp_all_documented_locations(isolated_lane, unique_userna
                     "achievement", "quest", "gate", "require", "error", "locked",
                 )), f"warp {location} errored without rationale: {res.text[:200]}"
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
@@ -46,7 +45,6 @@ async def test_layerB_warp_unknown_location_returns_error(isolated_lane, unique_
     """Unknown warp id must produce a clear signal (error or allowed-list)."""
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(188, 157),
         inventory=[{"key": "bronzeaxe", "count": 1}],
     )
@@ -66,4 +64,4 @@ async def test_layerB_warp_unknown_location_returns_error(isolated_lane, unique_
                 or "allowed" in data
             ), f"no error signal for bad warp: {res.text[:200]}"
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)

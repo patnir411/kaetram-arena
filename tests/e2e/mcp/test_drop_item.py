@@ -29,7 +29,6 @@ from tests.e2e.helpers.seed import cleanup_player, seed_player
 async def test_layerB_drop_item_happy_path(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(199, 169),
         inventory=[{"key": "mushroom1", "count": 1}],
     )
@@ -48,14 +47,13 @@ async def test_layerB_drop_item_happy_path(isolated_lane, unique_username):
         assert isinstance(before, int) and isinstance(after, int), payload
         assert after < before, f"expected inventory to shrink, got {payload}"
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_drop_item_empty_slot(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(199, 169),
     )
     try:
@@ -72,4 +70,4 @@ async def test_layerB_drop_item_empty_slot(isolated_lane, unique_username):
             f"expected an empty-slot error so agent doesn't retry blindly, got {payload}"
         )
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)

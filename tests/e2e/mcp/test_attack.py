@@ -22,7 +22,6 @@ async def test_layerB_attack_unreachable_mob_does_not_fake_kill(isolated_lane, u
     damage_dealt: 0` with a guidance note."""
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(188, 157),
         inventory=[{"key": "bronzeaxe", "count": 1}],
     )
@@ -42,7 +41,7 @@ async def test_layerB_attack_unreachable_mob_does_not_fake_kill(isolated_lane, u
             )
             assert post.get("damage_dealt", 0) == 0
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
@@ -51,7 +50,6 @@ async def test_layerB_attack_no_target_returns_guidance(isolated_lane, unique_us
     knows to navigate or pick another mob — not silently return success."""
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(188, 157),
         inventory=[{"key": "bronzeaxe", "count": 1}],
     )
@@ -71,4 +69,4 @@ async def test_layerB_attack_no_target_returns_guidance(isolated_lane, unique_us
                 or post.get("damage_dealt", 0) == 0
             ), f"silent no-op on unreachable attack: {res.text[:200]}"
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)

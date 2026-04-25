@@ -14,7 +14,6 @@ async def test_layerB_set_attack_style_valid(isolated_lane, unique_username, sty
     """All documented attack styles must dispatch without error."""
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(188, 157),
         inventory=[{"key": "bronzeaxe", "count": 1}],
     )
@@ -28,7 +27,7 @@ async def test_layerB_set_attack_style_valid(isolated_lane, unique_username, sty
             assert not res.is_error, res.text[:200]
             assert "style" in res.text.lower() or style in res.text.lower()
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
@@ -38,7 +37,6 @@ async def test_layerB_set_attack_style_invalid_fallback(isolated_lane, unique_us
     typo). This test pins that behavior so a future tightening is visible."""
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(188, 157),
         inventory=[{"key": "bronzeaxe", "count": 1}],
     )
@@ -58,4 +56,4 @@ async def test_layerB_set_attack_style_invalid_fallback(isolated_lane, unique_us
                 or "style" in res.text.lower()
             )
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)

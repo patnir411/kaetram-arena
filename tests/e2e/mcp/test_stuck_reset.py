@@ -16,7 +16,6 @@ from tests.e2e.helpers.seed import cleanup_player, seed_player
 async def test_layerB_stuck_reset_clears_state(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(188, 157),
         inventory=[{"key": "bronzeaxe", "count": 1}],
     )
@@ -34,4 +33,4 @@ async def test_layerB_stuck_reset_clears_state(isolated_lane, unique_username):
                 f"still stuck after reset: {digest}"
             )
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)

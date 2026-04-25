@@ -22,7 +22,6 @@ from tests.e2e.helpers.seed import cleanup_player, seed_player
 async def test_layerB_mcp_exposes_all_model_visible_tools(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(188, 157),
         inventory=[{"key": "bronzeaxe", "count": 1}],
     )
@@ -38,4 +37,4 @@ async def test_layerB_mcp_exposes_all_model_visible_tools(isolated_lane, unique_
                 f"Check @mcp.tool() registrations in mcp_game_server.py."
             )
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)

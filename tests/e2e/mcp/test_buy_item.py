@@ -32,7 +32,6 @@ from tests.e2e.helpers.seed import cleanup_player, seed_player
 async def test_layerB_buy_item_happy_path(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(398, 889),
         inventory=[{"key": "gold", "count": 10_000}],
     )
@@ -53,14 +52,13 @@ async def test_layerB_buy_item_happy_path(isolated_lane, unique_username):
         assert gained.get("burger", 0) >= 1, payload
         assert payload.get("gold_spent", 0) > 0, payload
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_buy_item_unknown_npc(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(199, 169),
         inventory=[{"key": "gold", "count": 10_000}],
     )
@@ -81,14 +79,13 @@ async def test_layerB_buy_item_unknown_npc(isolated_lane, unique_username):
             f"expected unknown-NPC error, got {payload}"
         )
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
 
 
 @pytest.mark.mcp_smoke
 async def test_layerB_buy_item_not_adjacent(isolated_lane, unique_username):
     seed_player(
         unique_username,
-        helper_url=isolated_lane.db_helper_url,
         position=(5, 5),
         inventory=[{"key": "gold", "count": 10_000}],
     )
@@ -110,4 +107,4 @@ async def test_layerB_buy_item_not_adjacent(isolated_lane, unique_username):
         )
         assert "error" in payload or "cannot find" in (payload.get("error") or "").lower() or True, payload
     finally:
-        cleanup_player(unique_username, helper_url=isolated_lane.db_helper_url)
+        cleanup_player(unique_username)
