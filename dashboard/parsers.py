@@ -3,7 +3,7 @@
 import json
 import logging
 import sys
-from collections import OrderedDict, deque
+from collections import OrderedDict
 from pathlib import Path
 from dashboard.constants import sanitize
 
@@ -59,12 +59,6 @@ _live_stats_cache = OrderedDict()  # filepath -> (mtime, stats_result), LRU
 _PARSE_CACHE_MAX = 25
 _STATS_CACHE_MAX = 25
 
-# Incremental tail-reader state, keyed by (filepath, consumer_id).
-# Each entry: {"offset": int, "events": deque(maxlen=500), "turn": int,
-# "model": str, "cost_usd": float}
-_tail_state = {}
-
-
 def parse_session_log(filepath):
     """Parse a session log (auto-detecting Claude or Codex format).
 
@@ -93,60 +87,6 @@ def parse_session_log(filepath):
     while len(_parse_cache) > _PARSE_CACHE_MAX:
         _parse_cache.popitem(last=False)
     return result
-
-
-def tail_session_log(filepath, consumer_id="default", max_events=500):
-    """Incremental log tail. Reads only new bytes since last call.
-
-    Returns the same shape as parse_session_log() but maintains a rolling
-    buffer of the most recent `max_events` events. Reuses the per-format
-    parsing logic by delegating to parse_session_log() on first read or
-    when the file shrinks (e.g., rotated/truncated).
-
-    `consumer_id` lets multiple callers maintain independent offsets on the
-    same file (e.g., dashboard activity feed vs MCP heartbeat).
-    """
-    key = (filepath, consumer_id)
-    state = _tail_state.get(key)
-    try:
-        size = Path(filepath).stat().st_size
-    except OSError:
-        return state["snapshot"] if state else None
-
-    # First read or rotation/truncation → fall back to full parse and seed offset.
-    if state is None or state.get("offset", 0) > size:
-        snapshot = parse_session_log(filepath)
-        events = list(snapshot.get("events", [])) if snapshot else []
-        buf = deque(events[-max_events:], maxlen=max_events)
-        state = {
-            "offset": size,
-            "buffer": buf,
-            "snapshot": snapshot,
-        }
-        _tail_state[key] = state
-        return snapshot
-
-    # Incremental read of new bytes.
-    new_lines = []
-    try:
-        with open(filepath, "rb") as fh:
-            fh.seek(state["offset"])
-            chunk = fh.read()
-            state["offset"] += len(chunk)
-            new_lines = chunk.decode("utf-8", errors="ignore").splitlines()
-    except OSError as e:
-        logger.debug("tail read failed: %s", e)
-        return state["snapshot"]
-
-    if not new_lines:
-        return state["snapshot"]
-
-    # Re-parse the whole file to keep semantics simple — but only once
-    # per growth event, not per request. The parse_session_log mtime cache
-    # makes the second hit cheap.
-    snapshot = parse_session_log(filepath)
-    state["snapshot"] = snapshot
-    return snapshot
 
 
 def _parse_claude_session_log(filepath):

@@ -64,23 +64,6 @@
     setInterval(function () { console.debug('LIVE_SCREENSHOT_TRIGGER'); }, 250);
   }
 
-  // ── Live State Push to Dashboard ──
-  if (!window.__liveStatePushActive) {
-    window.__liveStatePushActive = true;
-    setInterval(function () {
-      if (!window.__extractGameState) return;
-      var state = window.__extractGameState();
-      if (state && !state.error) {
-        var port = window.location.port || '9000';
-        fetch('http://localhost:3000/api/state?port=' + port, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(state)
-        }).catch(function() { /* ignore connection errors if dashboard is down */ });
-      }
-    }, 250);
-  }
-
   // ── Dynamic canvas metrics (computed per extraction) ──
   // IMPORTANT: `document.getElementById('canvas')` returns a <div> wrapper, NOT an actual
   // <canvas> element. Its children are position:absolute so the div has height=0, which

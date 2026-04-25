@@ -184,10 +184,11 @@ async def _ensure_browser(state: dict):
                 const PORT = '{port}';
                 const _WS = window.WebSocket;
                 window.WebSocket = function(url, protocols) {{
-                    url = url.replace(/\\/\\/[^:/]+/, '//localhost');
                     // Rewrite whatever port the client emits (today always
                     // :9001 from .env.defaults; defensive against future
-                    // Kaetram default-port changes).
+                    // Kaetram default-port changes). Hostname is preserved so
+                    // dual-VM setups (game server on one host, agent browser
+                    // on another) connect correctly.
                     url = url.replace(/:\\d+(?=\\/|$)/, ':' + PORT);
                     return protocols ? new _WS(url, protocols) : new _WS(url);
                 }};

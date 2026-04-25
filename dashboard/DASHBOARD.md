@@ -9,7 +9,7 @@ dashboard/
 ├── server.py        # Entry point: ThreadedHTTPServer (:8080), WebSocketRelay (:8081, auto-restart), ScreenshotWatcher
 ├── handler.py       # HTTP routing (do_GET / do_POST → path dispatch), template, /hls/, /static/, /ingest/ endpoints
 ├── api.py           # APIMixin — all /api/* endpoints (mixed into DashboardHandler)
-├── parsers.py       # Session log parsers (Claude/Codex/Gemini/OpenCode); mtime-keyed LRU; tail_session_log incremental reader
+├── parsers.py       # Session log parsers (Claude/Codex/Gemini/OpenCode); mtime-keyed LRU cache
 ├── game_state.py    # Game state extraction: MongoDB (authoritative) + game_state.json (live) + log fallback
 ├── db.py            # MongoDB queries: player_info, skills, equipment, inventory, quests, achievements
 ├── constants.py     # Shared config: ports, paths, TTL constants, GZIP_MIN_BYTES, sanitize(), process checks
@@ -88,7 +88,7 @@ Everything is cached to avoid redundant work on the 8-vCPU VM:
 | `_agents_cache` | 5s (`AGENTS_TTL`) | Avoids re-parsing logs + port probing on every dashboard poll. Now includes `hls_age` and `hls_available`. |
 | `_ss_cache` (ss -tlnp) | 5s | Avoids forking subprocess per request |
 | MongoDB player state | 3s | DB only saves on autosave/logout — more frequent queries waste cycles |
-| Session log parser | mtime-keyed LRU | Re-parses only when log mtime advances. `tail_session_log` is incremental — keeps a per-consumer offset for `/api/activity` and `/api/eval/live`. |
+| Session log parser | mtime-keyed LRU (25 files) | Re-parses only when log mtime advances. |
 | Dataset / SFT stats | mtime-keyed | Avoids walking `dataset/extracted/` on every poll |
 | Eval live | 1s fingerprint | `/api/eval/live` returns 304-equivalent payload when nothing changed |
 | HTML template | import-time | Loaded once, never re-read (restart dashboard after template edits) |

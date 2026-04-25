@@ -39,7 +39,12 @@ def _resolve_agent_id() -> int | None:
 
 def _post_json(path: str, body: dict | list) -> None:
     """Synchronous POST. Called from a thread pool executor so the event loop
-    doesn't block on the HTTP round-trip."""
+    doesn't block on the HTTP round-trip.
+
+    Note: `urllib.request.urlopen` opens a fresh socket per call — fine at our
+    current ~10 RPS to localhost (3 agents × 3.3 Hz heartbeat). If we scale to
+    >5 agents or move the dashboard off-host, switch to `urllib3.PoolManager`.
+    """
     url = f"http://{DASHBOARD_INGEST_HOST}:{DASHBOARD_INGEST_PORT}{path}"
     data = json.dumps(body).encode()
     req = urllib.request.Request(
@@ -155,8 +160,16 @@ async def activity_heartbeat_loop(state: dict, interval: float = 1.0) -> None:
                     with open(latest, "rb") as f:
                         f.seek(offset)
                         chunk = f.read()
-                    offsets[latest] = offset + len(chunk)
-                    for line in chunk.decode("utf-8", errors="ignore").splitlines():
+                    # Don't advance past a partial line at the chunk boundary —
+                    # the harness may be mid-write. Process up to the last \n
+                    # only, and keep the rest for the next pass.
+                    last_newline = chunk.rfind(b"\n")
+                    if last_newline == -1:
+                        await asyncio.sleep(interval)
+                        continue
+                    processable = chunk[:last_newline + 1]
+                    offsets[latest] = offset + len(processable)
+                    for line in processable.decode("utf-8", errors="ignore").splitlines():
                         line = line.strip()
                         if not line or not line.startswith("{"):
                             continue

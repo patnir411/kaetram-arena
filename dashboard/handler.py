@@ -330,10 +330,10 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
         # Guard against symlinks pointing outside static_dir.
         if not os.path.isfile(filepath):
             return self.send_error(404)
-        if os.path.realpath(filepath).startswith(os.path.realpath(static_dir) + os.sep) is False \
-                and os.path.realpath(filepath) != os.path.realpath(filepath):
-            # Trivially true; placeholder for future symlink hardening if needed.
-            pass
+        real_static_dir = os.path.realpath(static_dir)
+        real_filepath = os.path.realpath(filepath)
+        if not real_filepath.startswith(real_static_dir + os.sep):
+            return self.send_error(403)
         ctype = mimetypes.guess_type(filepath)[0] or "application/octet-stream"
         try:
             with open(filepath, "rb") as f:

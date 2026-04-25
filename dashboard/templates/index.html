@@ -1190,9 +1190,6 @@ let wsReconnectTimer = null;
 let wsReconnectAttempts = 0;
 // Per-agent freshness state: { ts: <unix sec last state>, video: bool, hp: { current, max } }
 const liveState = {};
-// Activity rolling buffer (capped) per agent.
-const liveActivity = {};
-const LIVE_ACTIVITY_CAP = 200;
 
 function _wsBackoffMs() {
   // 500, 1000, 2000, 4000, ... capped at 30s.
@@ -1225,7 +1222,6 @@ function connectWebSocket() {
       switch (msg.type) {
         case 'screenshot': onScreenshotNotification(msg.agent, msg.ts); break;
         case 'state':      onStateNotification(msg.agent, msg.payload, msg.ts); break;
-        case 'activity':   onActivityNotification(msg.agent, msg.events, msg.ts); break;
         case 'heartbeat':  onHeartbeatNotification(msg.agents, msg.ts); break;
         case 'connected':  break; // handshake
       }
@@ -1280,13 +1276,6 @@ function onStateNotification(agentId, payload, ts) {
       }
     }
   } catch(e) {}
-}
-
-function onActivityNotification(agentId, events, ts) {
-  if (agentId === null || agentId === undefined || !Array.isArray(events)) return;
-  const buf = liveActivity[agentId] = liveActivity[agentId] || [];
-  for (const ev of events) buf.push(ev);
-  while (buf.length > LIVE_ACTIVITY_CAP) buf.shift();
 }
 
 function onHeartbeatNotification(agents, ts) {
