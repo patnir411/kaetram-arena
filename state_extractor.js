@@ -552,9 +552,12 @@
     try {
       var p = game.player;
       if (p && p.equipments) {
-        for (var i = 0; i < p.equipments.length; i++) {
-          var eq = p.equipments[i];
-          beforeEquip[i] = eq ? (eq.name || eq.key || 'none') : 'none';
+        // p.equipments is an object keyed by Modules.Equipment slot enum,
+        // not an array — see __extractGameState() at line ~324.
+        for (var slotId in p.equipments) {
+          if (!Object.prototype.hasOwnProperty.call(p.equipments, slotId)) continue;
+          var eq = p.equipments[slotId];
+          beforeEquip[slotId] = eq ? (eq.name || eq.key || 'none') : 'none';
         }
       }
     } catch(e) {}

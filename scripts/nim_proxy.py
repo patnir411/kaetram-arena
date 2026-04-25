@@ -104,58 +104,74 @@ async def proxy(request: web.Request) -> web.StreamResponse:
         except (ValueError, TypeError):
             pass
 
+    session: ClientSession = request.app["session"]
+    async with session.request(
+        request.method, target, headers=fwd_headers, data=body_bytes,
+        allow_redirects=False,
+    ) as upstream:
+        content_type = upstream.headers.get("Content-Type", "")
+        is_sse = "text/event-stream" in content_type.lower()
+
+        resp_headers = {
+            k: v for k, v in upstream.headers.items()
+            if k.lower() not in (
+                "content-encoding", "content-length", "transfer-encoding",
+            )
+        }
+        resp = web.StreamResponse(status=upstream.status, headers=resp_headers)
+        await resp.prepare(request)
+
+        if is_sse:
+            buf = b""
+            async for chunk in upstream.content.iter_any():
+                buf += chunk
+                while b"\n" in buf:
+                    line, _, buf = buf.partition(b"\n")
+                    out = _rewrite_sse_line(line)
+                    await resp.write(out + b"\n")
+            if buf:
+                await resp.write(_rewrite_sse_line(buf))
+        else:
+            data = await upstream.read()
+            # Non-streaming chat-completions: copy reasoning_content into
+            # content if content is empty, so non-streaming consumers also
+            # see the thinking.
+            if path.endswith("chat/completions"):
+                try:
+                    obj = json.loads(data)
+                    for c in obj.get("choices", []):
+                        msg = c.get("message", {})
+                        rc = msg.get("reasoning_content") or msg.get("reasoning")
+                        if rc and not msg.get("content"):
+                            msg["content"] = rc
+                    data = json.dumps(obj, separators=(",", ":")).encode()
+                except (ValueError, TypeError):
+                    pass
+            await resp.write(data)
+
+        await resp.write_eof()
+        return resp
+
+
+async def _session_ctx(app: web.Application):
+    """Create one ClientSession at startup; close it on shutdown.
+
+    A single shared session preserves the aiohttp connector pool across
+    requests, which matters under concurrent OpenCode agents — the previous
+    per-request ``async with ClientSession(...)`` defeated TLS reuse and
+    risked socket exhaustion.
+    """
     timeout = ClientTimeout(total=600, sock_connect=15, sock_read=600)
-    async with ClientSession(timeout=timeout) as session:
-        async with session.request(
-            request.method, target, headers=fwd_headers, data=body_bytes,
-            allow_redirects=False,
-        ) as upstream:
-            content_type = upstream.headers.get("Content-Type", "")
-            is_sse = "text/event-stream" in content_type.lower()
-
-            resp_headers = {
-                k: v for k, v in upstream.headers.items()
-                if k.lower() not in (
-                    "content-encoding", "content-length", "transfer-encoding",
-                )
-            }
-            resp = web.StreamResponse(status=upstream.status, headers=resp_headers)
-            await resp.prepare(request)
-
-            if is_sse:
-                buf = b""
-                async for chunk in upstream.content.iter_any():
-                    buf += chunk
-                    while b"\n" in buf:
-                        line, _, buf = buf.partition(b"\n")
-                        out = _rewrite_sse_line(line)
-                        await resp.write(out + b"\n")
-                if buf:
-                    await resp.write(_rewrite_sse_line(buf))
-            else:
-                data = await upstream.read()
-                # Non-streaming chat-completions: copy reasoning_content into
-                # content if content is empty, so non-streaming consumers also
-                # see the thinking.
-                if path.endswith("chat/completions"):
-                    try:
-                        obj = json.loads(data)
-                        for c in obj.get("choices", []):
-                            msg = c.get("message", {})
-                            rc = msg.get("reasoning_content") or msg.get("reasoning")
-                            if rc and not msg.get("content"):
-                                msg["content"] = rc
-                        data = json.dumps(obj, separators=(",", ":")).encode()
-                    except (ValueError, TypeError):
-                        pass
-                await resp.write(data)
-
-            await resp.write_eof()
-            return resp
+    app["session"] = ClientSession(timeout=timeout)
+    try:
+        yield
+    finally:
+        await app["session"].close()
 
 
 def main():
     app = web.Application(client_max_size=64 * 1024 * 1024)
+    app.cleanup_ctx.append(_session_ctx)
     app.router.add_route("*", "/{path:.+}", proxy)
     log.info("NIM proxy listening on http://%s:%d → %s", HOST, PORT, NIM_URL)
     try:

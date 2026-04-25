@@ -63,7 +63,9 @@ async def state_heartbeat_loop(state: dict, interval: float = 0.3) -> None:
     """Push window.__latestGameState to the dashboard every `interval` seconds.
 
     `state` is the same dict managed by mcp_server.core (carries `page`).
-    Stops automatically when the page is closed/None on three consecutive ticks.
+    Stops automatically when the page is closed/None for ~30 s
+    (100 consecutive ticks at the default 0.3 s interval) — long enough to
+    tolerate slow tool calls without giving up on dashboard streaming.
     """
     agent_id = _resolve_agent_id()
     qs = f"?agent={agent_id}" if agent_id is not None else ""

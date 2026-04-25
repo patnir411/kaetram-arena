@@ -67,6 +67,12 @@ BASE_SERVER_PORT = 9001
 PORT_STRIDE = 10
 CLIENT_PORT = 9000  # shared static client
 
+# NIM proxy (SSE-rewriting bridge for OpenCode reasoning capture).
+# scripts/start-nim-proxy.sh daemonizes scripts/nim_proxy.py on this port.
+NIM_PROXY_HOST = "127.0.0.1"
+NIM_PROXY_PORT = 8889
+NIM_PROXY_SCRIPT = PROJECT_DIR / "scripts" / "start-nim-proxy.sh"
+
 
 @dataclass
 class GameServer:
@@ -1160,6 +1166,9 @@ class Orchestrator:
         self.agents: list[AgentInstance] = []
         self.running = True
         self.start_time = time.time()
+        # Tracks a NIM-proxy daemon we spawned (None if it was already
+        # running externally, or no OpenCode agents are configured).
+        self._nim_proxy_proc: subprocess.Popen | None = None
         # Detect auth mode once at startup (cached for all agents)
         self.auth_mode = detect_auth_mode()
         if self.auth_mode == "api_key":
@@ -1223,8 +1232,69 @@ class Orchestrator:
             agent.setup()
             self.agents.append(agent)
 
+    def _nim_proxy_reachable(self) -> bool:
+        try:
+            with socket.create_connection((NIM_PROXY_HOST, NIM_PROXY_PORT), timeout=1):
+                return True
+        except (ConnectionRefusedError, OSError, TimeoutError):
+            return False
+
+    def _ensure_nim_proxy(self):
+        """Start scripts/start-nim-proxy.sh if any OpenCode agent is configured.
+
+        OpenCode points its baseURL at http://127.0.0.1:8889/v1 (see
+        opencode.template.json), but nothing else in the stack starts that
+        proxy. Without it, every OpenCode chat completion silently hangs on
+        connect. We TCP-probe the port; if dead, spawn the daemon script and
+        wait for it to come up. Fail-fast with a clear message rather than
+        letting agents stall.
+        """
+        if self.harness_counts.get("opencode", 0) <= 0:
+            return
+        if self._nim_proxy_reachable():
+            print(f"[i] NIM proxy already up on {NIM_PROXY_HOST}:{NIM_PROXY_PORT}, reusing")
+            return
+        if not NIM_PROXY_SCRIPT.exists():
+            print(f"ERROR: OpenCode agents requested but {NIM_PROXY_SCRIPT} missing.")
+            sys.exit(1)
+        print(f"[i] Starting NIM proxy via {NIM_PROXY_SCRIPT.name}...")
+        self._nim_proxy_proc = subprocess.Popen(
+            ["bash", str(NIM_PROXY_SCRIPT)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            preexec_fn=os.setsid,
+        )
+        for _ in range(20):  # up to ~5 s
+            time.sleep(0.25)
+            if self._nim_proxy_reachable():
+                print(f"[i] NIM proxy ready on {NIM_PROXY_HOST}:{NIM_PROXY_PORT}")
+                return
+        print(f"ERROR: NIM proxy did not come up on {NIM_PROXY_HOST}:{NIM_PROXY_PORT}.")
+        print("       Check /tmp/nim_proxy.log; OpenCode will hang without it.")
+        sys.exit(1)
+
+    def _stop_nim_proxy(self):
+        if self._nim_proxy_proc is None or self._nim_proxy_proc.poll() is not None:
+            self._nim_proxy_proc = None
+            return
+        try:
+            os.killpg(os.getpgid(self._nim_proxy_proc.pid), signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            pass
+        try:
+            self._nim_proxy_proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(self._nim_proxy_proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+        self._nim_proxy_proc = None
+
     def start(self):
         """Start all servers, wait for health, then start all agents."""
+        # Bring up the NIM proxy first (only if we'll need it) — agents must
+        # not race the proxy boot.
+        self._ensure_nim_proxy()
+
         harness_parts = []
         for h, count in [("Claude", "claude"), ("Codex", "codex"), ("Gemini", "gemini"), ("OpenCode", "opencode")]:
             n = self.harness_counts.get(count, 0)
@@ -1376,6 +1446,7 @@ class Orchestrator:
             agent.stop()
         for server in self.servers:
             server.stop()
+        self._stop_nim_proxy()
 
         # Copy any remaining sandbox state
         for agent in self.agents:

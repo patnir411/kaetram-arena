@@ -35,7 +35,10 @@ async def attack(ctx: Context, mob_name: str) -> str:
     result = await page.evaluate(
         "(name) => JSON.stringify(window.__attackMob(name))", mob_name
     )
-    await page.wait_for_timeout(3000)
+    # 2.5 s settle window matches the original monolithic mcp_game_server.py;
+    # the 3000 ms value introduced in the modular refactor was an inadvertent
+    # regression that added ~500 ms latency to every combat turn.
+    await page.wait_for_timeout(2500)
 
     # Post-attack state: check if mob died, damage dealt, player HP
     post = await page.evaluate("""() => {

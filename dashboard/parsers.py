@@ -109,6 +109,11 @@ def _parse_claude_session_log(filepath):
     # later (Claude emits it in a separate user-role message) we can attach
     # the result text to the original tool event for click-to-expand.
     tool_idx_by_id: dict[str, int] = {}
+    # Step-boundary tracking for the "(silent) deliberated for Ns" annotation.
+    # Initialized here (not inside the step_start branch) so a stray
+    # step_finish arriving first doesn't fall through to a NameError.
+    last_step_started_at: int = 0
+    last_step_had_text: bool = True
 
     try:
         with open(filepath) as fh:
@@ -159,8 +164,8 @@ def _parse_claude_session_log(filepath):
                     continue
                 if t in ("step_finish", "step-finish"):
                     end_ts = obj.get("timestamp") or 0
-                    start_ts = locals().get("last_step_started_at") or 0
-                    had_text = locals().get("last_step_had_text", True)
+                    start_ts = last_step_started_at
+                    had_text = last_step_had_text
                     if not had_text and start_ts and end_ts > start_ts:
                         secs = round((end_ts - start_ts) / 1000.0, 1)
                         events.append({
