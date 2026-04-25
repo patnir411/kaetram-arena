@@ -158,9 +158,16 @@ async def _ensure_browser(state: dict):
             "--disable-infobars",
             "--hide-scrollbars",
         ]
+        # Pass DISPLAY through so headed Chromium can attach to the per-agent
+        # Xvfb display when orchestrate.py sets DISPLAY=:99+N. In pure
+        # headless mode DISPLAY is ignored.
+        launch_env = {**os.environ}
+        if headed and "DISPLAY" not in launch_env:
+            launch_env["DISPLAY"] = ":0"
         browser = await pw.chromium.launch(
             headless=not headed,
             args=chrome_args,
+            env=launch_env,
         )
         context = await browser.new_context(viewport={"width": 1280, "height": 720})
 
@@ -202,6 +209,21 @@ async def _ensure_browser(state: dict):
         state["page"] = page
         state["browser"] = browser
         state["pw"] = pw
+
+        # Start the dashboard heartbeats once. They run for the lifetime of
+        # the MCP server and are best-effort — never crash the agent.
+        if not state.get("_heartbeats_started"):
+            try:
+                from mcp_server.state_heartbeat import (
+                    state_heartbeat_loop, activity_heartbeat_loop,
+                )
+                asyncio.create_task(state_heartbeat_loop(state))
+                asyncio.create_task(activity_heartbeat_loop(state))
+                state["_heartbeats_started"] = True
+                log("[mcp] Dashboard heartbeats started")
+            except Exception as e:
+                log(f"[mcp] heartbeat start failed: {e}")
+
         log("[mcp] Browser ready")
         return page
 

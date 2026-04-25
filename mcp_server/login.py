@@ -258,15 +258,18 @@ async def login_impl(ctx: Context, page) -> str:
         }""")
         log(f"[mcp][debug_login] tutorial auto-warp check: {json.dumps(tutorial_state, sort_keys=True)[:1000]}")
         pos = (tutorial_state or {}).get("pos")
-        tutorial = (tutorial_state or {}).get("tutorial")
-        tutorial_unfinished = bool(tutorial and not tutorial.get("finished"))
+        # Auto-warp anyone parked at the tutorial spawn (Programmer's house).
+        # Pre-seeded accounts via tests/e2e/helpers/seed.py mark the tutorial
+        # finished but still spawn the character at (328, 892), so the prior
+        # `tutorial_unfinished`-only check left fresh-seeded bots stuck in the
+        # corner. The coordinate gate alone is sufficient — no real gameplay
+        # happens at those tiles.
         if (
-            tutorial_unfinished
-            and pos
+            pos
             and 300 <= pos.get("x", 0) <= 360
             and 860 <= pos.get("y", 0) <= 920
         ):
-            log(f"[mcp] Tutorial spawn detected at {pos}; auto-warping to Mudwich")
+            log(f"[mcp] Tutorial-spawn coords detected at {pos}; auto-warping to Mudwich")
             await page.evaluate("(id) => window.__safeWarp(id)", 0)
             await page.wait_for_timeout(2500)
     except Exception as e:

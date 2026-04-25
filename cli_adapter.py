@@ -616,13 +616,15 @@ class OpenCodeAdapter(CLIAdapter):
     Output format is --format json (not stream-json); each line is a JSON
     event with `type` and nested `part` / `message.content` shapes.
 
-    Model must be given in provider/model form (e.g. ollama/kaetram). The
-    default Ollama provider is defined in opencode.template.json; override
-    via OPENCODE_MODEL env var.
+    Model must be given in provider/model form. The default NVIDIA provider
+    is defined in opencode.template.json (free-tier Qwen via integrate.api
+    .nvidia.com); set OPENCODE_MODEL to override. Requires NVIDIA_API_KEY.
     """
 
-    def __init__(self, model: str = "ollama/kaetram"):
-        super().__init__(model)
+    _DEFAULT_MODEL = "nvidia/qwen/qwen3-coder-480b-a35b-instruct"
+
+    def __init__(self, model: str | None = None):
+        super().__init__(model or os.environ.get("OPENCODE_MODEL") or self._DEFAULT_MODEL)
 
     @property
     def name(self) -> str:
@@ -639,10 +641,23 @@ class OpenCodeAdapter(CLIAdapter):
                 "opencode.template.json missing — add it at the project root "
                 "with provider.ollama + mcp.kaetram entries"
             )
-        text = template_path.read_text()
-        text = text.replace("__VENV_PYTHON__", VENV_PYTHON)
-        text = text.replace("__PROJECT_DIR__", str(PROJECT_DIR))
-        (sandbox_dir / "opencode.json").write_text(text)
+        # Build the per-agent config by injecting the MCP env block opencode
+        # does not have placeholder substitution in its schema, so we load the
+        # template as JSON and patch `mcp.kaetram.environment` directly.
+        cfg = json.loads(template_path.read_text())
+        mcp = cfg.setdefault("mcp", {}).setdefault("kaetram", {})
+        cmd = mcp.get("command", [])
+        mcp["command"] = [
+            VENV_PYTHON if c == "__VENV_PYTHON__" else c.replace("__PROJECT_DIR__", str(PROJECT_DIR))
+            for c in cmd
+        ]
+        mcp["environment"] = {
+            "KAETRAM_PORT":           port,
+            "KAETRAM_USERNAME":       username,
+            "KAETRAM_EXTRACTOR":      str(PROJECT_DIR / "state_extractor.js"),
+            "KAETRAM_SCREENSHOT_DIR": str(sandbox_dir / "state"),
+        }
+        (sandbox_dir / "opencode.json").write_text(json.dumps(cfg, indent=2))
         # System prompt → AGENTS.md (opencode convention)
         if system_prompt:
             (sandbox_dir / "AGENTS.md").write_text(system_prompt)
@@ -656,17 +671,14 @@ class OpenCodeAdapter(CLIAdapter):
         auth_mode: str = "subscription",
     ) -> list[str]:
         # opencode run is one-shot per invocation — the outer play.sh loop
-        # drives session cadence. Turn budget caps the per-session wall
-        # clock, not the number of agent turns (opencode has no --max-turns
-        # flag; tool budget is governed by the model's own tool-call loop).
+        # drives session cadence. We do NOT pass --model; opencode uses the
+        # default provider/model from the user's opencode config + auth.
         timeout_seconds = max(max_turns * 45, 900)
         return [
             "timeout",
             str(timeout_seconds),
             "opencode",
             "run",
-            "--model",
-            self.model,
             "--format",
             "json",
             "--dangerously-skip-permissions",
@@ -717,7 +729,7 @@ def get_adapter(harness: str = "claude", model: str | None = None) -> CLIAdapter
     elif harness == "kimi":
         return KimiAdapter(model=model or "kimi-k2")
     elif harness == "opencode":
-        return OpenCodeAdapter(model=model or "ollama/kaetram")
+        return OpenCodeAdapter(model=model)
     else:
         return ClaudeAdapter(model=model or "sonnet")
 
@@ -725,12 +737,15 @@ def get_adapter(harness: str = "claude", model: str | None = None) -> CLIAdapter
 def detect_log_format(log_path: Path) -> str:
     """Detect CLI harness from session log format.
 
-    Reads the first 10 JSON lines looking for format markers:
+    Reads the first 25 JSON lines looking for format markers:
     - Claude/Qwen-Code: stream-json with claude_code_version or Gemini CLI markers
     - Codex: JSON with thread.started, item.completed events
+    - Gemini: gemini_version or model contains "gemini"
+    - OpenCode: tool_use events carry part.tool (no message.content), or
+      step_finish events with part.tokens
     - Kimi: raw text or mixed format (no reliable markers — returns 'unknown')
 
-    Returns 'claude', 'qwen-code', 'codex', 'kimi', or 'unknown'.
+    Returns 'claude', 'qwen-code', 'codex', 'gemini', 'opencode', 'kimi', or 'unknown'.
     """
     try:
         checked = 0
@@ -773,7 +788,17 @@ def detect_log_format(log_path: Path) -> str:
                 if obj.get("event") in ("message", "function_call", "function_call_output"):
                     return "codex"
 
-                if checked >= 10:
+                # OpenCode markers — flat tool_use with part.tool (no nested
+                # message.content), or step_finish events that carry
+                # part.tokens token accounting.
+                t = obj.get("type")
+                part = obj.get("part") if isinstance(obj.get("part"), dict) else None
+                if t == "tool_use" and part and part.get("tool") and "message" not in obj:
+                    return "opencode"
+                if t == "step_finish" and part and isinstance(part.get("tokens"), dict):
+                    return "opencode"
+
+                if checked >= 25:
                     break
     except OSError:
         pass

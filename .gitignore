@@ -35,8 +35,9 @@ dataset/qwen_kto*/
 dataset/raw/
 dataset/session*/
 
-# Claude session-local scheduler state
+# Claude session-local scheduler state (root + nested project dirs)
 .claude/scheduled_tasks.lock
+**/.claude/scheduled_tasks.lock
 
 # MCP config (template with placeholders resolved at launch)
 .mcp.json

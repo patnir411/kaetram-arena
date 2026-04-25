@@ -205,12 +205,15 @@
 
   /* ── Hero ── */
   .hero {
-    margin-bottom: 20px; background: var(--paper);
+    margin-bottom: 20px; background: var(--paper-2);
     border-top: 1px solid var(--ink);
     overflow: hidden; position: relative;
+    /* Stable container — keeps the absolutely-positioned <video> visible
+       even when the underlying JPEG fallback hasn't loaded yet. */
+    aspect-ratio: 16 / 9; max-height: 480px;
   }
-  .hero img {
-    width: 100%; max-height: 360px; object-fit: contain;
+  .hero img, .hero video {
+    width: 100%; height: 100%; object-fit: contain;
     background: var(--paper-2); display: block; cursor: pointer;
     transition: filter 0.2s; border-bottom: 1px solid var(--rule);
   }
@@ -304,11 +307,23 @@
   .event-detail {
     display: none; padding: 8px 10px; background: var(--paper-2);
     font-family: var(--font-mono); font-size: 10px; color: var(--ink-2);
-    white-space: pre-wrap; word-break: break-all; max-height: 220px;
+    white-space: pre-wrap; word-break: break-all; max-height: 360px;
     overflow-y: auto; border-left: 2px solid var(--rule);
     margin: 2px 0 4px 44px;
   }
   .event-detail.open { display: block; }
+  .event-detail .ed-section + .ed-section { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--rule); }
+  .event-detail .ed-label {
+    font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-3); margin-bottom: 4px;
+  }
+  .event-detail .ed-pre { margin: 0; font-family: var(--font-mono); white-space: pre-wrap; word-break: break-word; }
+  .event-detail .ed-pre.ed-ascii {
+    /* ASCII grid: preserve column alignment, no wrapping. */
+    white-space: pre; word-break: normal; overflow-x: auto; font-size: 9px; line-height: 1.2;
+  }
+  .activity-event.clickable { cursor: pointer; }
+  .activity-event.thinking-event { cursor: pointer; }
 
   @keyframes eventSlideIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
   @keyframes eventFlash { 0% { background: rgba(200,83,43,0.06); } 100% { background: transparent; } }
@@ -610,23 +625,21 @@
   }
   .agent-card::before { content: none; }
   .agent-card:hover { border-top-color: var(--accent); }
-  .agent-card.mode-aggressive { border-top-color: var(--accent); }
-  .agent-card.mode-aggressive::before { background: none; }
-  .agent-card.mode-methodical { border-top-color: var(--olive); }
-  .agent-card.mode-methodical::before { background: none; }
-  .agent-card.mode-curious { border-top-color: var(--slate); }
-  .agent-card.mode-curious::before { background: none; }
-  .agent-card.mode-efficient { border-top-color: var(--plum); }
+  .agent-card.mode-grinder { border-top-color: var(--accent); }
+  .agent-card.mode-grinder::before { background: none; }
+  .agent-card.mode-completionist { border-top-color: var(--olive); }
+  .agent-card.mode-completionist::before { background: none; }
+  .agent-card.mode-explorer_tinkerer { border-top-color: var(--slate); }
+  .agent-card.mode-explorer_tinkerer::before { background: none; }
   .agent-card.mode-qwen { border-top-color: var(--slate); }
   .agent-card.selected { border-top-color: var(--accent); box-shadow: none; }
   .agent-card.selected::before {
     content: ''; position: absolute; top: -2px; left: 0; right: 0; height: 2px;
     background: var(--accent); opacity: 1;
   }
-  .agent-card.selected.mode-aggressive { border-top-color: var(--accent); box-shadow: none; }
-  .agent-card.selected.mode-methodical { border-top-color: var(--olive); box-shadow: none; }
-  .agent-card.selected.mode-curious { border-top-color: var(--slate); box-shadow: none; }
-  .agent-card.selected.mode-efficient { border-top-color: var(--plum); box-shadow: none; }
+  .agent-card.selected.mode-grinder            { border-top-color: var(--accent); box-shadow: none; }
+  .agent-card.selected.mode-completionist      { border-top-color: var(--olive);  box-shadow: none; }
+  .agent-card.selected.mode-explorer_tinkerer  { border-top-color: var(--slate);  box-shadow: none; }
   .agent-card.selected.mode-qwen { border-top-color: var(--slate); box-shadow: none; }
   .agent-card-header {
     display: flex; justify-content: space-between; align-items: baseline;
@@ -636,7 +649,7 @@
     font-family: var(--font-display); font-weight: 500; font-style: italic;
     font-size: 13px; color: var(--ink); letter-spacing: -0.01em;
   }
-  .agent-card-thumb {
+  .agent-card-video {
     width: 100%; height: 110px; object-fit: contain;
     background: var(--paper-2); border-radius: 0; margin-top: 6px;
     border: 1px solid var(--rule);
@@ -978,13 +991,34 @@
     <!-- Multi-agent grid (hidden in single-agent mode) -->
     <div id="agent-grid-container" class="agent-grid" style="display:none"></div>
 
-    <div class="hero" id="hero">
+    <div class="hero" id="hero" style="position:relative">
+      <!-- HLS video — only shown when an agent is selected and a stream exists.
+           Falls back to the JPEG <img> below when ffmpeg is down or HLS errors.
+           Layered absolutely so the JPEG remains the always-on baseline. -->
+      <video id="hero-video" autoplay muted playsinline
+             style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;background:#000;cursor:pointer"
+             onclick="openLightbox('/screenshots/agent_'+(selectedAgent==null?0:selectedAgent)+'/live_screen.png')"></video>
       <img id="hero-img" src="/screenshots/live_screen.png" alt="Latest game screenshot" onclick="openLightbox(this.src)">
-      <div class="caption">
+      <div class="caption" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <span id="hero-caption">Latest agent view</span>
         <span id="hero-time">-</span>
+        <span id="stream-health" data-state="connecting"
+              style="margin-left:auto;font-size:9px;letter-spacing:0.5px;border:1px solid currentColor;padding:1px 6px;border-radius:3px;color:var(--dim)">CONNECTING</span>
+        <span id="stream-fresh" style="font-size:9px;color:var(--dim)"></span>
       </div>
     </div>
+    <style>
+      #stream-health[data-state="connected"]    { color: var(--green); }
+      #stream-health[data-state="reconnecting"] { color: var(--amber); }
+      #stream-health[data-state="offline"]      { color: #d33; }
+      .agent-card-fresh-dot {
+        display:inline-block; width:6px; height:6px; border-radius:50%;
+        background: var(--dim); margin-left:6px; vertical-align:middle;
+      }
+      .agent-card-fresh-dot[data-fresh="ok"]    { background: var(--green); }
+      .agent-card-fresh-dot[data-fresh="slow"]  { background: var(--amber); }
+      .agent-card-fresh-dot[data-fresh="stale"] { background: #d33; }
+    </style>
     <div class="grid-2">
       <div class="card">
         <h2>Quests</h2>
@@ -996,7 +1030,7 @@
       </div>
     </div>
     <div class="card full">
-      <h2>Live Activity <span style="color:var(--dim);font-size:10px;font-weight:normal">newest first</span> <span class="badge" id="activity-log-name">-</span></h2>
+      <h2>Live Activity <span style="color:var(--dim);font-size:10px;font-weight:normal">oldest first · auto-scroll</span> <span class="badge" id="activity-log-name">-</span></h2>
       <div class="activity-meta" id="activity-meta-overview"></div>
       <div class="activity-feed" id="activity-feed-overview"><div class="empty">Waiting for agent...</div></div>
     </div>
@@ -1005,7 +1039,7 @@
   <!-- ===== ACTIVITY TAB ===== -->
   <div class="tab-content" id="tab-activity">
     <div class="card full">
-      <h2>Full Activity Feed <span style="color:var(--dim);font-size:10px;font-weight:normal">newest first</span> <span class="badge" id="activity-log-name-full">-</span></h2>
+      <h2>Full Activity Feed <span style="color:var(--dim);font-size:10px;font-weight:normal">oldest first · auto-scroll</span> <span class="badge" id="activity-log-name-full">-</span></h2>
       <div id="activity-agent-selector" class="agent-selector" style="display:none"></div>
       <div class="activity-meta" id="activity-meta-full"></div>
       <p style="font-size:10px;color:var(--dim);margin-bottom:10px">Click any event to expand details. Tool calls show input code/params.</p>
@@ -1135,26 +1169,52 @@ let currentMode = 'none';   // 'single', 'multi', 'none'
 let selectedAgent = null;   // null = default (single-agent), or agent ID for multi
 let agentList = [];         // cached /api/agents response
 
-// === WebSocket for realtime screenshot push ===
+// Normalize any stray legacy personality labels (old metadata.json / session
+// logs) to the current archetype names. Used everywhere we render `a.mode`.
+const LEGACY_PERSONALITY_ALIAS = {
+  aggressive: 'grinder',
+  methodical: 'completionist',
+  curious:    'explorer_tinkerer',
+  efficient:  'completionist',
+  explorer:   'explorer_tinkerer',
+};
+function normalizePersonality(m) {
+  if (!m) return 'grinder';
+  return LEGACY_PERSONALITY_ALIAS[m] || m;
+}
+
+// === WebSocket for realtime screenshot/state/activity push ===
 let ws = null;
 let wsConnected = false;
 let wsReconnectTimer = null;
+let wsReconnectAttempts = 0;
+// Per-agent freshness state: { ts: <unix sec last state>, video: bool, hp: { current, max } }
+const liveState = {};
+// Activity rolling buffer (capped) per agent.
+const liveActivity = {};
+const LIVE_ACTIVITY_CAP = 200;
+
+function _wsBackoffMs() {
+  // 500, 1000, 2000, 4000, ... capped at 30s.
+  return Math.min(30000, 500 * Math.pow(2, wsReconnectAttempts));
+}
 
 function connectWebSocket() {
   const wsHost = location.hostname || 'localhost';
   const wsUrl = 'ws://' + wsHost + ':8081';
-  try { ws = new WebSocket(wsUrl); } catch(e) { return; }
+  try { ws = new WebSocket(wsUrl); } catch(e) { _scheduleReconnect(); return; }
 
   ws.onopen = () => {
     wsConnected = true;
+    wsReconnectAttempts = 0;
+    _setStreamHealth('connected');
   };
 
   ws.onclose = () => {
     wsConnected = false;
     ws = null;
-    if (!wsReconnectTimer) {
-      wsReconnectTimer = setTimeout(() => { wsReconnectTimer = null; connectWebSocket(); }, 3000);
-    }
+    _setStreamHealth('reconnecting');
+    _scheduleReconnect();
   };
 
   ws.onerror = () => {};
@@ -1162,9 +1222,77 @@ function connectWebSocket() {
   ws.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
-      if (msg.type === 'screenshot') onScreenshotNotification(msg.agent, msg.ts);
+      switch (msg.type) {
+        case 'screenshot': onScreenshotNotification(msg.agent, msg.ts); break;
+        case 'state':      onStateNotification(msg.agent, msg.payload, msg.ts); break;
+        case 'activity':   onActivityNotification(msg.agent, msg.events, msg.ts); break;
+        case 'heartbeat':  onHeartbeatNotification(msg.agents, msg.ts); break;
+        case 'connected':  break; // handshake
+      }
     } catch(e) {}
   };
+}
+
+function _scheduleReconnect() {
+  if (wsReconnectTimer || document.hidden) return;
+  const delay = _wsBackoffMs();
+  wsReconnectTimer = setTimeout(() => {
+    wsReconnectTimer = null;
+    wsReconnectAttempts++;
+    connectWebSocket();
+  }, delay);
+}
+
+// Pause reconnect attempts while the tab is hidden — avoids burning a socket
+// reconnect budget the user can't see. On visibility change, force-reconnect
+// immediately and refresh tiles once.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+  } else if (!wsConnected) {
+    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+    wsReconnectAttempts = 0;
+    connectWebSocket();
+  }
+});
+
+function _setStreamHealth(stateName) {
+  const pill = document.getElementById('stream-health');
+  if (!pill) return;
+  pill.dataset.state = stateName;
+  pill.textContent = stateName.toUpperCase();
+}
+
+function onStateNotification(agentId, payload, ts) {
+  if (agentId === null || agentId === undefined) return;
+  liveState[agentId] = {
+    ts: ts,
+    payload: payload,
+  };
+  // Lightweight in-place HP/level overlay (no DOM destruction).
+  try {
+    const card = document.getElementById('agent-card-' + agentId);
+    if (card && payload && payload.player_stats) {
+      const ps = payload.player_stats;
+      const hpLine = card.querySelector('.agent-hp-line');
+      if (hpLine && ps.hp !== undefined) {
+        hpLine.textContent = `HP ${ps.hp}/${ps.max_hp || '?'}  L${ps.level || '?'}`;
+      }
+    }
+  } catch(e) {}
+}
+
+function onActivityNotification(agentId, events, ts) {
+  if (agentId === null || agentId === undefined || !Array.isArray(events)) return;
+  const buf = liveActivity[agentId] = liveActivity[agentId] || [];
+  for (const ev of events) buf.push(ev);
+  while (buf.length > LIVE_ACTIVITY_CAP) buf.shift();
+}
+
+function onHeartbeatNotification(agents, ts) {
+  // Just enough to keep the stream-health pill green when there's no
+  // screenshot traffic — confirms the WS pipe is alive end-to-end.
+  if (wsConnected) _setStreamHealth('connected');
 }
 
 function onScreenshotNotification(agentId, ts) {
@@ -1182,17 +1310,8 @@ function onScreenshotNotification(agentId, ts) {
     screenshotBase = '/screenshots/live_screen.png';
   }
 
-  // Always update agent thumbnail in multi-agent grid
-  if (agentId !== null) {
-    const thumb = document.querySelector('#agent-card-' + agentId + ' .agent-card-thumb');
-    if (thumb) {
-      const thumbUrl = '/screenshots/agent_' + agentId + '/live_screen.png?t=' + ts;
-      const pre = new Image();
-      pre.onload = () => { thumb.src = thumbUrl; thumb.style.display = ''; };
-      pre.onerror = () => { thumb.src = ''; thumb.style.display = 'none'; };
-      pre.src = thumbUrl;
-    }
-  }
+  // Per-card thumbnails are now HLS-driven (<video class="agent-card-video">),
+  // so we no longer need to update a JPEG thumbnail on screenshot push.
 
   if (shouldUpdateHero && screenshotBase) {
     const newUrl = screenshotBase + '?t=' + ts;
@@ -1207,6 +1326,228 @@ function onScreenshotNotification(agentId, ts) {
 }
 
 connectWebSocket();
+
+// === HLS livestream (per-agent video tile) ===
+// Single <video> element rebound when the user selects a different agent.
+// Loaded lazily — hls.min.js is only fetched once.
+let _hlsLib = null;
+let _hlsInstance = null;
+let _hlsBoundAgent = null;
+let _hlsRetryTimer = null;
+
+function _loadHls() {
+  if (_hlsLib) return Promise.resolve(_hlsLib);
+  if (window.Hls) { _hlsLib = window.Hls; return Promise.resolve(_hlsLib); }
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = '/static/hls.min.js';
+    s.onload = () => { _hlsLib = window.Hls; resolve(_hlsLib); };
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+async function bindHeroVideo(agentId) {
+  if (_hlsRetryTimer) { clearTimeout(_hlsRetryTimer); _hlsRetryTimer = null; }
+  if (agentId === null || agentId === undefined) {
+    if (_hlsInstance) { try { _hlsInstance.destroy(); } catch(e){} _hlsInstance = null; }
+    const v = document.getElementById('hero-video');
+    if (v) { v.removeAttribute('src'); v.style.display = 'none'; }
+    _hlsBoundAgent = null;
+    return;
+  }
+  _hlsBoundAgent = agentId;
+  await _attachHls(agentId, 0);
+}
+
+async function _attachHls(agentId, attempts) {
+  // Bail if the user has selected a different agent in the meantime.
+  if (agentId !== _hlsBoundAgent) return;
+  const v = document.getElementById('hero-video');
+  if (!v) return;
+  const url = '/hls/agent_' + agentId + '/stream.m3u8';
+
+  // Probe the playlist. ffmpeg may not have written it yet, or may have less
+  // than the 3 segments hls.js wants — in either case retry with backoff.
+  let ok = false;
+  try {
+    const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+    ok = r.ok;
+  } catch(e) {}
+  if (!ok) {
+    v.style.display = 'none';
+    _scheduleHlsRetry(agentId, attempts);
+    return;
+  }
+
+  try {
+    const Hls = await _loadHls();
+    if (_hlsInstance) { try { _hlsInstance.destroy(); } catch(e){} _hlsInstance = null; }
+    if (Hls && Hls.isSupported()) {
+      const hls = new Hls({ liveSyncDuration: 4, liveMaxLatencyDuration: 10, lowLatencyMode: false });
+      let fatals = 0;
+      hls.loadSource(url);
+      hls.attachMedia(v);
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (!data || !data.fatal) return;
+        fatals++;
+        if (fatals < 3) {
+          try { hls.startLoad(); } catch(e){}
+          return;
+        }
+        // Three fatal errors → tear down and retry the whole bind with
+        // backoff. Don't permanently hide the tile; the playlist will
+        // become healthy once ffmpeg catches up or recovers.
+        try { hls.destroy(); } catch(e){}
+        if (_hlsInstance === hls) _hlsInstance = null;
+        v.style.display = 'none';
+        _scheduleHlsRetry(agentId, attempts + 1);
+      });
+      _hlsInstance = hls;
+      v.style.display = '';
+    } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
+      v.src = url;
+      v.style.display = '';
+    } else {
+      v.style.display = 'none';
+    }
+  } catch(e) {
+    v.style.display = 'none';
+    _scheduleHlsRetry(agentId, attempts + 1);
+  }
+}
+
+function _scheduleHlsRetry(agentId, attempts) {
+  if (_hlsRetryTimer) { clearTimeout(_hlsRetryTimer); _hlsRetryTimer = null; }
+  if (agentId !== _hlsBoundAgent) return;
+  // 1s, 2s, 4s, 8s, capped at 15s.
+  const delay = Math.min(15000, 1000 * Math.pow(2, attempts));
+  _hlsRetryTimer = setTimeout(() => {
+    _hlsRetryTimer = null;
+    _attachHls(agentId, attempts);
+  }, delay);
+}
+
+// === Per-card HLS thumbnails ===
+// Independent of the hero — each grid card gets its own tiny HLS player so
+// we can see all agents at once even when none are "selected" and even when
+// observe() hasn't fired in a while.
+const _cardHls = {};   // agent_id -> Hls instance
+
+async function _bindCardVideo(agentId) {
+  const v = document.querySelector('.agent-card-video[data-agent-id="' + agentId + '"]');
+  if (!v) return;
+  // Already bound and playing → leave alone.
+  if (_cardHls[agentId] && v.style.display !== 'none') return;
+
+  const url = '/hls/agent_' + agentId + '/stream.m3u8';
+  let ok = false;
+  try {
+    const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+    ok = r.ok;
+  } catch(e) {}
+  if (!ok) {
+    v.style.display = 'none';
+    return;
+  }
+
+  try {
+    const Hls = await _loadHls();
+    if (_cardHls[agentId]) {
+      try { _cardHls[agentId].destroy(); } catch(e){}
+      delete _cardHls[agentId];
+    }
+    if (Hls && Hls.isSupported()) {
+      const hls = new Hls({
+        liveSyncDuration: 4, liveMaxLatencyDuration: 12,
+        lowLatencyMode: false, maxBufferLength: 10,
+      });
+      let fatals = 0;
+      hls.loadSource(url);
+      hls.attachMedia(v);
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (!data || !data.fatal) return;
+        fatals++;
+        if (fatals < 3) {
+          try { hls.startLoad(); } catch(e){}
+          return;
+        }
+        try { hls.destroy(); } catch(e){}
+        delete _cardHls[agentId];
+        v.style.display = 'none';
+        // Retry after 8s — segments often catch up.
+        setTimeout(() => _bindCardVideo(agentId), 8000);
+      });
+      _cardHls[agentId] = hls;
+      v.style.display = '';
+    } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
+      v.src = url;
+      v.style.display = '';
+    } else {
+      v.style.display = 'none';
+    }
+  } catch(e) {
+    v.style.display = 'none';
+  }
+}
+
+function bindAllCardVideos() {
+  document.querySelectorAll('.agent-card-video[data-agent-id]').forEach(v => {
+    const id = parseInt(v.dataset.agentId, 10);
+    if (!Number.isFinite(id)) return;
+    _bindCardVideo(id);
+  });
+}
+
+// Cards rebuild whenever the agent grid is re-rendered. Watch only top-level
+// child additions/removals of the grid container so we rebind once per
+// rebuild, not on every text update.
+function _watchAgentGrid() {
+  const grid = document.getElementById('agent-grid-container');
+  if (!grid) { setTimeout(_watchAgentGrid, 500); return; }
+  let pending = null;
+  const obs = new MutationObserver(() => {
+    if (pending) return;
+    pending = setTimeout(() => { pending = null; bindAllCardVideos(); }, 200);
+  });
+  obs.observe(grid, { childList: true });   // top-level only — no subtree
+  bindAllCardVideos();
+}
+if (document.readyState !== 'loading') _watchAgentGrid();
+else document.addEventListener('DOMContentLoaded', _watchAgentGrid);
+
+// === Freshness ticker (1 Hz) ===
+setInterval(() => {
+  const now = Date.now() / 1000;
+  document.querySelectorAll('.agent-card').forEach(card => {
+    const id = card.dataset.agentId;
+    if (id === undefined) return;
+    let dot = card.querySelector('.agent-card-fresh-dot');
+    if (!dot) {
+      dot = document.createElement('span');
+      dot.className = 'agent-card-fresh-dot';
+      const header = card.querySelector('.agent-card-header');
+      if (header) header.appendChild(dot);
+    }
+    const st = liveState[id];
+    if (!st) { dot.dataset.fresh = ''; return; }
+    const age = now - st.ts;
+    dot.dataset.fresh = age < 3 ? 'ok' : (age < 15 ? 'slow' : 'stale');
+    dot.title = `state ${age.toFixed(1)}s ago`;
+  });
+  if (selectedAgent !== null && selectedAgent !== undefined) {
+    const st = liveState[selectedAgent];
+    const fresh = document.getElementById('stream-fresh');
+    if (fresh) {
+      if (!st) { fresh.textContent = ''; }
+      else {
+        const age = now - st.ts;
+        fresh.textContent = age < 2 ? '● live' : (age < 15 ? `● thinking ${age.toFixed(0)}s` : `● stale ${age.toFixed(0)}s`);
+        fresh.style.color = age < 2 ? 'var(--green)' : (age < 15 ? 'var(--amber)' : '#d33');
+      }
+    }
+  }
+}, 1000);
 
 // === Tab switching ===
 document.querySelectorAll('.tab').forEach(tab => {
@@ -1231,7 +1572,7 @@ async function confirmRestartRun(ev) {
     alert('Hours must be an integer between 1 and 48.');
     return;
   }
-  if (!confirm(`This will WIPE player DB + kill all agents, then launch 3 fresh Claude agents (aggr/meth/curi) for ${hours} hours.\n\nProceed?`)) return;
+  if (!confirm(`This will WIPE player DB + kill all agents, then launch 3 fresh Claude agents (grinder / completionist / explorer_tinkerer) for ${hours} hours.\n\nProceed?`)) return;
 
   const btn = document.getElementById('restart-run-btn');
   const origText = btn ? btn.textContent : null;
@@ -1240,7 +1581,7 @@ async function confirmRestartRun(ev) {
     const resp = await fetch('/api/restart-run', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({hours, aggressive: 1, methodical: 1, curious: 1})
+      body: JSON.stringify({hours, grinder: 1, completionist: 1, explorer_tinkerer: 1})
     });
     const data = await resp.json();
     if (data.ok) {
@@ -1421,6 +1762,47 @@ function classifyAction(ev) {
   return { icon: '\u25b6', cls: '', label: tool.split('__').pop().substring(0, 15) };
 }
 
+// === Pretty-printers for the activity feed expand panel ===
+
+function prettyJson(s) {
+  // Best-effort: stringify already-JSON inputs with 2-space indent, leave
+  // anything non-JSON untouched. Used for the `input` block of any tool.
+  if (!s || typeof s !== 'string') return s || '';
+  const t = s.trim();
+  if (!(t.startsWith('{') || t.startsWith('['))) return s;
+  try {
+    return JSON.stringify(JSON.parse(t), null, 2);
+  } catch (e) {
+    return s;
+  }
+}
+
+function renderToolResult(raw) {
+  // Tool results from MCP observe (and a few peers) are formatted as
+  //    <json blob>\n\nASCII_MAP:\n<ascii>
+  // Split them into two sections so the operator can read the structured
+  // game state separately from the ASCII terrain dump. For non-observe
+  // results we just pretty-print the JSON if possible and leave plain text
+  // alone.
+  if (!raw) return '';
+  const ASCII_TAG = '\n\nASCII_MAP:';
+  let jsonPart = raw, asciiPart = '';
+  const i = raw.indexOf(ASCII_TAG);
+  if (i !== -1) {
+    jsonPart = raw.slice(0, i);
+    asciiPart = raw.slice(i + ASCII_TAG.length).replace(/^\n+/, '');
+  }
+  let html = '';
+  const pretty = prettyJson(jsonPart);
+  if (pretty && pretty.trim()) {
+    html += '<div class="ed-section"><div class="ed-label">game state</div><pre class="ed-pre">' + esc(pretty) + '</pre></div>';
+  }
+  if (asciiPart && asciiPart.trim()) {
+    html += '<div class="ed-section"><div class="ed-label">ascii map</div><pre class="ed-pre ed-ascii">' + esc(asciiPart) + '</pre></div>';
+  }
+  return html;
+}
+
 // === Build single event HTML ===
 function buildEventHTML(ev, idx, prefix, withDetails, isNew) {
   const id = prefix + '-' + idx;
@@ -1429,15 +1811,19 @@ function buildEventHTML(ev, idx, prefix, withDetails, isNew) {
   let html = '';
 
   if (ev.type === 'tool') {
-    html += '<div class="activity-event ' + cls.cls + newCls + '" data-ev-idx="' + idx + '" onclick="toggleDetail(\'' + id + '\')">'
+    const expandable = (ev.detail && ev.detail.length) || (ev.result && ev.result.length);
+    html += '<div class="activity-event ' + cls.cls + newCls + (expandable ? ' clickable' : '') + '" data-ev-idx="' + idx + '" onclick="toggleDetail(\'' + id + '\')">'
       + '<span class="ev-icon">' + cls.icon + '</span>'
       + '<span class="turn-num">#' + ev.turn + '</span>'
       + '<span class="tool-name">' + esc(cls.label) + '</span>'
       + '<span class="summary">' + esc(ev.summary) + '</span>'
       + '<span class="ev-time" data-ev-turn="' + ev.turn + '"></span>'
       + '</div>';
-    if (withDetails && ev.detail) {
-      html += '<div class="event-detail" id="' + id + '">' + esc(ev.detail) + '</div>';
+    if (withDetails && expandable) {
+      let body = '';
+      if (ev.detail) body += '<div class="ed-section"><div class="ed-label">input</div><pre class="ed-pre">' + esc(prettyJson(ev.detail)) + '</pre></div>';
+      if (ev.result) body += renderToolResult(ev.result);
+      html += '<div class="event-detail" id="' + id + '">' + body + '</div>';
     }
   } else if (ev.type === 'text') {
     html += '<div class="activity-event text-event' + newCls + '" data-ev-idx="' + idx + '" onclick="toggleDetail(\'' + id + '\')">'
@@ -1577,10 +1963,11 @@ function renderActivityMeta(events, elId) {
 }
 
 // === Build full activity HTML (used for drawer and initial render) ===
+// Oldest-first / top-down: matches the natural reading order of a log.
 function buildActivityHTML(events, withDetails, prefix) {
   if (!events || !events.length) return '<div class="empty">No events yet</div>';
   let html = '';
-  for (let i = events.length - 1; i >= 0; i--) {
+  for (let i = 0; i < events.length; i++) {
     html += buildEventHTML(events[i], i, prefix || 'ev', withDetails, false);
   }
   return html;
@@ -1595,7 +1982,7 @@ function toggleDetail(id) {
 let feedEventCounts = { ov: 0, full: 0 };
 
 
-// === Incremental feed updater (newest-first) ===
+// === Incremental feed updater (oldest-first / top-down) ===
 function updateFeedIncremental(feedElId, events, withDetails, prefix) {
   const feedId = feedElId.includes('overview') ? 'ov' : 'full';
   const feed = document.getElementById(feedElId);
@@ -1606,40 +1993,45 @@ function updateFeedIncremental(feedElId, events, withDetails, prefix) {
   const displayEvents = isOverview ? events.slice(-30) : events;
   const totalNew = displayEvents.length;
 
-  // If the log file changed (event count went down), or first render — full rebuild
+  // First render or rotation/truncation → full rebuild.
   if (prevCount === 0 || totalNew < prevCount || (isOverview && prevCount > 30)) {
     feed.innerHTML = buildActivityHTML(displayEvents, withDetails, prefix);
     feedEventCounts[feedId] = totalNew;
+    // Stick to the bottom on initial render (most recent visible).
+    feed.scrollTop = feed.scrollHeight;
     return;
   }
 
-  // Prepend only new events (newest first, at top)
   const newCount = totalNew - prevCount;
   if (newCount <= 0) return;
 
-  // Remove empty placeholder if present
   const emptyEl = feed.querySelector('.empty');
   if (emptyEl) emptyEl.remove();
 
-  // Build new events in reverse order (newest first)
+  // Append new events at the bottom in chronological order.
   let fragment = '';
-  for (let i = displayEvents.length - 1; i >= displayEvents.length - newCount; i--) {
+  for (let i = displayEvents.length - newCount; i < displayEvents.length; i++) {
     fragment += buildEventHTML(displayEvents[i], i, prefix, withDetails, true);
   }
 
-  feed.insertAdjacentHTML('afterbegin', fragment);
+  // Auto-scroll to bottom only if the user was already near the bottom; lets
+  // them inspect older events without getting yanked away.
+  const stickyBottom = (feed.scrollHeight - feed.clientHeight - feed.scrollTop) < 60;
+  feed.insertAdjacentHTML('beforeend', fragment);
 
-  // For overview, trim old events from the bottom if over 30
+  // For overview, trim oldest events from the top so we keep ~30 visible.
   if (isOverview) {
     const existing = feed.querySelectorAll('.activity-event');
     const toRemove = existing.length - 30;
     for (let i = 0; i < toRemove; i++) {
-      const last = existing[existing.length - 1 - i];
-      const next = last.nextElementSibling;
+      const first = existing[i];
+      const next = first.nextElementSibling;
       if (next && next.classList.contains('event-detail')) next.remove();
-      last.remove();
+      first.remove();
     }
   }
+
+  if (stickyBottom) feed.scrollTop = feed.scrollHeight;
 
   feedEventCounts[feedId] = totalNew;
 
@@ -1668,9 +2060,9 @@ async function loadPrompt() {
     document.getElementById('prompt-content').innerHTML = simpleMarkdown(esc(data.content || ''));
 
     // Render personality cards
-    const PCOLORS = { aggressive: 'var(--red)', methodical: 'var(--amber)', curious: 'var(--blue)', efficient: 'var(--purple)', qwen: 'var(--cyan)' };
-    const PBGS = { aggressive: '#140a0a', methodical: '#14120a', curious: '#0a0e14', efficient: '#0e0a14', qwen: '#0a1214' };
-    const PLABELS = { aggressive: 'AGGRESSIVE', methodical: 'METHODICAL', curious: 'CURIOUS', efficient: 'EFFICIENT', qwen: 'QWEN 3.5-9B' };
+    const PCOLORS = { grinder: 'var(--red)', completionist: 'var(--amber)', explorer_tinkerer: 'var(--blue)', qwen: 'var(--cyan)' };
+    const PBGS = { grinder: '#140a0a', completionist: '#14120a', explorer_tinkerer: '#0a0e14', qwen: '#0a1214' };
+    const PLABELS = { grinder: 'GRINDER', completionist: 'COMPLETIONIST', explorer_tinkerer: 'EXPLORER/TINKERER', qwen: 'QWEN 3.5-9B' };
     const grid = document.getElementById('personality-grid');
     if (data.personalities && Object.keys(data.personalities).length > 0) {
       let html = '';
@@ -1849,6 +2241,8 @@ function selectAgent(id) {
   pre.onload = () => { img.src = newSrc; };
   pre.onerror = () => { img.src = ''; };
   pre.src = newSrc;
+  // Wire up the HLS video overlay for this agent (no-op if ffmpeg isn't running).
+  bindHeroVideo(id);
   refreshSlow();
 }
 
@@ -2079,14 +2473,14 @@ async function refreshFast() {
         const newIds = new Set(agents.map(a => String(a.id)));
         const needRebuild = existingIds.size !== newIds.size || [...newIds].some(id => !existingIds.has(id));
 
-        const PERSONALITY_COLORS = { aggressive: 'var(--red)', methodical: 'var(--amber)', curious: 'var(--blue)', efficient: 'var(--purple)', qwen: 'var(--cyan)' };
-        const PERSONALITY_LABELS = { aggressive: 'AGGRESSIVE', methodical: 'METHODICAL', curious: 'CURIOUS', efficient: 'EFFICIENT', qwen: 'QWEN 3.5-9B' };
+        const PERSONALITY_COLORS = { grinder: 'var(--red)', completionist: 'var(--amber)', explorer_tinkerer: 'var(--blue)', qwen: 'var(--cyan)' };
+        const PERSONALITY_LABELS = { grinder: 'GRINDER', completionist: 'COMPLETIONIST', explorer_tinkerer: 'EXPLORER/TINKERER', qwen: 'QWEN 3.5-9B' };
 
         if (needRebuild) {
           // Full rebuild — only when agents are added/removed
           let html = '';
           for (const a of agents) {
-            const personality = a.mode || 'aggressive';
+            const personality = normalizePersonality(a.mode);
             const modeClass = ' mode-' + personality;
             const modeColor = PERSONALITY_COLORS[personality] || 'var(--green)';
             const modeLabel = PERSONALITY_LABELS[personality] || personality.toUpperCase();
@@ -2099,14 +2493,16 @@ async function refreshFast() {
               codex: 'var(--amber)',
               gemini: '#4285F4',    // Google blue
               kimi: '#00BFA5',      // teal
-              'qwen-code': '#FF6B00' // orange
+              'qwen-code': '#FF6B00', // orange
+              opencode: '#9C27B0'   // purple
             };
             const hLabels = {
               claude: 'CLAUDE',
               codex: 'CODEX',
               gemini: 'GEMINI',
               kimi: 'KIMI K2',
-              'qwen-code': 'QWEN CODE'
+              'qwen-code': 'QWEN CODE',
+              opencode: 'OPENCODE'
             };
             const hColor = hColors[harness] || 'var(--text)';
             html += '<span style="font-size:8px;color:' + hColor + ';border:1px solid ' + hColor + ';padding:1px 4px;border-radius:3px;margin-left:4px;letter-spacing:0.5px">' + (hLabels[harness] || harness.toUpperCase()) + '</span>';
@@ -2115,7 +2511,8 @@ async function refreshFast() {
             html += '<div class="agent-hp-line" style="margin-top:4px"></div>';
 
             html += '<div class="agent-last-active" style="font-size:9px"></div>';
-            html += '<img class="agent-card-thumb" src="" style="display:none">';
+            // HLS-backed thumbnail (always-live, observe-independent).
+            html += '<video class="agent-card-video" data-agent-id="' + a.id + '" autoplay muted playsinline style="display:none"></video>';
             html += '</div>';
           }
           container.innerHTML = html;
@@ -2131,10 +2528,10 @@ async function refreshFast() {
           else card.classList.remove('selected');
 
           // Personality class
-          for (const cls of ['mode-aggressive', 'mode-methodical', 'mode-curious', 'mode-efficient', 'mode-qwen', 'mode-blind']) {
+          for (const cls of ['mode-grinder', 'mode-completionist', 'mode-explorer_tinkerer', 'mode-qwen', 'mode-blind']) {
             card.classList.remove(cls);
           }
-          const personality = a.mode || 'aggressive';
+          const personality = normalizePersonality(a.mode);
           card.classList.add('mode-' + personality);
 
           const ps = (a.game_state || {}).player_stats || {};
@@ -2158,25 +2555,28 @@ async function refreshFast() {
             hpLine.style.display = 'none';
           }
 
-          // Last active (based on latest log file mtime)
+          // Last active. Prefer HLS playlist age (always-on stream) so a
+          // mid-thinking agent isn't reported as stale. Fall back to log
+          // mtime when HLS is unavailable (older runs / dashboard).
           const laEl = card.querySelector('.agent-last-active');
-          if (a.last_active !== undefined) {
-            const laColor = a.last_active > 60 ? 'var(--red)' : a.last_active > 15 ? 'var(--amber)' : 'var(--green)';
+          let laAge, laLabel;
+          if (a.hls_available && typeof a.hls_age === 'number') {
+            laAge = a.hls_age;
+            laLabel = 'video ' + humanTime(a.hls_age);
+          } else if (a.last_active !== undefined) {
+            laAge = a.last_active;
+            laLabel = 'active ' + humanTime(a.last_active);
+          }
+          if (laLabel) {
+            const laColor = laAge > 60 ? 'var(--red)' : laAge > 15 ? 'var(--amber)' : 'var(--green)';
             laEl.style.color = laColor;
-            laEl.textContent = 'active ' + humanTime(a.last_active);
+            laEl.textContent = laLabel;
           } else {
             laEl.textContent = '';
           }
 
-          // Thumbnail — skip when WS is pushing updates
-          if (!wsConnected) {
-            const thumb = card.querySelector('.agent-card-thumb');
-            const thumbUrl = '/screenshots/agent_' + a.id + '/live_screen.png?t=' + Date.now();
-            const pre = new Image();
-            pre.onload = () => { thumb.src = thumbUrl; thumb.style.display = ''; };
-            pre.onerror = () => { thumb.src = ''; thumb.style.display = 'none'; };
-            pre.src = thumbUrl;
-          }
+          // Per-card video thumbnail is HLS-driven via _bindCardVideo —
+          // no JPEG fallback path needed.
         }
       }
     } catch(e) {}

@@ -14,7 +14,7 @@
 #   ./scripts/restart-agent.sh 2            # 2 agents, 24 hours
 #   ./scripts/restart-agent.sh 4 8          # 4 agents, 8 hours
 #   ./scripts/restart-agent.sh 4 0          # 4 agents, no time limit
-#   ./scripts/restart-agent.sh --aggressive 1 --methodical 1 --curious 1
+#   ./scripts/restart-agent.sh --grinder 1 --completionist 1 --explorer 1
 
 set -euo pipefail
 
@@ -24,21 +24,22 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 N_AGENTS=""
 HOURS="24"
 MAX_BUDGET=""
-N_AGGRESSIVE=""
-N_METHODICAL=""
-N_CURIOUS=""
+N_GRINDER=""
+N_COMPLETIONIST=""
+N_EXPLORER_TINKERER=""
 N_CLAUDE=""
 N_CODEX=""
 N_GEMINI=""
 N_KIMI=""
 N_QWEN_CODE=""
+N_OPENCODE=""
 
 # Parse args
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --aggressive)  N_AGGRESSIVE="$2"; shift 2;;
-    --methodical)  N_METHODICAL="$2"; shift 2;;
-    --curious)     N_CURIOUS="$2"; shift 2;;
+    --grinder)            N_GRINDER="$2"; shift 2;;
+    --completionist)      N_COMPLETIONIST="$2"; shift 2;;
+    --explorer-tinkerer|--explorer)  N_EXPLORER_TINKERER="$2"; shift 2;;
     --hours)       HOURS="$2"; shift 2;;
     --max-budget-usd) MAX_BUDGET="$2"; shift 2;;
     --claude)
@@ -76,6 +77,13 @@ while [[ $# -gt 0 ]]; do
         N_QWEN_CODE="-1"; shift  # bare --qwen-code = all agents
       fi
       ;;
+    --opencode)
+      if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
+        N_OPENCODE="$2"; shift 2
+      else
+        N_OPENCODE="-1"; shift  # bare --opencode = all agents
+      fi
+      ;;
     *)
       # Positional: first=agents, second=hours
       if [ -z "$N_AGENTS" ]; then N_AGENTS="$1"
@@ -88,8 +96,14 @@ done
 HAS_PERSONALITY=false
 PERSONALITY_ARGS=""
 TOTAL_AGENTS=0
-for p in aggressive methodical curious; do
-  eval "count=\$N_$(echo $p | tr '[:lower:]' '[:upper:]')"
+declare -A _PERSONALITY_FLAGS=(
+  [grinder]=N_GRINDER
+  [completionist]=N_COMPLETIONIST
+  [explorer-tinkerer]=N_EXPLORER_TINKERER
+)
+for p in grinder completionist explorer-tinkerer; do
+  var="${_PERSONALITY_FLAGS[$p]}"
+  count="${!var}"
   if [ -n "$count" ] && [ "$count" -gt 0 ]; then
     HAS_PERSONALITY=true
     PERSONALITY_ARGS="$PERSONALITY_ARGS --$p $count"
@@ -104,9 +118,9 @@ fi
 
 echo "=== Restarting Kaetram training run ==="
 if $HAS_PERSONALITY; then
-  [ -n "$N_AGGRESSIVE" ] && [ "$N_AGGRESSIVE" -gt 0 ] && echo "  Aggressive:  $N_AGGRESSIVE"
-  [ -n "$N_METHODICAL" ] && [ "$N_METHODICAL" -gt 0 ] && echo "  Methodical:  $N_METHODICAL"
-  [ -n "$N_CURIOUS" ] && [ "$N_CURIOUS" -gt 0 ] && echo "  Curious:     $N_CURIOUS"
+  [ -n "$N_GRINDER" ] && [ "$N_GRINDER" -gt 0 ] && echo "  Grinder:            $N_GRINDER"
+  [ -n "$N_COMPLETIONIST" ] && [ "$N_COMPLETIONIST" -gt 0 ] && echo "  Completionist:      $N_COMPLETIONIST"
+  [ -n "$N_EXPLORER_TINKERER" ] && [ "$N_EXPLORER_TINKERER" -gt 0 ] && echo "  Explorer/Tinkerer:  $N_EXPLORER_TINKERER"
   echo "  Total:    $TOTAL_AGENTS"
 else
   echo "  Agents: $TOTAL_AGENTS (round-robin personalities)"
@@ -118,10 +132,12 @@ HARNESS_DESC=""
 [ -n "$N_GEMINI" ] && [ "$N_GEMINI" != "-1" ] && [ "$N_GEMINI" -gt 0 ] 2>/dev/null && HARNESS_DESC="${HARNESS_DESC}${HARNESS_DESC:+ + }$N_GEMINI Gemini"
 [ -n "$N_KIMI" ] && [ "$N_KIMI" != "-1" ] && [ "$N_KIMI" -gt 0 ] 2>/dev/null && HARNESS_DESC="${HARNESS_DESC}${HARNESS_DESC:+ + }$N_KIMI Kimi"
 [ -n "$N_QWEN_CODE" ] && [ "$N_QWEN_CODE" != "-1" ] && [ "$N_QWEN_CODE" -gt 0 ] 2>/dev/null && HARNESS_DESC="${HARNESS_DESC}${HARNESS_DESC:+ + }$N_QWEN_CODE Qwen Code"
+[ -n "$N_OPENCODE" ] && [ "$N_OPENCODE" != "-1" ] && [ "$N_OPENCODE" -gt 0 ] 2>/dev/null && HARNESS_DESC="${HARNESS_DESC}${HARNESS_DESC:+ + }$N_OPENCODE OpenCode"
 [ "$N_CODEX" = "-1" ] && HARNESS_DESC="all Codex"
 [ "$N_GEMINI" = "-1" ] && HARNESS_DESC="all Gemini"
 [ "$N_KIMI" = "-1" ] && HARNESS_DESC="all Kimi"
 [ "$N_QWEN_CODE" = "-1" ] && HARNESS_DESC="all Qwen Code"
+[ "$N_OPENCODE" = "-1" ] && HARNESS_DESC="all OpenCode"
 [ -z "$HARNESS_DESC" ] && HARNESS_DESC="all Claude"
 echo "  Harness: $HARNESS_DESC"
 echo "  Hours:  ${HOURS}"
@@ -138,11 +154,17 @@ tmux kill-session -t datacol 2>/dev/null || true
 pkill -f "claude -p.*You play\|claude -p.*ClaudeBot\|claude -p.*play the game\|claude -p.*IMPORTANT" 2>/dev/null || true
 pkill -f "codex.*exec" 2>/dev/null || true
 pkill -f "gemini.*-p" 2>/dev/null || true
+pkill -f "kimi -p" 2>/dev/null || true
+pkill -f "qwen -p" 2>/dev/null || true
+pkill -f "opencode run" 2>/dev/null || true
+pkill -f "timeout .* opencode" 2>/dev/null || true
 pkill -f "play.sh" 2>/dev/null || true
 pkill -f "play_qwen.py" 2>/dev/null || true
 pkill -f "claude -p.*Login" 2>/dev/null || true
 sleep 2
 pkill -9 -f "claude -p.*You play\|claude -p.*ClaudeBot\|claude -p.*play the game\|claude -p.*IMPORTANT" 2>/dev/null || true
+pkill -9 -f "opencode run" 2>/dev/null || true
+pkill -9 -f "timeout .* opencode" 2>/dev/null || true
 # Kill MCP game servers (orphaned from previous runs)
 pkill -f "mcp_game_server.py" 2>/dev/null || true
 # Kill Playwright browser drivers spawned by MCP servers
@@ -162,6 +184,17 @@ pkill -9 -f "playwright/driver/node" 2>/dev/null || true
 pkill -9 -f "npm exec @playwright" 2>/dev/null || true
 pkill -9 -f "playwright-mcp" 2>/dev/null || true
 pkill -9 -f "chrome-headless-shell" 2>/dev/null || true
+
+# ── Livestream pipeline cleanup: Xvfb + ffmpeg + HLS segments ──
+# Per-agent Xvfb runs on display 99 + agent_id (so :99..:108 covers slots 0-9).
+pkill -9 -f "Xvfb :9[0-9]" 2>/dev/null || true
+pkill -9 -f "Xvfb :10[0-9]" 2>/dev/null || true
+pkill -9 -f "ffmpeg.*x11grab" 2>/dev/null || true
+rm -rf /tmp/hls/agent_* 2>/dev/null || true
+mkdir -p /tmp/hls 2>/dev/null || true
+for i in $(seq 0 $((TOTAL_AGENTS - 1))); do
+  mkdir -p "/tmp/hls/agent_$i" 2>/dev/null || true
+done
 
 # ── Step 2: Kill game server instances (not the client on 9000) ──
 echo "Stopping game servers (preserving client on :9000)..."
@@ -183,7 +216,7 @@ if docker ps --format '{{.Names}}' | grep -q "^${MONGO_CONTAINER}$"; then
   USER_JS_ARRAY=""
   for i in $(seq 0 $((TOTAL_AGENTS - 1))); do
     [ -n "$USER_JS_ARRAY" ] && USER_JS_ARRAY="${USER_JS_ARRAY},"
-    USER_JS_ARRAY="${USER_JS_ARRAY}'claudebot${i}','codexbot${i}','geminibot${i}','kimibot${i}','qwencodebot${i}'"
+    USER_JS_ARRAY="${USER_JS_ARRAY}'claudebot${i}','codexbot${i}','geminibot${i}','kimibot${i}','qwencodebot${i}','opencodebot${i}'"
   done
 
   echo "Resetting player data in MongoDB..."
@@ -195,6 +228,21 @@ if docker ps --format '{{.Names}}' | grep -q "^${MONGO_CONTAINER}$"; then
     [ "$result" != "0" ] && echo "  ${coll}: deleted ${result}"
   done
   echo "  Players will start fresh on login."
+
+  # Pre-seed accounts with the known bcrypt hash so the first login attempt
+  # succeeds. Kaetram's client sometimes doesn't surface the "account not
+  # found" error into #login-error-text fast enough for login.py's retry
+  # loop to catch, so relying on register-on-fail is unreliable across
+  # harnesses. Seeding every possible bot name for every active agent is
+  # idempotent and cheap.
+  echo "Seeding bot accounts (password=test)..."
+  PYTHONPATH="$PROJECT_DIR" "$PROJECT_DIR/.venv/bin/python3" - <<PYEOF
+from tests.e2e.helpers.seed import seed_player
+for i in range($TOTAL_AGENTS):
+    for prefix in ("claudebot", "codexbot", "geminibot", "kimibot", "qwencodebot", "opencodebot"):
+        seed_player(f"{prefix}{i}")
+print(f"  Seeded {$TOTAL_AGENTS * 6} bot rows.")
+PYEOF
 else
   echo "WARNING: MongoDB container not running — skipping DB reset"
 fi
@@ -270,6 +318,7 @@ fi
 [ -n "$N_GEMINI" ] && ORCH_CMD="$ORCH_CMD --gemini $N_GEMINI"
 [ -n "$N_KIMI" ] && ORCH_CMD="$ORCH_CMD --kimi $N_KIMI"
 [ -n "$N_QWEN_CODE" ] && ORCH_CMD="$ORCH_CMD --qwen-code $N_QWEN_CODE"
+[ -n "$N_OPENCODE" ] && ORCH_CMD="$ORCH_CMD --opencode $N_OPENCODE"
 ORCH_CMD="$ORCH_CMD 2>&1 | tee /tmp/orchestrate.log"
 
 # Send to existing datacol session, or create one

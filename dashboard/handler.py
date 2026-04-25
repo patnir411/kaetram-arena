@@ -11,7 +11,10 @@ import os
 import time
 import urllib.parse
 
-from dashboard.constants import PROJECT_DIR, STATE_DIR, MAX_AGENTS, SCREENSHOT_POLL_INTERVAL, SCREENSHOT_MAX_AGE
+from dashboard.constants import (
+    PROJECT_DIR, STATE_DIR, MAX_AGENTS, SCREENSHOT_POLL_INTERVAL,
+    SCREENSHOT_MAX_AGE, GZIP_MIN_BYTES,
+)
 from dashboard.api import APIMixin
 
 
@@ -36,6 +39,10 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
             path = parsed.path
             if path == "/api/restart-run":
                 self.handle_restart_run()
+            elif path == "/ingest/state":
+                self.handle_ingest_state(parsed)
+            elif path == "/ingest/activity":
+                self.handle_ingest_activity(parsed)
             else:
                 self.send_error(404)
         except Exception as e:
@@ -47,6 +54,62 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
             except Exception:
                 pass
 
+    # ── Local-only ingest endpoints (MCP heartbeat → WS relay) ──
+
+    def _is_loopback(self) -> bool:
+        ip = (self.client_address[0] or "").lower()
+        return ip in ("127.0.0.1", "::1", "localhost")
+
+    def _read_json_body(self):
+        clen = int(self.headers.get("Content-Length", 0) or 0)
+        raw = self.rfile.read(clen) if clen else b""
+        try:
+            return json.loads(raw) if raw else {}
+        except Exception:
+            return None
+
+    def handle_ingest_state(self, parsed):
+        """POST /ingest/state?agent=N → broadcast as {type:state}.
+
+        Localhost only: the MCP server lives on the same VM as the dashboard.
+        """
+        if not self._is_loopback():
+            return self.send_error(403)
+        qs = urllib.parse.parse_qs(parsed.query)
+        agent = qs.get("agent", [None])[0]
+        body = self._read_json_body()
+        if body is None:
+            return self.send_error(400)
+        try:
+            from dashboard.server import get_relay
+            relay = get_relay()
+            if relay is not None:
+                relay.notify_state(int(agent) if agent is not None else None, body)
+        except Exception:
+            pass  # Never fail the ingest because of relay state.
+        self.send_response(204)
+        self.end_headers()
+
+    def handle_ingest_activity(self, parsed):
+        """POST /ingest/activity?agent=N → broadcast as {type:activity}."""
+        if not self._is_loopback():
+            return self.send_error(403)
+        qs = urllib.parse.parse_qs(parsed.query)
+        agent = qs.get("agent", [None])[0]
+        body = self._read_json_body()
+        if body is None:
+            return self.send_error(400)
+        events = body if isinstance(body, list) else body.get("events", [])
+        try:
+            from dashboard.server import get_relay
+            relay = get_relay()
+            if relay is not None:
+                relay.notify_activity(int(agent) if agent is not None else None, events)
+        except Exception:
+            pass
+        self.send_response(204)
+        self.end_headers()
+
     def handle_restart_run(self):
         """POST /api/restart-run — kick off restart-agent.sh with optional payload."""
         content_length = int(self.headers.get("Content-Length", 0) or 0)
@@ -57,18 +120,21 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
             payload = {}
         # Defaults match what the user has been running
         hours = int(payload.get("hours", 6))
-        aggressive = int(payload.get("aggressive", 1))
-        methodical = int(payload.get("methodical", 1))
-        curious = int(payload.get("curious", 1))
+        grinder = int(payload.get("grinder", 1))
+        completionist = int(payload.get("completionist", 1))
+        explorer = int(payload.get("explorer_tinkerer", payload.get("explorer", 1)))
+        harness = str(payload.get("harness", "claude"))
+        if harness not in {"claude", "codex", "gemini", "kimi", "qwen-code", "opencode"}:
+            harness = "claude"
 
         import subprocess
         script = os.path.join(PROJECT_DIR, "scripts", "restart-agent.sh")
         cmd = [
             script,
-            "--claude", str(aggressive + methodical + curious),
-            "--aggressive", str(aggressive),
-            "--methodical", str(methodical),
-            "--curious", str(curious),
+            f"--{harness}", str(grinder + completionist + explorer),
+            "--grinder", str(grinder),
+            "--completionist", str(completionist),
+            "--explorer-tinkerer", str(explorer),
             "--hours", str(hours),
         ]
         # Fire-and-forget — the script manages its own orchestrator. We don't wait.
@@ -146,6 +212,10 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
                 self.send_mjpeg_stream()
             elif path.startswith("/screenshots/"):
                 self.send_screenshot_file()
+            elif path.startswith("/hls/"):
+                self.send_hls_file(path)
+            elif path.startswith("/static/"):
+                self.send_static_file(path)
             else:
                 self.send_error(404)
         except Exception as e:
@@ -249,6 +319,83 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
             with open(filepath, "rb") as f:
                 self.wfile.write(f.read())
 
+    def send_static_file(self, path: str):
+        """Serve dashboard/static/* (vendored libs like hls.min.js)."""
+        parts = path.strip("/").split("/")
+        if len(parts) != 2 or "/" in parts[1] or ".." in parts[1]:
+            return self.send_error(404)
+        filename = parts[1]
+        static_dir = os.path.join(os.path.dirname(__file__), "static")
+        filepath = os.path.join(static_dir, filename)
+        # Guard against symlinks pointing outside static_dir.
+        if not os.path.isfile(filepath):
+            return self.send_error(404)
+        if os.path.realpath(filepath).startswith(os.path.realpath(static_dir) + os.sep) is False \
+                and os.path.realpath(filepath) != os.path.realpath(filepath):
+            # Trivially true; placeholder for future symlink hardening if needed.
+            pass
+        ctype = mimetypes.guess_type(filepath)[0] or "application/octet-stream"
+        try:
+            with open(filepath, "rb") as f:
+                data = f.read()
+        except OSError:
+            return self.send_error(404)
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(data)
+
+    def send_hls_file(self, path: str):
+        """Serve HLS playlist + segments from /tmp/hls/agent_N/.
+
+        URL form: /hls/agent_N/stream.m3u8  or  /hls/agent_N/seg_00042.ts.
+        Path is allowlisted to those two filename shapes — no traversal,
+        no arbitrary file disclosure.
+        """
+        parts = path.strip("/").split("/")
+        # Expect: ["hls", "agent_<n>", "<stream.m3u8|seg_*.ts>"]
+        if len(parts) != 3 or not parts[1].startswith("agent_"):
+            return self.send_error(404)
+        try:
+            agent_id = int(parts[1].replace("agent_", ""))
+        except ValueError:
+            return self.send_error(404)
+        filename = parts[2]
+        # Allowlist: playlist or numbered TS segment.
+        if filename != "stream.m3u8" and not (
+            filename.startswith("seg_") and filename.endswith(".ts")
+        ):
+            return self.send_error(404)
+        if "/" in filename or ".." in filename:
+            return self.send_error(404)
+
+        filepath = os.path.join("/tmp", "hls", f"agent_{agent_id}", filename)
+        if not os.path.isfile(filepath):
+            return self.send_error(404)
+
+        is_playlist = filename.endswith(".m3u8")
+        ctype = "application/vnd.apple.mpegurl" if is_playlist else "video/mp2t"
+        cache = "no-cache" if is_playlist else "max-age=10"
+
+        try:
+            with open(filepath, "rb") as f:
+                data = f.read()
+        except OSError:
+            return self.send_error(404)
+
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Cache-Control", cache)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(data)
+
     def send_mjpeg_stream(self):
         """Serve MJPEG stream from an agent's live_screen.jpg."""
         raw = self.path.split("?")[0]
@@ -336,7 +483,7 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-store")
-        if len(body) > 1024 and self._accepts_gzip():
+        if len(body) > GZIP_MIN_BYTES and self._accepts_gzip():
             body = gzip.compress(body, compresslevel=1)
             self.send_header("Content-Encoding", "gzip")
         self.send_header("Content-Length", str(len(body)))

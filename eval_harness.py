@@ -998,7 +998,7 @@ Examples:
     )
     parser.add_argument(
         "--personality", default="",
-        choices=["", "aggressive", "methodical", "curious"],
+        choices=["", "grinder", "completionist", "explorer_tinkerer"],
         help="Inject a personality block into the system prompt (default: none)",
     )
     parser.add_argument(

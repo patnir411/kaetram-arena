@@ -99,21 +99,29 @@ async def attack(ctx: Context, mob_name: str) -> str:
             wait_ms = min(max(1500, dist * 300), 5000)
             await page.wait_for_timeout(wait_ms)
 
-            # Handle lootbag
+            # Lootbags are a two-step flow (walk to bag → bag UI opens →
+            # take items by index). The careful implementation lives in
+            # `loot()` (gathering.py) which polls for the bag UI to become
+            # visible and only sends Take packets for indices it can see.
+            # Brute-forcing 10 packets blindly here either fires before the
+            # server has registered the open, or hits already-taken indices
+            # — works sometimes, silent-fails often. Hint the agent to call
+            # loot() explicitly instead.
             if auto_looted["targeting"].get("type") == 8:
-                await page.evaluate("""() => {
-                    const game = window.game;
-                    if (!game || !game.socket) return;
-                    for (let i = 0; i < 10; i++) {
-                        try { game.socket.send(58, { opcode: 1, index: i }); } catch(e) {}
-                    }
-                }""")
-                await page.wait_for_timeout(500)
-
-            # Diff inventory
-            inv_after = await inventory_snapshot(page)
-            gained = inventory_diff(inv_before, inv_after)
-            auto_looted = {"looted": gained if gained else "none", "target": auto_looted["targeting"].get("name", "?")}
+                inv_after = await inventory_snapshot(page)
+                gained = inventory_diff(inv_before, inv_after)
+                auto_looted = {
+                    "lootbag_pending": True,
+                    "target": auto_looted["targeting"].get("name", "?"),
+                    "instance": auto_looted["targeting"].get("instance"),
+                    "looted": gained if gained else "none",
+                    "hint": "Lootbag spawned — call loot() to take its contents.",
+                }
+            else:
+                # Ground items: instant pickup on click; just diff inventory.
+                inv_after = await inventory_snapshot(page)
+                gained = inventory_diff(inv_before, inv_after)
+                auto_looted = {"looted": gained if gained else "none", "target": auto_looted["targeting"].get("name", "?")}
 
     # Merge post-attack state into result
     try:

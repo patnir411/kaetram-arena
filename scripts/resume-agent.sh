@@ -9,7 +9,7 @@
 #
 # Usage:
 #   ./scripts/resume-agent.sh                                    # resume all agents (default mode)
-#   ./scripts/resume-agent.sh --aggressive 1 --methodical 1 --curious 1
+#   ./scripts/resume-agent.sh --grinder 1 --completionist 1 --explorer 1
 #   ./scripts/resume-agent.sh --hours 8                          # resume with time limit
 
 set -euo pipefail
@@ -17,20 +17,21 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Parse args (same flags as restart-agent.sh)
-N_AGGRESSIVE=""
-N_METHODICAL=""
-N_CURIOUS=""
+N_GRINDER=""
+N_COMPLETIONIST=""
+N_EXPLORER_TINKERER=""
 HOURS=""
 N_CLAUDE=""
 N_CODEX=""
 N_GEMINI=""
 N_KIMI=""
 N_QWEN_CODE=""
+N_OPENCODE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --aggressive)  N_AGGRESSIVE="$2"; shift 2;;
-    --methodical)  N_METHODICAL="$2"; shift 2;;
-    --curious)     N_CURIOUS="$2"; shift 2;;
+    --grinder)            N_GRINDER="$2"; shift 2;;
+    --completionist)      N_COMPLETIONIST="$2"; shift 2;;
+    --explorer-tinkerer|--explorer)  N_EXPLORER_TINKERER="$2"; shift 2;;
     --hours)       HOURS="$2"; shift 2;;
     --claude)
       if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
@@ -67,6 +68,13 @@ while [[ $# -gt 0 ]]; do
         N_QWEN_CODE="-1"; shift
       fi
       ;;
+    --opencode)
+      if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
+        N_OPENCODE="$2"; shift 2
+      else
+        N_OPENCODE="-1"; shift
+      fi
+      ;;
     *) shift;;
   esac
 done
@@ -85,6 +93,8 @@ pkill -f "codex.*exec" 2>/dev/null || true
 pkill -f "gemini.*-p" 2>/dev/null || true
 pkill -f "kimi -p" 2>/dev/null || true
 pkill -f "qwen -p" 2>/dev/null || true
+pkill -f "opencode run" 2>/dev/null || true
+pkill -f "timeout .* opencode" 2>/dev/null || true
 pkill -f "play.sh" 2>/dev/null || true
 pkill -f "play_qwen.py" 2>/dev/null || true
 sleep 2
@@ -136,8 +146,14 @@ fi
 HAS_PERSONALITY=false
 PERSONALITY_ARGS=""
 PERSONALITY_TOTAL=0
-for p in aggressive methodical curious; do
-  eval "count=\$N_$(echo $p | tr '[:lower:]' '[:upper:]')"
+declare -A _PERSONALITY_FLAGS=(
+  [grinder]=N_GRINDER
+  [completionist]=N_COMPLETIONIST
+  [explorer-tinkerer]=N_EXPLORER_TINKERER
+)
+for p in grinder completionist explorer-tinkerer; do
+  var="${_PERSONALITY_FLAGS[$p]}"
+  count="${!var}"
   if [ -n "$count" ] && [ "$count" -gt 0 ]; then
     HAS_PERSONALITY=true
     PERSONALITY_ARGS="$PERSONALITY_ARGS --$p $count"
@@ -153,9 +169,9 @@ fi
 
 echo "=== Resuming Kaetram training run ==="
 if $HAS_PERSONALITY; then
-  [ -n "$N_AGGRESSIVE" ] && [ "$N_AGGRESSIVE" -gt 0 ] && echo "  Aggressive:  $N_AGGRESSIVE"
-  [ -n "$N_METHODICAL" ] && [ "$N_METHODICAL" -gt 0 ] && echo "  Methodical:  $N_METHODICAL"
-  [ -n "$N_CURIOUS" ] && [ "$N_CURIOUS" -gt 0 ] && echo "  Curious:     $N_CURIOUS"
+  [ -n "$N_GRINDER" ] && [ "$N_GRINDER" -gt 0 ] && echo "  Grinder:            $N_GRINDER"
+  [ -n "$N_COMPLETIONIST" ] && [ "$N_COMPLETIONIST" -gt 0 ] && echo "  Completionist:      $N_COMPLETIONIST"
+  [ -n "$N_EXPLORER_TINKERER" ] && [ "$N_EXPLORER_TINKERER" -gt 0 ] && echo "  Explorer/Tinkerer:  $N_EXPLORER_TINKERER"
   echo "  Total:       $N_AGENTS"
 else
   echo "  Agents to resume: $N_AGENTS (detected $DETECTED with state)"
@@ -211,6 +227,7 @@ fi
 [ -n "$N_GEMINI" ] && ORCH_ARGS="$ORCH_ARGS --gemini $N_GEMINI"
 [ -n "$N_KIMI" ] && ORCH_ARGS="$ORCH_ARGS --kimi $N_KIMI"
 [ -n "$N_QWEN_CODE" ] && ORCH_ARGS="$ORCH_ARGS --qwen-code $N_QWEN_CODE"
+[ -n "$N_OPENCODE" ] && ORCH_ARGS="$ORCH_ARGS --opencode $N_OPENCODE"
 
 ORCH_CMD="cd $PROJECT_DIR && python3 orchestrate.py $ORCH_ARGS 2>&1 | tee /tmp/orchestrate.log"
 

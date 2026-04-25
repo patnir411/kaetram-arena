@@ -1,9 +1,13 @@
 """JSONL session log parsers for Claude Code and Codex CLI session logs."""
 
 import json
+import logging
 import sys
+from collections import OrderedDict, deque
 from pathlib import Path
 from dashboard.constants import sanitize
+
+logger = logging.getLogger(__name__)
 
 # Import shared format detection
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -50,37 +54,99 @@ def _kaetram_tool_summary(tool: str, inp: dict) -> str:
     return action
 
 
-_parse_cache = {}  # filepath -> (file_size, parsed_result)
-_live_stats_cache = {}  # filepath -> (mtime, stats_result)
+_parse_cache = OrderedDict()  # filepath -> (mtime, parsed_result), LRU
+_live_stats_cache = OrderedDict()  # filepath -> (mtime, stats_result), LRU
+_PARSE_CACHE_MAX = 25
+_STATS_CACHE_MAX = 25
+
+# Incremental tail-reader state, keyed by (filepath, consumer_id).
+# Each entry: {"offset": int, "events": deque(maxlen=500), "turn": int,
+# "model": str, "cost_usd": float}
+_tail_state = {}
 
 
 def parse_session_log(filepath):
     """Parse a session log (auto-detecting Claude or Codex format).
 
     Returns dict with events, turn, cost, tokens, model, duration.
-    Cached by (filepath, file_size) — only re-parses when log grows.
+    Cached by (filepath, mtime) — re-parses any time the log changes,
+    not just when it grows. LRU eviction keeps the 25 most-recent files.
     """
     try:
-        size = Path(filepath).stat().st_size
+        mtime = Path(filepath).stat().st_mtime
     except OSError:
-        size = -1
+        mtime = -1
     cached = _parse_cache.get(filepath)
-    if cached and cached[0] == size:
+    if cached and cached[0] == mtime:
+        _parse_cache.move_to_end(filepath)
         return cached[1]
 
     fmt = detect_log_format(Path(filepath))
     if fmt == "codex":
         result = _parse_codex_session_log(filepath)
     else:
-        # Claude, Gemini, Kimi, Qwen Code all use compatible stream-json
+        # Claude, Gemini, OpenCode, Kimi, Qwen Code all use compatible stream-json
         result = _parse_claude_session_log(filepath)
 
-    _parse_cache[filepath] = (size, result)
-    # Evict old entries (keep last 20 files)
-    if len(_parse_cache) > 20:
-        oldest = list(_parse_cache.keys())[0]
-        del _parse_cache[oldest]
+    _parse_cache[filepath] = (mtime, result)
+    _parse_cache.move_to_end(filepath)
+    while len(_parse_cache) > _PARSE_CACHE_MAX:
+        _parse_cache.popitem(last=False)
     return result
+
+
+def tail_session_log(filepath, consumer_id="default", max_events=500):
+    """Incremental log tail. Reads only new bytes since last call.
+
+    Returns the same shape as parse_session_log() but maintains a rolling
+    buffer of the most recent `max_events` events. Reuses the per-format
+    parsing logic by delegating to parse_session_log() on first read or
+    when the file shrinks (e.g., rotated/truncated).
+
+    `consumer_id` lets multiple callers maintain independent offsets on the
+    same file (e.g., dashboard activity feed vs MCP heartbeat).
+    """
+    key = (filepath, consumer_id)
+    state = _tail_state.get(key)
+    try:
+        size = Path(filepath).stat().st_size
+    except OSError:
+        return state["snapshot"] if state else None
+
+    # First read or rotation/truncation → fall back to full parse and seed offset.
+    if state is None or state.get("offset", 0) > size:
+        snapshot = parse_session_log(filepath)
+        events = list(snapshot.get("events", [])) if snapshot else []
+        buf = deque(events[-max_events:], maxlen=max_events)
+        state = {
+            "offset": size,
+            "buffer": buf,
+            "snapshot": snapshot,
+        }
+        _tail_state[key] = state
+        return snapshot
+
+    # Incremental read of new bytes.
+    new_lines = []
+    try:
+        with open(filepath, "rb") as fh:
+            fh.seek(state["offset"])
+            chunk = fh.read()
+            state["offset"] += len(chunk)
+            new_lines = chunk.decode("utf-8", errors="ignore").splitlines()
+    except OSError as e:
+        logger.debug("tail read failed: %s", e)
+        return state["snapshot"]
+
+    if not new_lines:
+        return state["snapshot"]
+
+    # Re-parse the whole file to keep semantics simple — but only once
+    # per growth event, not per request. The parse_session_log mtime cache
+    # makes the second hit cheap.
+    snapshot = parse_session_log(filepath)
+    state["snapshot"] = snapshot
+    return snapshot
 
 
 def _parse_claude_session_log(filepath):
@@ -99,6 +165,10 @@ def _parse_claude_session_log(filepath):
     seen_msg_ids = set()
     duration_ms = 0
     num_turns = 0
+    # tool_use_id → event index, so when the matching tool_result comes
+    # later (Claude emits it in a separate user-role message) we can attach
+    # the result text to the original tool event for click-to-expand.
+    tool_idx_by_id: dict[str, int] = {}
 
     try:
         with open(filepath) as fh:
@@ -119,27 +189,89 @@ def _parse_claude_session_log(filepath):
                         model = obj.get("model", "")
                     continue
 
-                # Gemini: flat tool_use event
+                # OpenCode emits a "text" event for every model utterance —
+                # natural-language reasoning between tool calls. Surface as a
+                # `thinking` event (matches the existing 🧠 frontend renderer)
+                # so the activity feed shows in-context model thoughts.
+                if t == "text":
+                    part = obj.get("part") or {}
+                    txt = (part.get("text") or obj.get("text") or "").strip()
+                    if txt:
+                        events.append({
+                            "turn": turn, "type": "thinking",
+                            "text": sanitize(txt[:8000]),
+                        })
+                    # Track that this step had narration so we don't synthesize
+                    # a "(silent thinking)" placeholder for it later.
+                    last_step_had_text = True
+                    continue
+
+                # Step boundaries — surface silent thinking time. Some models
+                # (esp. Qwen3-Coder under the grinder personality) emit zero
+                # `text` events between tool calls. The activity feed would
+                # otherwise look like pure action with no cognition. Show a
+                # "(silent) Ns" thinking row when we see a step finish that
+                # had no narration, so the user can see the model paused to
+                # decide even when it didn't verbalize.
+                if t in ("step_start", "step-start"):
+                    last_step_started_at = obj.get("timestamp") or 0
+                    last_step_had_text = False
+                    continue
+                if t in ("step_finish", "step-finish"):
+                    end_ts = obj.get("timestamp") or 0
+                    start_ts = locals().get("last_step_started_at") or 0
+                    had_text = locals().get("last_step_had_text", True)
+                    if not had_text and start_ts and end_ts > start_ts:
+                        secs = round((end_ts - start_ts) / 1000.0, 1)
+                        events.append({
+                            "turn": turn, "type": "thinking",
+                            "text": f"(silent) deliberated for {secs}s",
+                        })
+                    last_step_had_text = True   # reset
+                    # Fall through to step_finish token-accounting block below.
+
+                # Gemini: flat tool_use event / OpenCode: flat tool_use with
+                # part.tool. OpenCode wraps tool name + input + output inside
+                # `part.state` rather than putting them at the top level.
                 if t == "tool_use":
-                    tool = obj.get("tool_name", "unknown")
-                    tool_display = tool.replace("mcp_kaetram_", "")
-                    inp = obj.get("parameters", {})
+                    part = obj.get("part") or {}
+                    state = part.get("state") or {}
+                    tool = obj.get("tool_name") or part.get("tool") or "unknown"
+                    # OpenCode prefixes MCP tools as kaetram_<name> (no double
+                    # underscore). Normalize both spellings to a common form.
+                    tool_norm = tool.replace("mcp_kaetram_", "").replace("kaetram_", "")
+                    tool_display = tool_norm if tool != tool_norm else tool.replace("mcp_kaetram_", "")
+                    inp = obj.get("parameters") or state.get("input") or {}
                     summary = ""
                     detail = ""
                     if "kaetram" in tool:
-                        summary = _kaetram_tool_summary(tool.replace("mcp_kaetram_", "mcp__kaetram__"), inp)
+                        # Feed a canonical mcp__kaetram__<name> handle to the
+                        # existing summary helper so Claude/Gemini/OpenCode
+                        # render identically in Live Activity.
+                        canonical = "mcp__kaetram__" + tool_norm
+                        summary = _kaetram_tool_summary(canonical, inp)
                         detail = json.dumps(inp)[:500] if inp else ""
                     elif inp:
                         parts = [f"{k}={str(v)[:30]}" for k, v in list(inp.items())[:3]]
                         summary = " ".join(parts)
                     turn += 1
+                    # OpenCode embeds the tool OUTPUT inside the same tool_use
+                    # event. Attach it to the tool event as `result` so the
+                    # frontend can expand the row to show the full output
+                    # (e.g. game state JSON for `observe`, NPC dialogue for
+                    # `interact_npc`, etc.).
+                    oc_output = state.get("output")
+                    result_text = ""
+                    if isinstance(oc_output, str) and oc_output.strip():
+                        result_text = sanitize(oc_output[:8000])
                     events.append({
                         "turn": turn, "type": "tool",
                         "tool": tool_display,
                         "tool_full": tool,
                         "summary": sanitize(summary),
                         "detail": sanitize(detail),
-                        "id": obj.get("tool_id", ""),
+                        "result": result_text,
+                        "id": obj.get("tool_id") or part.get("callID", ""),
                     })
                     continue
 
@@ -147,7 +279,21 @@ def _parse_claude_session_log(filepath):
                 if t == "tool_result":
                     output = obj.get("output", "")
                     if isinstance(output, str) and output.strip():
-                        events.append({"turn": turn, "type": "result", "text": sanitize(output[:500])})
+                        events.append({"turn": turn, "type": "result", "text": sanitize(output[:8000])})
+                    continue
+
+                # OpenCode token accounting lives in step_finish events.
+                if t in ("step_finish", "step-finish"):
+                    tkn = (obj.get("part") or {}).get("tokens") or {}
+                    if tkn:
+                        tokens["input"]        += tkn.get("input", 0)
+                        tokens["output"]       += tkn.get("output", 0)
+                        cache = tkn.get("cache") or {}
+                        tokens["cache_create"] += cache.get("write", 0)
+                        tokens["cache_read"]   += cache.get("read", 0)
+                        last_context = (tkn.get("input", 0)
+                            + cache.get("write", 0) + cache.get("read", 0))
+                    num_turns += 1
                     continue
 
                 if t == "assistant":
@@ -205,14 +351,18 @@ def _parse_claude_session_log(filepath):
                                 parts = [f"{k}={str(v)[:30]}" for k, v in list(inp.items())[:3]]
                                 summary = " ".join(parts)
                             turn += 1
+                            tool_use_id = c.get("id", "")
                             events.append({
                                 "turn": turn, "type": "tool",
                                 "tool": tool_display,
                                 "tool_full": tool,
                                 "summary": sanitize(summary),
                                 "detail": sanitize(detail),
-                                "id": c.get("id", ""),
+                                "result": "",   # populated by matching tool_result
+                                "id": tool_use_id,
                             })
+                            if tool_use_id:
+                                tool_idx_by_id[tool_use_id] = len(events) - 1
                         elif ct == "text":
                             text = c.get("text", "")
                             if text.strip():
@@ -221,6 +371,55 @@ def _parse_claude_session_log(filepath):
                             thinking = c.get("thinking", "")
                             if thinking.strip():
                                 events.append({"turn": turn, "type": "thinking", "text": sanitize(thinking)})
+
+                # Claude tool_result lives in user-role messages; attach to
+                # the matching tool event so the activity feed expand panel
+                # can show the full output (e.g. game_state JSON + ASCII map
+                # for `observe`).
+                elif t == "user":
+                    msg = obj.get("message", {})
+                    contents = msg.get("content", []) if isinstance(msg, dict) else []
+                    if not isinstance(contents, list):
+                        continue
+                    for c in contents:
+                        if not isinstance(c, dict):
+                            continue
+                        if c.get("type") != "tool_result":
+                            continue
+                        tuid = c.get("tool_use_id", "")
+                        raw = c.get("content", "")
+                        # Claude content can be str or [{type:text,text:...}, ...]
+                        if isinstance(raw, list):
+                            parts = []
+                            for blk in raw:
+                                if isinstance(blk, dict) and blk.get("type") == "text":
+                                    parts.append(blk.get("text", ""))
+                                elif isinstance(blk, str):
+                                    parts.append(blk)
+                            text = "\n".join(p for p in parts if p)
+                        else:
+                            text = raw if isinstance(raw, str) else ""
+                        if not text:
+                            continue
+                        # MCP tool results are typically wrapped as
+                        # `{"result": "..."}` by the FastMCP layer. Unwrap so
+                        # the frontend sees clean text it can split on the
+                        # ASCII_MAP marker and pretty-print the JSON.
+                        stripped = text.strip()
+                        if stripped.startswith("{") and '"result"' in stripped[:20]:
+                            try:
+                                parsed = json.loads(stripped)
+                                if isinstance(parsed, dict) and "result" in parsed:
+                                    inner = parsed["result"]
+                                    if isinstance(inner, str):
+                                        text = inner
+                                    elif isinstance(inner, (dict, list)):
+                                        text = json.dumps(inner, indent=2)
+                            except (json.JSONDecodeError, ValueError):
+                                pass
+                        idx = tool_idx_by_id.get(tuid)
+                        if idx is not None and 0 <= idx < len(events):
+                            events[idx]["result"] = sanitize(text[:8000])
 
                 elif t == "result":
                     cost_usd = obj.get("total_cost_usd", 0)
@@ -523,6 +722,7 @@ def live_session_stats(filepath):
         mtime = -1
     cached = _live_stats_cache.get(filepath)
     if cached and cached[0] == mtime:
+        _live_stats_cache.move_to_end(filepath)
         return cached[1]
 
     fmt = detect_log_format(Path(filepath))
@@ -637,8 +837,7 @@ def live_session_stats(filepath):
         "duration_ms": duration_ms,
     }
     _live_stats_cache[filepath] = (mtime, result)
-    # Evict old entries
-    if len(_live_stats_cache) > 20:
-        oldest = list(_live_stats_cache.keys())[0]
-        del _live_stats_cache[oldest]
+    _live_stats_cache.move_to_end(filepath)
+    while len(_live_stats_cache) > _STATS_CACHE_MAX:
+        _live_stats_cache.popitem(last=False)
     return result

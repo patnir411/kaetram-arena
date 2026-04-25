@@ -121,25 +121,31 @@ research/
 - `--claude` → Sonnet (Claude Code) — primary data collection harness
 - `--codex` → GPT-5.4 (OpenAI Codex) — uses stop hook for turn continuation
 - `--gemini` → Gemini 2.5 Flash (Google Gemini CLI) — uses maxSessionTurns in settings.json
-- `--opencode` → local Ollama via OpenCode CLI — reads `opencode.json` (resolved from `opencode.template.json`) + `AGENTS.md` from sandbox CWD. Model defaults to `ollama/kaetram`; override with `OPENCODE_MODEL=provider/model`. Provider registered in `opencode.template.json` points at local Ollama on :11434 — run `ollama serve` first.
+- `--opencode` → NVIDIA Qwen free API via OpenCode CLI — reads `opencode.json` (resolved from `opencode.template.json`) + `AGENTS.md` from sandbox CWD. `AGENTS.md` carries the exact same resolved system prompt used by `--append-system-prompt` (Claude) / `model_instructions_file` (Codex) / `.gemini/GEMINI.md` (Gemini), so the agent sees identical instructions across harnesses. Auth is read from opencode's stored credentials (`opencode auth login nvidia`; see `~/.local/share/opencode/auth.json`) — no env var needed. Model is provider/model form — set via `OPENCODE_MODEL` env var or `opencode.template.json` default (`nvidia/qwen/qwen3-coder-480b-a3b-instruct`). Ollama is no longer supported by this flag.
 - `--kimi` → Kimi K2 — WIP
 - `--qwen-code` → Qwen3-Coder — WIP
 
-### Personality archetypes (data-factory policies)
+### Archetypes = data-factory policies (not a scientific claim)
 
-The three personality prompts map to concrete gameplay-capability axes, not
-vibes. Each archetype produces a distinct tool-use signature so
-outcome-filtered trajectories cover complementary capabilities for SFT/KTO.
+Archetypes are the **data-generation mechanism**, not a hypothesis we're
+publishing. The paper claim is *"capability-diverse, outcome-filtered
+trajectories improve SFT/KTO for long-horizon game agents"* — the 3
+archetypes just happen to be the most efficient way we've found to cover
+the 5 core Kaetram capabilities (progression, combat/leveling, resources/
+tools, world exploration, recovery). If a pilot shows they collapse into
+the same trajectories, we'll drop to two policies (`progression` and
+`uncertainty/recovery/coverage`) — keep this in mind when editing prompts.
 
 | Flag | File | Axis | Signature tools |
 |---|---|---|---|
 | `--completionist` | `prompts/personalities/completionist.md` | progression | `interact_npc`, `query_quest`, `gather`, `craft_item` |
 | `--grinder` | `prompts/personalities/grinder.md` | combat / leveling | `attack`, `loot`, `equip_item`, `eat_food` |
-| `--explorer_tinkerer` (or `--explorer`) | `prompts/personalities/explorer_tinkerer.md` | world + systems coverage | `navigate`, `interact_npc` (non-quest too), `buy_item`, `craft_item` (novel), `warp` |
+| `--explorer-tinkerer` (or `--explorer`) | `prompts/personalities/explorer_tinkerer.md` | world + systems coverage | `navigate`, `interact_npc` (non-quest too), `buy_item`, `craft_item` (novel), `warp` |
 
-Legacy vibe flags are kept as aliases so existing `scripts/restart-agent.sh`
-invocations keep working: `--aggressive → grinder`, `--methodical →
-completionist`, `--curious → explorer_tinkerer`, `--efficient → completionist`.
+The old vibe flags (`--aggressive / --methodical / --curious /
+--efficient`) have been removed from every orchestration script. Session
+logs and training records that still carry those labels will continue to
+parse, but new runs must use the archetype flags above.
 
 ### Quick start (multi-agent)
 
@@ -156,8 +162,9 @@ completionist`, `--curious → explorer_tinkerer`, `--efficient → completionis
 # Mixed harnesses
 ./scripts/restart-agent.sh --claude 1 --codex 1 --gemini 1 --hours 0
 
-# With legacy vibe flags (aliased — still works)
-./scripts/restart-agent.sh --aggressive 2 --curious 2 --hours 24
+# 3 OpenCode agents on NVIDIA Qwen free API (one per archetype)
+# Auth: opencode auth login nvidia (one-time). No env var needed.
+./scripts/restart-agent.sh --opencode 3 --grinder 1 --completionist 1 --explorer 1 --hours 3
 
 # Resume without reset
 ./scripts/resume-agent.sh --qwen-code 2 --hours 8
@@ -190,7 +197,7 @@ Restart a single running agent (0-3) without affecting others. Useful for:
 Flags:
 - `--reset` — Reset Level 1 + clear state (default: preserve progress)
 - `--claude`, `--codex`, `--kimi`, `--qwen-code` — Change harness
-- `--personality {aggressive,methodical,curious}` — Change playstyle
+- `--personality {grinder,completionist,explorer_tinkerer}` — Change archetype
 
 **Important:** Always clears `.session_counter` to ensure fresh session starts (not resumption).
 
@@ -198,7 +205,7 @@ Examples:
 ```bash
 ./scripts/restart-single-agent.sh 2 --kimi --reset           # Agent 2: switch to Kimi, reset Level 1
 ./scripts/restart-single-agent.sh 0 --qwen-code              # Agent 0: switch to Qwen Code, preserve progress
-./scripts/restart-single-agent.sh 3 --personality curious    # Agent 3: change to curious playstyle
+./scripts/restart-single-agent.sh 3 --personality explorer_tinkerer  # Agent 3: switch archetype
 ```
 
 ### Single-agent mode (development/testing)
@@ -221,7 +228,7 @@ Run each in its own terminal:
 3. **Terminal 3 — Agent loop** — MUST be separate terminal (never subprocess)
    ```bash
    ./play.sh                    # Claude (default)
-   ./play.sh --kimi --curious   # Kimi with thinking
+   ./play.sh --kimi --explorer  # Kimi with explorer_tinkerer archetype
    ./play.sh --qwen-code        # Qwen Code
    ./play.sh --codex            # Codex
    ```
@@ -236,7 +243,7 @@ Run each in its own terminal:
 ./scripts/restart-agent.sh 2 8
 
 # One of each personality
-./scripts/restart-agent.sh --aggressive 1 --methodical 1 --curious 1 --hours 0
+./scripts/restart-agent.sh --grinder 1 --completionist 1 --explorer 1 --hours 0
 ```
 
 Port allocation: agent N gets server WS port `9001 + N*10` (9001, 9011, 9021). All agents share the static client on port 9000. Each agent logs in as `ClaudeBotN`.
@@ -252,15 +259,20 @@ Claude agents use sandboxes at `/tmp/kaetram_agent_0/` through `/tmp/kaetram_age
 
 **GOTCHA — Kaetram game server port override:** `PORT=X yarn start` does NOT work. Kaetram's config reads PORT from the `.env` file, not `process.env`. Use `node --enable-source-maps dist/main.js --port X` from `packages/server/` instead (the `--port` CLI arg overrides config directly). This is how `orchestrate.py` starts game servers.
 
-**Agent playstyles:** Each agent gets a playstyle that defines its DECIDE priorities in `system.md`. Playstyle files in `prompts/personalities/` are injected via the `__PERSONALITY_BLOCK__` placeholder. All agents get `game_knowledge.md` appended. Dashboard shows playstyle badges (red=AGGRESSIVE, amber=METHODICAL, blue=CURIOUS). Active collection uses 3 agents. Each agent's sandbox gets a `metadata.json` with its playstyle.
+**Agent archetypes:** Each agent gets an archetype that defines its DECIDE priorities in `system.md`. Archetype files in `prompts/personalities/` are injected via the `__PERSONALITY_BLOCK__` placeholder. All agents get `game_knowledge.md` appended. Each agent's sandbox gets a `metadata.json` recording the archetype.
 
-| Flag | Playstyle | Color | Approach |
-|------|-----------|-------|----------|
-| `--aggressive` | Aggressive | Red | HP threshold 30%, attacks above-level mobs, pushes new zones early |
-| `--methodical` | Methodical | Amber | HP threshold 60%, needs 2+ food before quest mobs, infrastructure quest order |
-| `--curious` | Curious | Blue | NPC-first, enters every building, zone rotation every 30 turns |
+| Flag | Archetype | Capability axis |
+|------|-----------|-----------------|
+| `--grinder` | Grinder | combat / leveling (attack, loot, equip, eat) |
+| `--completionist` | Completionist | progression (NPCs, quests, gather, craft) |
+| `--explorer-tinkerer` (or `--explorer`) | Explorer/Tinkerer | world + systems coverage (navigate, warp, shops, novel crafts) |
 
-**Note:** EFFICIENT personality deprecated (April 3). Active: agent_0=AGGRESSIVE, agent_1=METHODICAL, agent_2=CURIOUS.
+**Framing:** these three archetypes are a *data-factory* hypothesis, not a
+paper claim. If a pilot run shows trajectories collapse into the same
+behaviors, we collapse to two policies (`progression` and
+`uncertainty/recovery/coverage`). Active collection runs all three. The
+legacy flags (`--aggressive / --methodical / --curious / --efficient`)
+have been removed.
 
 **Resource budget (3 agents on this VM):** ~2.5 GB RAM, ~27% CPU, ~4.5 GB disk/24h — comfortable on 32 GB / 8 vCPU (`e2-standard-8`).
 
@@ -447,7 +459,7 @@ Rate limit / budget:
 | `convert_to_qwen.py` | Turns → Qwen3.5 9B SFT/GRPO format |
 | `prompts/system.md` | Agent system prompt (~100 lines, no JS — just tool names + decision tree) |
 | `prompts/game_knowledge.md` | Game knowledge (mob stats, quest guides, NPC coords) |
-| `prompts/personalities/*.md` | Playstyle overrides (`aggressive.md`, `methodical.md`, `curious.md` — EFFICIENT was deprecated April 3 and its file is gone) |
+| `prompts/personalities/*.md` | Archetype overrides (`grinder.md`, `completionist.md`, `explorer_tinkerer.md`) |
 | `dashboard.py` | Live web dashboard (port 8080) |
 | `dashboard/parsers.py` | Session log parser — classifies MCP tool calls for activity feed |
 | `dashboard/api.py` | API endpoints — `/api/game-state`, `/api/agents`, `/api/activity`, `/api/eval/live`, `/api/eval/latest` |

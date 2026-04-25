@@ -59,7 +59,7 @@ for i in $(seq 1 "$RUNS"); do
     sleep 60
   done
   echo "[chainer $(date -u +%FT%TZ)] launching chained run $i/$RUNS" >> "$LOG"
-  ./scripts/restart-agent.sh --claude 3 --aggressive 1 --methodical 1 --curious 1 --hours 4 >> "$LOG" 2>&1
+  ./scripts/restart-agent.sh --claude 3 --grinder 1 --completionist 1 --explorer 1 --hours 4 >> "$LOG" 2>&1
   sleep 120
 done
 echo "[chainer $(date -u +%FT%TZ)] all $RUNS chained runs launched, chainer exiting" >> "$LOG"

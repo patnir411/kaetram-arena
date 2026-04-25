@@ -3,7 +3,9 @@
 These are mixed into DashboardHandler via APIMixin to keep the handler module small.
 """
 
+import heapq
 import json
+import logging
 import os
 import glob
 import time
@@ -12,14 +14,67 @@ from datetime import datetime
 from dashboard.constants import (
     PROJECT_DIR, STATE_DIR, LOG_DIR, DATASET_DIR,
     BASE_SERVER_PORT, PORT_STRIDE, MAX_AGENTS,
+    AGENTS_CACHE_TTL, STATS_CACHE_TTL, EVAL_LIVE_CACHE_TTL,
     sanitize, get_ss_output, check_process_running,
 )
 from dashboard.parsers import parse_session_log, quick_session_summary, live_session_stats
 from dashboard.game_state import extract_game_state_from_db
 
+logger = logging.getLogger(__name__)
+
 
 _agents_cache = {"data": None, "time": 0}
-_AGENTS_CACHE_TTL = 5  # seconds — avoid re-parsing logs and probing ports every 2s
+# Backwards-compat alias retained — the module-level constant is the source
+# of truth. Keep until external readers (none known) are confirmed gone.
+_AGENTS_CACHE_TTL = AGENTS_CACHE_TTL
+
+# Mtime-bucketed caches for expensive directory scans. Mirrors the existing
+# _walkthroughs_cache pattern — recompute only when any tracked file is newer
+# than the cached snapshot.
+_dataset_stats_cache = {"computed_at": 0, "data": None}
+_sft_stats_cache = {"computed_at": 0, "data": None}
+
+
+def _normalize_observe_schema(d: dict) -> dict:
+    """Translate the compact observe.js schema (pos/stats/nearby/status) into
+    the legacy schema the dashboard frontend reads (player_position /
+    player_stats / nearby_entities / current_target). The MCP observe tool
+    was rewritten to emit shorter keys; rather than touch every consumer
+    (api.py, db.py, index.html, parsers), normalize at the JSON-read seam so
+    every harness — Claude, Codex, Gemini, OpenCode — surfaces identically.
+    """
+    if not isinstance(d, dict):
+        return d
+    if "pos" in d and "player_position" not in d:
+        p = d["pos"]
+        if isinstance(p, dict):
+            d["player_position"] = {
+                "x": p.get("x"),
+                "y": p.get("y"),
+                "orientation": p.get("orientation"),
+            }
+    if "stats" in d and "player_stats" not in d:
+        s = d["stats"]
+        if isinstance(s, dict):
+            d["player_stats"] = {
+                "level":    s.get("level"),
+                "hp":       s.get("hp"),
+                "max_hp":   s.get("max_hp"),
+                "mana":     s.get("mana"),
+                "max_mana": s.get("max_mana"),
+                "xp":       s.get("xp"),
+            }
+    if "nearby" in d and "nearby_entities" not in d:
+        d["nearby_entities"] = d["nearby"]
+    status = d.get("status") or {}
+    combat = status.get("combat") if isinstance(status, dict) else None
+    if isinstance(combat, dict) and combat.get("target") and "current_target" not in d:
+        d["current_target"] = {
+            "name": combat.get("target"),
+            "hp":   combat.get("target_hp"),
+            "dist": combat.get("dist"),
+        }
+    return d
 
 
 class APIMixin:
@@ -60,7 +115,7 @@ class APIMixin:
                 age = time.time() - mtime
                 if age < 120:  # fresh within 2 minutes
                     with open(gs_file) as fh:
-                        live = json.load(fh)
+                        live = _normalize_observe_schema(json.load(fh))
                     freshness = round(age, 1)
                     if db_state:
                         # Merge: DB has quests/skills/equipment, file has live position/HP/entities
@@ -126,7 +181,7 @@ class APIMixin:
         personalities = {}
         pdir = os.path.join(PROJECT_DIR, "prompts", "personalities")
         if os.path.isdir(pdir):
-            for name in ("aggressive", "methodical", "curious", "efficient"):
+            for name in ("grinder", "completionist", "explorer_tinkerer"):
                 pfile = os.path.join(pdir, f"{name}.md")
                 if os.path.isfile(pfile):
                     try:
@@ -178,6 +233,11 @@ class APIMixin:
     # ── Dataset stats ──
 
     def send_dataset_stats(self):
+        # Mtime-bucketed cache: recompute at most every STATS_CACHE_TTL seconds.
+        now = time.time()
+        if _dataset_stats_cache["data"] is not None and now - _dataset_stats_cache["computed_at"] < STATS_CACHE_TTL:
+            return self._send_json(_dataset_stats_cache["data"])
+
         stats = {"raw_sessions": 0, "raw_total_size": 0}
         if os.path.isdir(DATASET_DIR):
             raw_dir = os.path.join(DATASET_DIR, "raw")
@@ -185,10 +245,16 @@ class APIMixin:
                 raw_logs = glob.glob(os.path.join(raw_dir, "agent_*", "logs", "session_*.log"))
                 stats["raw_sessions"] = len(raw_logs)
                 stats["raw_total_size"] = sum(os.path.getsize(f) for f in raw_logs)
+        _dataset_stats_cache["data"] = stats
+        _dataset_stats_cache["computed_at"] = now
         self._send_json(stats)
 
     def send_sft_stats(self):
         """SFT pipeline output stats: extracted turns + Qwen3.5 SFT records."""
+        now = time.time()
+        if _sft_stats_cache["data"] is not None and now - _sft_stats_cache["computed_at"] < STATS_CACHE_TTL:
+            return self._send_json(_sft_stats_cache["data"])
+
         stats = {"extracted": {"files": 0, "total_turns": 0}, "qwen_sft": {"train": 0, "val": 0, "total": 0}}
 
         extracted_dir = os.path.join(DATASET_DIR, "extracted")
@@ -199,8 +265,8 @@ class APIMixin:
                 try:
                     with open(tf) as fh:
                         total_turns += sum(1 for line in fh if line.strip())
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("turns.jsonl scan failed for %s: %s", tf, e)
             stats["extracted"] = {"files": len(turns_files), "total_turns": total_turns}
 
         qwen_dir = os.path.join(DATASET_DIR, "qwen_sft")
@@ -211,9 +277,11 @@ class APIMixin:
                 train_count = len(json.load(open(train_file)))
                 val_count = len(json.load(open(val_file))) if os.path.isfile(val_file) else 0
                 stats["qwen_sft"] = {"train": train_count, "val": val_count, "total": train_count + val_count}
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("qwen_sft load failed: %s", e)
 
+        _sft_stats_cache["data"] = stats
+        _sft_stats_cache["computed_at"] = now
         self._send_json(stats)
 
     # ── Raw file viewer ──
@@ -384,17 +452,17 @@ class APIMixin:
                 try:
                     with open(metadata_file) as mf:
                         meta = json.load(mf)
-                    agent["mode"] = meta.get("personality", meta.get("mode", "efficient"))
+                    agent["mode"] = meta.get("personality", meta.get("mode", "grinder"))
                     agent["harness"] = meta.get("harness", "claude")
                     agent["harness_model"] = meta.get("model") or default_models.get(agent["harness"], "")
                     if meta.get("username"):
                         agent["username"] = meta["username"]
                 except Exception:
-                    agent["mode"] = "efficient"
+                    agent["mode"] = "grinder"
                     agent["harness"] = "claude"
                     agent["harness_model"] = default_models.get("claude", "")
             else:
-                agent["mode"] = "efficient"
+                agent["mode"] = "grinder"
                 agent["harness"] = "claude"
                 agent["harness_model"] = default_models.get("claude", "")
 
@@ -406,6 +474,19 @@ class APIMixin:
                 if os.path.isfile(ss):
                     agent["screenshot_age"] = int(time.time() - os.path.getmtime(ss))
                     break
+
+            # HLS livestream freshness — independent of observe() cadence.
+            # If ffmpeg is alive and emitting segments, this stays low even
+            # when the model is "thinking" for minutes between tool calls.
+            hls_playlist = os.path.join("/tmp", "hls", f"agent_{i}", "stream.m3u8")
+            if os.path.isfile(hls_playlist):
+                try:
+                    agent["hls_age"] = int(time.time() - os.path.getmtime(hls_playlist))
+                    agent["hls_available"] = True
+                except OSError:
+                    agent["hls_available"] = False
+            else:
+                agent["hls_available"] = False
 
             # Use ss port check instead of raw TCP probe (avoids TIME-WAIT flood on game servers)
             agent["server_healthy"] = agent["server_port"] in listening_ports
@@ -429,7 +510,7 @@ class APIMixin:
                     if os.path.isfile(gs_file):
                         try:
                             with open(gs_file) as gf:
-                                agent["game_state"] = json.load(gf)
+                                agent["game_state"] = _normalize_observe_schema(json.load(gf))
                         except Exception:
                             pass
             else:
@@ -450,11 +531,12 @@ class APIMixin:
         else:
             log_dir = LOG_DIR
 
-        logs = sorted(glob.glob(os.path.join(log_dir, "session_*.log")), key=os.path.getmtime)
-        if not logs:
+        candidates = glob.glob(os.path.join(log_dir, "session_*.log"))
+        if not candidates:
             return self._send_json({"events": [], "turn": 0, "cost_usd": 0})
 
-        latest = logs[-1]
+        # We only want the most-recent file — O(n) max() instead of O(n log n) sort.
+        latest = max(candidates, key=os.path.getmtime)
         parsed = parse_session_log(latest)
         parsed["log_file"] = os.path.basename(latest)
         self._send_json(parsed)
@@ -477,7 +559,7 @@ class APIMixin:
                     if not os.path.isdir(d):
                         continue
                     agent_name = os.path.basename(os.path.dirname(d))
-                    for log in sorted(glob.glob(os.path.join(d, "*.log")), key=os.path.getmtime, reverse=True)[:20]:
+                    for log in heapq.nlargest(20, glob.glob(os.path.join(d, "*.log")), key=os.path.getmtime):
                         name = os.path.basename(log)
                         size = os.path.getsize(log)
                         mtime = datetime.fromtimestamp(os.path.getmtime(log)).strftime("%Y-%m-%d %H:%M:%S")
@@ -489,7 +571,7 @@ class APIMixin:
                         })
 
         if source == "single" or source == "all":
-            for log in sorted(glob.glob(os.path.join(LOG_DIR, "*.log")), key=os.path.getmtime, reverse=True)[:50]:
+            for log in heapq.nlargest(50, glob.glob(os.path.join(LOG_DIR, "*.log")), key=os.path.getmtime):
                 name = os.path.basename(log)
                 size = os.path.getsize(log)
                 mtime = datetime.fromtimestamp(os.path.getmtime(log)).strftime("%Y-%m-%d %H:%M:%S")
@@ -667,9 +749,31 @@ class APIMixin:
 
     # ── Eval live status (running eval sessions) ──
 
+    _eval_live_cache = {"data": None, "computed_at": 0, "fingerprint": None}
+
     def send_eval_live(self):
         """Return live status from running eval sandboxes (/tmp/kaetram_eval_*)."""
         import glob as _glob
+
+        # Short-circuit: if nothing on disk has changed since last computation
+        # AND we're inside the TTL window, return the cached snapshot.
+        # Fingerprint = sorted tuple of (path, mtime) for every eval log file.
+        fingerprint_files = []
+        for sb in sorted(_glob.glob("/tmp/kaetram_eval_*")):
+            for lp in _glob.glob(os.path.join(sb, "logs", "*.log")):
+                try:
+                    fingerprint_files.append((lp, os.path.getmtime(lp)))
+                except OSError:
+                    continue
+        fingerprint = tuple(sorted(fingerprint_files))
+        now = time.time()
+        if (
+            APIMixin._eval_live_cache["data"] is not None
+            and APIMixin._eval_live_cache["fingerprint"] == fingerprint
+            and now - APIMixin._eval_live_cache["computed_at"] < EVAL_LIVE_CACHE_TTL
+        ):
+            return self._send_json(APIMixin._eval_live_cache["data"])
+
         models = {}
         for sandbox_dir in sorted(_glob.glob("/tmp/kaetram_eval_*")):
             model_name = os.path.basename(sandbox_dir).replace("kaetram_eval_", "")
@@ -690,7 +794,7 @@ class APIMixin:
             if os.path.isfile(gs_path) and (time.time() - os.path.getmtime(gs_path)) < 600:
                 try:
                     with open(gs_path) as f:
-                        model["game_state"] = json.load(f)
+                        model["game_state"] = _normalize_observe_schema(json.load(f))
                 except Exception:
                     pass
 
@@ -724,8 +828,8 @@ class APIMixin:
                                 if '"killed": true' in c or '"killed":true' in c:
                                     cum_kills += 1
                         model["cumulative"] = {"kills": cum_kills, "tools": cum_tools, "errors": cum_errors}
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("eval log parse failed for %s: %s", model_name, e)
 
             # Completed episode count from results.json (check latest symlink first)
             results_path = os.path.join(DATASET_DIR, "eval", "latest", model_name, "results.json")
@@ -763,9 +867,15 @@ class APIMixin:
             except Exception:
                 watchdog_alert = ""
 
-        self._send_json({
+        payload = {
             "models": models,
             "eval_running": any(m["active"] for m in models.values()),
             "watchdog": watchdog,
             "watchdog_alert": watchdog_alert,
-        })
+        }
+        APIMixin._eval_live_cache = {
+            "data": payload,
+            "computed_at": now,
+            "fingerprint": fingerprint,
+        }
+        self._send_json(payload)

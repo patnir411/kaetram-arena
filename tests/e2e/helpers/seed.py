@@ -295,7 +295,23 @@ def seed_player(
     db_name: str = DEFAULT_DB_NAME,
 ) -> dict[str, Any]:
     """Upsert every provided player document. Returns the exact seeded state
-    dict so the caller can persist it alongside run artifacts."""
+    dict so the caller can persist it alongside run artifacts.
+
+    `inventory` semantics:
+      - `None` (default) → `STARTER_KIT` (5 starter weapons; matches what a
+        real player has after the tutorial — see `applyTutorialBypass()` in
+        Kaetram-Open `quests.ts`). This is the "post-tutorial vanilla" seed
+        that production restarts and most tests want.
+      - `[]` or `()`     → explicitly empty (use this when a test needs to
+        verify behavior on an empty inventory).
+      - `[items, ...]`   → exactly those items (overrides the kit).
+
+    Tests that call `seed_player(name, ...)` without specifying `inventory=`
+    will now receive the starter kit. This restores parity with the
+    `prompts/game_knowledge.md` claim that "starter kit is already in your
+    inventory" — previously the prompt was lying because the default was
+    None → empty 25 slots.
+    """
     x, y = int(position[0]), int(position[1])
     client = _client(mongo_uri)
     try:
@@ -307,7 +323,10 @@ def seed_player(
         )
         _upsert(db, "player_info", username, info)
 
-        inv_slots = _inventory_slots(inventory)
+        # Default to STARTER_KIT when caller didn't specify. Distinguished
+        # from explicit `inventory=[]` which means "empty by intent."
+        inv_items = STARTER_KIT if inventory is None else inventory
+        inv_slots = _inventory_slots(inv_items)
         _upsert(db, "player_inventory", username, {"slots": inv_slots})
 
         if bank is not None:

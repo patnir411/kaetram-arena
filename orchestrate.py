@@ -10,7 +10,7 @@ Usage:
     python3 orchestrate.py --agents 2 --hours 8           # auto-stop after 8h
     python3 orchestrate.py --codex                        # all agents use Codex
     python3 orchestrate.py --claude 2 --codex 2           # mixed: 2 Claude + 2 Codex
-    python3 orchestrate.py --claude 2 --codex 2 --aggressive 2 --curious 2
+    python3 orchestrate.py --claude 2 --codex 2 --grinder 2 --explorer 2
 """
 
 import argparse
@@ -60,7 +60,7 @@ NVM_SH = Path.home() / ".nvm" / "nvm.sh"
 SYSTEM_PROMPT_FILE = PROJECT_DIR / "prompts" / "system.md"
 GAME_KNOWLEDGE_FILE = PROJECT_DIR / "prompts" / "game_knowledge.md"
 PERSONALITY_DIR = PROJECT_DIR / "prompts" / "personalities"
-VALID_PERSONALITIES = ("aggressive", "methodical", "curious")
+VALID_PERSONALITIES = ("grinder", "completionist", "explorer_tinkerer")
 
 # Port allocation: agent N gets server WS on 9001 + N*10
 BASE_SERVER_PORT = 9001
@@ -145,6 +145,201 @@ class GameServer:
         return True
 
 
+# ── Per-slot HLS livestream pipeline ──
+# Xvfb virtual display + ffmpeg x11grab → HLS segments served by the dashboard.
+# Both are best-effort: if either tool is missing or fails to start, the agent
+# continues in headless mode and the dashboard falls back to the JPEG path.
+
+import shutil
+
+HLS_BASE_DIR = Path("/tmp/hls")
+HLS_DISPLAY_BASE = 99   # display = HLS_DISPLAY_BASE + agent_id
+XVFB_AVAILABLE = shutil.which("Xvfb") is not None
+FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
+HLS_ENABLED = XVFB_AVAILABLE and FFMPEG_AVAILABLE
+
+
+@dataclass
+class XvfbProcess:
+    """Headed virtual X display per agent. Drives `KAETRAM_HEADED=1` Chromium."""
+
+    agent_id: int
+    width: int = 1280
+    height: int = 810
+    depth: int = 24
+    process: subprocess.Popen | None = None
+
+    @property
+    def display(self) -> int:
+        return HLS_DISPLAY_BASE + self.agent_id
+
+    @property
+    def display_str(self) -> str:
+        return f":{self.display}"
+
+    def _socket_path(self) -> Path:
+        return Path(f"/tmp/.X11-unix/X{self.display}")
+
+    def start(self) -> bool:
+        if not XVFB_AVAILABLE:
+            return False
+        log_path = Path(f"/tmp/kaetram_agent_{self.agent_id}/xvfb_{self.display}.log")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._log = open(log_path, "a")
+        self._log.write(f"\n--- Xvfb start at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+        self._log.flush()
+        self.process = subprocess.Popen(
+            [
+                "Xvfb", self.display_str,
+                "-screen", "0", f"{self.width}x{self.height}x{self.depth}",
+                "-nolisten", "tcp",
+            ],
+            stdout=self._log, stderr=self._log,
+            preexec_fn=os.setsid,
+        )
+        # Wait up to 3s for the socket to appear.
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            if self._socket_path().exists():
+                return True
+            if self.process.poll() is not None:
+                return False
+            time.sleep(0.05)
+        return self._socket_path().exists()
+
+    def is_alive(self) -> bool:
+        return (
+            self.process is not None
+            and self.process.poll() is None
+            and self._socket_path().exists()
+        )
+
+    def stop(self):
+        if self.process and self.process.poll() is None:
+            try:
+                os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                pass
+            try:
+                self.process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
+                try:
+                    self.process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
+        self.process = None
+        if hasattr(self, "_log") and self._log:
+            try:
+                self._log.close()
+            except OSError:
+                pass
+            self._log = None
+
+
+@dataclass
+class FfmpegEncoder:
+    """ffmpeg x11grab → HLS segments under /tmp/hls/agent_N/."""
+
+    agent_id: int
+    display: int
+    width: int = 1280
+    height: int = 720         # cropped from 810 to strip Chrome chrome
+    crop_y: int = 90
+    fps: int = 25
+    process: subprocess.Popen | None = None
+    last_restart: float = 0.0
+    cooldown: float = 5.0
+
+    def hls_dir(self) -> Path:
+        return HLS_BASE_DIR / f"agent_{self.agent_id}"
+
+    def playlist_path(self) -> Path:
+        return self.hls_dir() / "stream.m3u8"
+
+    def start(self) -> bool:
+        if not FFMPEG_AVAILABLE:
+            return False
+        d = self.hls_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        # Clear stale segments from any prior run before starting.
+        for old in list(d.glob("seg_*.ts")) + list(d.glob("stream.m3u8")):
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
+        log_path = Path(f"/tmp/kaetram_agent_{self.agent_id}/ffmpeg_{self.display}.log")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._log = open(log_path, "a")
+        self._log.write(f"\n--- ffmpeg start at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+        self._log.flush()
+
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "warning",
+            "-f", "x11grab",
+            "-framerate", str(self.fps),
+            "-video_size", f"{self.width}x{self.height + self.crop_y}",
+            "-i", f":{self.display}",
+            "-vf", f"crop={self.width}:{self.height}:0:{self.crop_y}",
+            "-c:v", "libx264", "-preset", "veryfast",
+            "-tune", "zerolatency", "-crf", "28", "-g", "50",
+            "-an",
+            "-f", "hls",
+            "-hls_time", "2", "-hls_list_size", "5",
+            "-hls_flags", "delete_segments+independent_segments",
+            "-hls_segment_filename", str(d / "seg_%05d.ts"),
+            str(self.playlist_path()),
+        ]
+        self.process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=self._log, stderr=self._log,
+            preexec_fn=os.setsid,
+        )
+        self.last_restart = time.time()
+        return True
+
+    def is_alive(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def maybe_restart(self) -> bool:
+        if self.is_alive():
+            return False
+        if time.time() - self.last_restart < self.cooldown:
+            return False
+        self.stop()
+        return self.start()
+
+    def stop(self):
+        if self.process and self.process.poll() is None:
+            try:
+                os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                pass
+            try:
+                self.process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
+                try:
+                    self.process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
+        self.process = None
+        if hasattr(self, "_log") and self._log:
+            try:
+                self._log.close()
+            except OSError:
+                pass
+            self._log = None
+
+
 @dataclass
 class AgentInstance:
     agent_id: int
@@ -153,13 +348,16 @@ class AgentInstance:
     sandbox_dir: Path
     log_dir: Path
     adapter: CLIAdapter
-    personality: str = "aggressive"    # "aggressive", "methodical", "curious"
+    personality: str = "grinder"    # "grinder", "completionist", "explorer_tinkerer"
     process: subprocess.Popen | None = None
     session: int = 0
     max_turns: int = 150
     max_budget_usd: float | None = None
     auth_mode: str = "subscription"   # "api_key" or "subscription"
     pause_between: int = 10
+    # Per-agent livestream pipeline (None when HLS_ENABLED is False or boot failed).
+    xvfb: "XvfbProcess | None" = None
+    ffmpeg: "FfmpegEncoder | None" = None
 
     def setup(self):
         """Create sandbox directory with CLI config and state/."""
@@ -214,7 +412,6 @@ class AgentInstance:
         game_knowledge = GAME_KNOWLEDGE_FILE.read_text() if GAME_KNOWLEDGE_FILE.exists() else ""
         prompt = prompt.replace("__GAME_KNOWLEDGE_BLOCK__", game_knowledge)
 
-        # Inject personality block
         personality_file = PERSONALITY_DIR / f"{self.personality}.md"
         personality_block = personality_file.read_text() if personality_file.exists() else ""
         prompt = prompt.replace("__PERSONALITY_BLOCK__", personality_block)
@@ -235,9 +432,9 @@ class AgentInstance:
     def _build_user_prompt(self) -> str:
         """Build the user prompt for a session."""
         playstyle_hint = {
-            "aggressive": "You play AGGRESSIVE — fight hard mobs, push into new zones, attempt bosses. Combat is your priority.",
-            "methodical": "You play METHODICAL — prepare thoroughly, gather resources, craft items, build skills before advancing.",
-            "curious": "You play CURIOUS — talk to every NPC, enter every building, discover hidden paths, accept all quests.",
+            "grinder":            "You play GRINDER — combat-first: attack, loot, equip, eat. Push levels and unlock higher-tier gear.",
+            "completionist":      "You play COMPLETIONIST — progression-first: talk to NPCs, accept quests, gather, craft. Finish quest chains before advancing.",
+            "explorer_tinkerer":  "You play EXPLORER/TINKERER — world + systems coverage: navigate everywhere, warp to new zones, try unusual NPCs and novel crafts.",
         }.get(self.personality, "")
 
         game_state_block = ""
@@ -254,20 +451,29 @@ class AgentInstance:
             f"{playstyle_hint}\n\n"
             "IMPORTANT: Do NOT search for files, read documentation, or explore the filesystem. "
             "Your ONLY job is to play the game via the MCP tools. "
-            "Start IMMEDIATELY by calling login.\n\n"
+            "Start IMMEDIATELY by calling observe — the MCP server auto-logs in on first connect.\n\n"
             f"Session #{self.session}.\n"
             f"{game_state_block}\n"
-            "Follow your system instructions exactly. Call login, then observe, "
+            "Follow your system instructions exactly. Call observe first, "
             "then run the OBSERVE-ACT loop."
         )
 
-        # Codex exec is a one-shot task executor — it stops when it thinks the
-        # task is "done." We must explicitly instruct it to keep looping.
-        if self.adapter.name == "codex":
+        # `codex exec` and `opencode run` differ in how the loop ends:
+        #   - codex exec is genuinely one-shot per invocation; the CLI itself
+        #     stops after the model's first non-tool response.
+        #   - opencode run is an agent loop (build mode by default) and will
+        #     keep calling tools as long as the model wants — but the model
+        #     decides when to stop. Coder-tuned models like Qwen3 Coder 480B
+        #     read "you must use tools to play the game" as "call observe,
+        #     describe the state, finish," and exit after a single tool call.
+        # Either way the symptom from our side is the same: a session that
+        # ends after one tool. The addendum below tells the model to keep
+        # looping regardless of how the harness frames "done."
+        if self.adapter.name in ("codex", "opencode"):
             base_prompt += (
                 "\n\nYou must keep playing continuously — call tools in a loop "
                 "for the ENTIRE session. After every action, call observe again "
-                "and pick the next action. Do NOT stop after login. Do NOT stop "
+                "and pick the next action. Do NOT stop after the first observe. Do NOT stop "
                 "after one action. Keep calling tools: observe → decide → act → "
                 "observe → decide → act, hundreds of times. Never output a final "
                 "message or conclude — just keep playing until the process is killed."
@@ -304,6 +510,11 @@ class AgentInstance:
         for f in ("screenshot.png", "live_screen.png", "live_screen.jpg"):
             (state_dir / f).unlink(missing_ok=True)
 
+        # Bring up the per-agent livestream pipeline before the CLI starts so
+        # Chromium can attach to a live X display. Failures here are
+        # non-fatal: agent runs headless + dashboard falls back to JPEG.
+        self._start_livestream_pipeline()
+
         # Reset Codex stop hook turn counter so each session starts fresh
         if self.adapter.name == "codex":
             (self.sandbox_dir / ".turn_counter").write_text("0")
@@ -325,6 +536,12 @@ class AgentInstance:
             auth_mode=self.auth_mode,
         )
 
+        # Build env: inherit current, layer harness env, then HLS overrides.
+        env = {**os.environ, **self.adapter.get_env()}
+        if self.xvfb is not None and self.xvfb.is_alive():
+            env["DISPLAY"] = self.xvfb.display_str
+            env["KAETRAM_HEADED"] = "1"
+
         log_fh = open(log_file, "w")
         self.process = subprocess.Popen(
             cmd,
@@ -332,10 +549,44 @@ class AgentInstance:
             stdin=subprocess.DEVNULL,
             stdout=log_fh,
             stderr=subprocess.STDOUT,
-            env={**os.environ, **self.adapter.get_env()},
+            env=env,
             preexec_fn=os.setsid,
         )
         self._log_fh = log_fh
+
+    def _start_livestream_pipeline(self):
+        """Best-effort Xvfb + ffmpeg bring-up. Sets self.xvfb / self.ffmpeg on success."""
+        if not HLS_ENABLED:
+            return
+        # Xvfb first; ffmpeg depends on the X socket existing.
+        try:
+            xv = XvfbProcess(agent_id=self.agent_id)
+            if xv.start():
+                self.xvfb = xv
+            else:
+                xv.stop()
+                print(f"[agent {self.agent_id}] Xvfb failed to bind :{xv.display}; "
+                      "falling back to headless mode")
+                return
+        except Exception as e:
+            print(f"[agent {self.agent_id}] Xvfb spawn error: {e}")
+            return
+
+        try:
+            fm = FfmpegEncoder(agent_id=self.agent_id, display=self.xvfb.display)
+            if fm.start():
+                self.ffmpeg = fm
+            else:
+                print(f"[agent {self.agent_id}] ffmpeg failed to start; HLS disabled")
+        except Exception as e:
+            print(f"[agent {self.agent_id}] ffmpeg spawn error: {e}")
+
+    def supervise_livestream(self):
+        """Called from the orchestrator health loop. Restarts ffmpeg if dead
+        but Xvfb is still up. If Xvfb is dead, leaves the slot to the agent
+        restart path — the agent's stop() will tear ffmpeg down with it."""
+        if self.ffmpeg and not self.ffmpeg.is_alive() and self.xvfb and self.xvfb.is_alive():
+            self.ffmpeg.maybe_restart()
 
     def _get_all_descendant_pgids(self) -> set[int]:
         """Walk the process tree to find all unique PGIDs (including Chrome's own group)."""
@@ -402,6 +653,21 @@ class AgentInstance:
         if hasattr(self, "_log_fh") and self._log_fh:
             self._log_fh.close()
             self._log_fh = None
+
+        # Tear down livestream pipeline AFTER the CLI/Chromium cascade so
+        # Chromium doesn't try to draw to a dying X display.
+        if self.ffmpeg is not None:
+            try:
+                self.ffmpeg.stop()
+            except Exception:
+                pass
+            self.ffmpeg = None
+        if self.xvfb is not None:
+            try:
+                self.xvfb.stop()
+            except Exception:
+                pass
+            self.xvfb = None
 
     def is_alive(self) -> bool:
         return self.process is not None and self.process.poll() is None
@@ -860,7 +1126,7 @@ class Orchestrator:
         """Create all server and agent instances."""
         # Build per-agent harness assignment list
         harness_list = []
-        for h in ("claude", "codex", "gemini", "kimi", "qwen-code"):
+        for h in ("claude", "codex", "gemini", "kimi", "qwen-code", "opencode"):
             harness_list.extend([h] * self.harness_counts.get(h, 0))
 
         # Build personality assignment list
@@ -891,10 +1157,10 @@ class Orchestrator:
 
             harness = harness_list[i] if i < len(harness_list) else "claude"
             adapter = get_adapter(harness=harness, model=self.model)
-            prefix_map = {"codex": "CodexBot", "gemini": "GeminiBot", "kimi": "KimiBot", "qwen-code": "QwenBot"}
+            prefix_map = {"codex": "CodexBot", "gemini": "GeminiBot", "kimi": "KimiBot", "qwen-code": "QwenBot", "opencode": "OpenCodeBot"}
             bot_prefix = prefix_map.get(harness, "ClaudeBot")
 
-            personality = assignments[i] if i < len(assignments) else "aggressive"
+            personality = assignments[i] if i < len(assignments) else "grinder"
             sandbox = Path(f"/tmp/kaetram_agent_{i}")
             log_dir = PROJECT_DIR / "dataset" / "raw" / f"agent_{i}" / "logs"
             agent = AgentInstance(
@@ -997,6 +1263,10 @@ class Orchestrator:
                         f"stale 15min, restarted → session #{agent.session}"
                     )
 
+                # Independent of agent state: if ffmpeg died but Xvfb is still
+                # up, restart only the encoder so the dashboard tile recovers.
+                agent.supervise_livestream()
+
             # If all agents are rate-limited with a distant reset, shut down
             rate_limit_times = []
             for agent in self.agents:
@@ -1083,13 +1353,14 @@ def main():
         "--hours", type=float, default=None, help="Auto-stop after N hours (default: run forever)"
     )
     parser.add_argument(
-        "--aggressive", type=int, default=0, help="Number of aggressive-playstyle agents"
+        "--grinder", type=int, default=0, help="Number of GRINDER agents (combat/leveling archetype)"
     )
     parser.add_argument(
-        "--methodical", type=int, default=0, help="Number of methodical-playstyle agents"
+        "--completionist", type=int, default=0, help="Number of COMPLETIONIST agents (progression/quest archetype)"
     )
     parser.add_argument(
-        "--curious", type=int, default=0, help="Number of curious-playstyle agents"
+        "--explorer-tinkerer", "--explorer", dest="explorer_tinkerer", type=int, default=0,
+        help="Number of EXPLORER/TINKERER agents (world + systems coverage)"
     )
     parser.add_argument(
         "--claude", type=int, nargs="?", const=-1, default=0,
@@ -1112,6 +1383,11 @@ def main():
         help="Number of Qwen Code agents (bare --qwen-code = all agents)"
     )
     parser.add_argument(
+        "--opencode", type=int, nargs="?", const=-1, default=0,
+        help="Number of OpenCode agents (bare --opencode = all agents). "
+             "Uses NVIDIA Qwen free API via opencode.template.json."
+    )
+    parser.add_argument(
         "--model", type=str, default=None,
         help="Model name override (default: sonnet for Claude, gpt-5.4 for Codex)"
     )
@@ -1122,9 +1398,9 @@ def main():
     args = parser.parse_args()
 
     personality_counts = {
-        "aggressive": args.aggressive,
-        "methodical": args.methodical,
-        "curious": args.curious,
+        "grinder":           args.grinder,
+        "completionist":     args.completionist,
+        "explorer_tinkerer": args.explorer_tinkerer,
     }
     explicit_total = sum(personality_counts.values())
 
@@ -1143,39 +1419,46 @@ def main():
     gemini_n = args.gemini or 0
     kimi_n = args.kimi or 0
     qwen_code_n = args.qwen_code or 0
+    opencode_n = args.opencode or 0
 
-    bare_flags = sum(1 for v in [claude_n, codex_n, gemini_n, kimi_n, qwen_code_n] if v == -1)
+    bare_flags = sum(1 for v in [claude_n, codex_n, gemini_n, kimi_n, qwen_code_n, opencode_n] if v == -1)
     if bare_flags > 1:
-        parser.error("Cannot use multiple bare harness flags (--claude, --codex, --gemini, --kimi, --qwen-code) without counts")
+        parser.error("Cannot use multiple bare harness flags (--claude, --codex, --gemini, --kimi, --qwen-code, --opencode) without counts")
 
     # Handle bare flags (e.g. --codex alone means all agents)
-    if qwen_code_n == -1:
+    if opencode_n == -1:
+        opencode_n = n_total
+        claude_n = codex_n = gemini_n = kimi_n = qwen_code_n = 0
+    elif qwen_code_n == -1:
         qwen_code_n = n_total
-        claude_n = codex_n = gemini_n = kimi_n = 0
+        claude_n = codex_n = gemini_n = kimi_n = opencode_n = 0
     elif kimi_n == -1:
         kimi_n = n_total
-        claude_n = codex_n = gemini_n = qwen_code_n = 0
+        claude_n = codex_n = gemini_n = qwen_code_n = opencode_n = 0
     elif gemini_n == -1:
         gemini_n = n_total
-        claude_n = codex_n = kimi_n = qwen_code_n = 0
+        claude_n = codex_n = kimi_n = qwen_code_n = opencode_n = 0
     elif codex_n == -1:
         codex_n = n_total
-        claude_n = gemini_n = kimi_n = qwen_code_n = 0
+        claude_n = gemini_n = kimi_n = qwen_code_n = opencode_n = 0
     elif claude_n == -1:
         claude_n = n_total
-        codex_n = gemini_n = kimi_n = qwen_code_n = 0
-    elif claude_n == 0 and codex_n == 0 and gemini_n == 0 and kimi_n == 0 and qwen_code_n == 0:
+        codex_n = gemini_n = kimi_n = qwen_code_n = opencode_n = 0
+    elif claude_n == 0 and codex_n == 0 and gemini_n == 0 and kimi_n == 0 and qwen_code_n == 0 and opencode_n == 0:
         # No harness specified: default all Claude
         claude_n = n_total
     else:
         # Explicit counts: fill remainder with Claude
-        explicit_total = claude_n + codex_n + gemini_n + kimi_n + qwen_code_n
+        explicit_total = claude_n + codex_n + gemini_n + kimi_n + qwen_code_n + opencode_n
         if explicit_total < n_total:
             claude_n = n_total - explicit_total
         elif explicit_total > n_total:
             n_total = explicit_total
 
-    harness_counts = {"claude": claude_n, "codex": codex_n, "gemini": gemini_n, "kimi": kimi_n, "qwen-code": qwen_code_n}
+    harness_counts = {
+        "claude": claude_n, "codex": codex_n, "gemini": gemini_n,
+        "kimi": kimi_n, "qwen-code": qwen_code_n, "opencode": opencode_n,
+    }
 
     # Check for required CLIs
     if codex_n > 0 and shutil.which("codex") is None:
@@ -1186,6 +1469,8 @@ def main():
         parser.error("kimi CLI not found. Install with: curl -LsSf https://code.kimi.com/install.sh | bash")
     if qwen_code_n > 0 and shutil.which("qwen") is None:
         parser.error("qwen-code CLI not found. Install with: npm install -g @qwen-code/qwen-code")
+    if opencode_n > 0 and shutil.which("opencode") is None:
+        parser.error("opencode CLI not found. Install with: npm install -g opencode")
 
     orch = Orchestrator(
         n_agents=n_total, hours=args.hours,

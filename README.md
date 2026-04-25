@@ -11,7 +11,7 @@ An autonomous AI agent that plays [Kaetram](https://github.com/Kaetram/Kaetram-O
 - Records every action as a `(game_state, reasoning, action)` tuple
 - Runs indefinitely in sessions — each session picks up where the last left off
 - Supports multi-agent mode: run N agents in parallel for scaled data collection
-- 3 agent playstyles (aggressive, methodical, curious) for diverse training data
+- 3 capability archetypes (grinder, completionist, explorer_tinkerer) as a data factory for diverse training trajectories
 
 ## Current status (April 14, 2026)
 
@@ -74,8 +74,8 @@ Run N agents in parallel, each with its own Kaetram server instance. The preferr
 # 4 agents, no time limit
 ./scripts/restart-agent.sh 4 0
 
-# One of each playstyle
-./scripts/restart-agent.sh --aggressive 1 --methodical 1 --curious 1 --hours 0
+# One of each archetype
+./scripts/restart-agent.sh --grinder 1 --completionist 1 --explorer 1 --hours 0
 
 # Resume without DB reset (preserves character progress)
 ./scripts/resume-agent.sh --hours 8
@@ -229,7 +229,7 @@ kaetram-agent/
 ├── prompts/
 │   ├── system.md            # Base system prompt: login, OODA loop, targeting
 │   ├── game_knowledge.md    # Game knowledge: quests, NPCs, mobs (appended to all agents)
-│   └── personalities/       # Playstyle DECIDE overrides (aggressive, methodical, curious)
+│   └── personalities/       # Archetype DECIDE overrides (grinder, completionist, explorer_tinkerer)
 ├── scripts/
 │   ├── start-kaetram.sh     # Starts Kaetram server (handles nvm use 20)
 │   ├── restart-agent.sh     # Primary command: kill + restart agents fresh (resets DB)
@@ -317,7 +317,7 @@ Unlike prior work where LLMs serve as decision advisors for human players ([Thin
 
 **1. Shared typed MCP tool vocabulary** — Teacher (Claude) and student (Qwen3.5-9B) call the same 17 typed tools (`attack("goblin")`, `navigate(188, 157)`, `interact_npc("Blacksmith")`). This eliminates action space mismatch between teacher and student at training time — a structural problem in prior game-agent distillation where teachers write raw code or click pixels the student can't reliably reproduce.
 
-**2. Personality-diverse teacher data** — 3 Claude agents with orthogonal playstyles (AGGRESSIVE, METHODICAL, CURIOUS) produce structurally different decision distributions at overlapping game states. The student learns a richer action distribution than any single teacher policy provides.
+**2. Capability-diverse teacher data** — 3 Claude agents with orthogonal capability archetypes (GRINDER, COMPLETIONIST, EXPLORER/TINKERER) produce structurally different decision distributions at overlapping game states. The student learns a richer action distribution than any single teacher policy provides. Archetypes are a data-factory mechanism, not a scientific claim — if trajectories collapse, we fall back to two policies (progression and uncertainty/recovery/coverage).
 
 **3. KTO preference learning with automated game outcome scoring** — After SFT, we apply KTO using a 6-dimension composite reward signal (XP gain, level delta, quest progression, exploration, turn quality, death penalty). No human labels. Fully automated. Scales with agent runtime. Fits the MMORPG setting where there is no binary win condition.
 

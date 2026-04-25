@@ -29,6 +29,15 @@ WS_PORT = 8081
 SCREENSHOT_POLL_INTERVAL = 0.25  # seconds between mtime checks (4 FPS for live stream feel)
 SCREENSHOT_MAX_AGE = 60  # seconds — screenshots older than this are considered stale
 
+# Cache TTLs (seconds) — used by api.py endpoints
+AGENTS_CACHE_TTL = 15
+STATS_CACHE_TTL = 30
+EVAL_LIVE_CACHE_TTL = 1
+
+# Gzip compression threshold (bytes). Smaller payloads skip gzip — overhead
+# of compress/decompress exceeds wire savings on tiny JSON.
+GZIP_MIN_BYTES = 4096
+
 # Subprocess cache (shared across endpoints to avoid redundant forks)
 _ss_cache = {"output": "", "time": 0}
 _SS_CACHE_TTL = 5  # seconds

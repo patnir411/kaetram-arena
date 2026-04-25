@@ -14,22 +14,14 @@ CODEX_MODEL="gpt-5.4"
 GEMINI_MODEL="gemini-3-flash-preview"
 KIMI_MODEL="kimi-k2"
 QWEN_CODE_MODEL="qwen3-coder"
-OPENCODE_MODEL="${OPENCODE_MODEL:-ollama/kaetram}"
+OPENCODE_MODEL="${OPENCODE_MODEL:-nvidia/qwen/qwen3-coder-480b-a35b-instruct}"
 for arg in "$@"; do
   case "$arg" in
-    # Capability-focused archetypes (canonical)
+    # Capability-focused archetypes (only supported set)
     --completionist)        PERSONALITY="completionist";;
     --grinder)              PERSONALITY="grinder";;
     --explorer_tinkerer)    PERSONALITY="explorer_tinkerer";;
     --explorer)             PERSONALITY="explorer_tinkerer";;  # short form
-    # Legacy vibe flags — aliased for backward compatibility with scripts/*.sh
-    # aggressive → grinder (combat-first),
-    # curious → explorer_tinkerer (explore-everything),
-    # methodical → completionist (progression-over-advance).
-    --aggressive)  PERSONALITY="grinder";;
-    --methodical)  PERSONALITY="completionist";;
-    --curious)     PERSONALITY="explorer_tinkerer";;
-    --efficient)   PERSONALITY="completionist";;  # efficient was an unused alias
     --codex)       HARNESS="codex";;
     --gemini)      HARNESS="gemini";;
     --kimi)        HARNESS="kimi";;
