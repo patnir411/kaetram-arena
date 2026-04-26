@@ -129,3 +129,36 @@ def test_username(request) -> str:
     `unique_username` — unique per test, A-Za-z0-9_, <= 16 chars."""
     slug = uuid.uuid4().hex[:6]
     return f"TestBot_{slug}"
+
+
+@pytest.fixture
+def seeded_player(test_username):
+    """Seed a minimal player at Mudwich. Tests that need more state should
+    call ctx['reseed'](**overrides) inside the test body.
+
+    Yields a dict with `username`, `seeded` (raw seed result), `base_kwargs`,
+    and `reseed` callable. Cleanup runs unconditionally on teardown.
+    """
+    from tests.e2e.helpers.seed import seed_player, cleanup_player
+
+    base = dict(
+        position=(188, 157),
+        hit_points=69,
+        mana=44,
+        inventory=[{"index": 0, "key": "bronzeaxe", "count": 1}],
+    )
+    cleanup_player(test_username)
+    seeded = seed_player(test_username, **base)
+    ctx = {"username": test_username, "seeded": seeded, "base_kwargs": base}
+
+    def _reseed(**overrides):
+        cleanup_player(test_username)
+        merged = {**base, **overrides}
+        ctx["seeded"] = seed_player(test_username, **merged)
+        return ctx["seeded"]
+
+    ctx["reseed"] = _reseed
+    try:
+        yield ctx
+    finally:
+        cleanup_player(test_username)

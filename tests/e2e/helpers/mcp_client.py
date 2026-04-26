@@ -149,6 +149,20 @@ async def send_chat_command_via_browser(
             await browser.close()
 
 
+class McpSession:
+    """Thin handle returned by `mcp_session()`. Type-only stub kept at module
+    level so arena tests that annotate `session: McpSession` resolve. The
+    real implementation is the local `_Handle` class inside `mcp_session()`;
+    duck-typing means an instance of either class satisfies this annotation.
+    """
+
+    async def call_tool(self, name: str, args: dict[str, Any] | None = None) -> "ToolResult":
+        ...
+
+    async def list_tools(self) -> list[str]:
+        ...
+
+
 @dataclass
 class ToolResult:
     """Parsed CallToolResult. Mirrors arena's helper — `.text` for raw body,
