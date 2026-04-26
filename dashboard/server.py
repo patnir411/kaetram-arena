@@ -174,6 +174,19 @@ class WebSocketRelay:
             {"agents": agents, "ts": ts if ts is not None else time.time()},
         )
 
+    def notify_test_event(self, run_id, event, payload, ts=None):
+        """Broadcast a pytest run event (start, runtest_*, session_finish, etc.).
+        Consumed by the Tests tab via ws.onmessage `case 'test_event'`."""
+        self._broadcast_typed(
+            "test_event",
+            {
+                "run_id": run_id,
+                "event": event,
+                "payload": payload,
+                "ts": ts if ts is not None else time.time(),
+            },
+        )
+
     def notify_restart(self, ts=None):
         """Tell every connected tab to drop local state and re-fetch.
         Fired by handle_restart_run after wiping caches so the UI catches up
@@ -260,7 +273,8 @@ def start_dashboard():
     watcher_thread = threading.Thread(target=watcher.run, daemon=True, name="screenshot-watcher")
     watcher_thread.start()
 
-    print(f"Dashboard running at http://0.0.0.0:8080")
+    http_port = int(os.environ.get("DASHBOARD_HTTP_PORT", "8080"))
+    print(f"Dashboard running at http://0.0.0.0:{http_port}")
     print(f"WebSocket relay on ws://0.0.0.0:{WS_PORT}")
-    server = ThreadedHTTPServer(("0.0.0.0", 8080), DashboardHandler)
+    server = ThreadedHTTPServer(("0.0.0.0", http_port), DashboardHandler)
     server.serve_forever()

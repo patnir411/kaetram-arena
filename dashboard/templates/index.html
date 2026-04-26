@@ -942,6 +942,7 @@
   <div class="tab" data-tab="sessions">Sessions</div>
   <div class="tab" data-tab="prompt">Prompt</div>
   <div class="tab" data-tab="eval">EVAL</div>
+  <div class="tab" data-tab="tests">Tests</div>
 </div>
 
 <div id="quest-tooltip" role="tooltip"></div>
@@ -1094,6 +1095,328 @@
     </div>
   </div>
 
+  <!-- ===== TESTS TAB ===== -->
+  <div class="tab-content" id="tab-tests">
+    <style>
+      #tab-tests {
+        font-family: var(--font-mono); color: var(--ink); padding: 16px 20px;
+      }
+      .tests-layout {
+        display: grid; grid-template-columns: 280px 1fr; gap: 16px;
+        align-items: start;
+      }
+      @media (max-width: 900px) {
+        .tests-layout { grid-template-columns: 1fr; }
+      }
+      .tests-video-top {
+        margin-bottom: 14px;
+      }
+      .tests-video-top img#test-video {
+        max-height: 420px; object-fit: contain;
+      }
+      .tests-pane {
+        background: var(--paper-2); border: 1px solid var(--rule);
+        border-radius: var(--radius); padding: 10px;
+      }
+      .tests-pane-h {
+        font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase;
+        color: var(--ink-3); padding: 0 0 8px 0; margin: 0 0 8px 0;
+        border-bottom: 1px solid var(--rule-2); font-weight: 500;
+      }
+      /* Tree */
+      .tests-tree { max-height: 70vh; overflow-y: auto; font-size: 11px; }
+      .tests-group { margin-bottom: 4px; }
+      .tests-group-h {
+        display: flex; align-items: center; gap: 8px;
+        padding: 8px 8px; cursor: pointer; user-select: none;
+        font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--ink-2); font-weight: 500;
+        border-radius: var(--radius);
+        border: 1px solid var(--rule-2); background: var(--paper);
+        transition: background 0.12s, color 0.12s, border-color 0.12s;
+      }
+      .tests-group-h:hover { background: var(--rule-2); color: var(--ink); border-color: var(--rule); }
+      .tests-group-h .chev {
+        display: inline-block; width: 14px; height: 14px;
+        text-align: center; line-height: 14px;
+        color: var(--ink-3); font-size: 11px; flex-shrink: 0;
+        transition: transform 0.15s;
+      }
+      .tests-group.collapsed .chev { transform: rotate(-90deg); }
+      .tests-group-h:hover .chev { color: var(--ink); }
+      .tests-group-h .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .tests-group-h .count { color: var(--ink-3); font-size: 10px; }
+      .tests-group-h .run-this {
+        background: transparent; border: 1px solid var(--rule);
+        color: var(--ink-3); border-radius: 999px;
+        font-family: var(--font-mono); font-size: 8px; font-weight: 500;
+        letter-spacing: 0.14em; text-transform: uppercase;
+        padding: 2px 8px; cursor: pointer;
+        opacity: 0; transition: opacity 0.12s;
+      }
+      .tests-group-h:hover .run-this { opacity: 1; }
+      .tests-group-h .run-this:hover { color: var(--accent); border-color: var(--accent); }
+      .tests-group-h.sel { color: var(--accent); border-color: var(--accent); }
+      .tests-group-h.sel .chev,
+      .tests-group-h.sel .count { color: var(--accent); }
+      .tests-group-h.sel .run-this { opacity: 1; color: var(--accent); border-color: var(--accent); }
+      .tests-group-files {
+        padding: 4px 0 4px 18px; border-left: 1px solid var(--rule-2);
+        margin-left: 14px; margin-top: 2px;
+      }
+      .tests-group.collapsed .tests-group-files { display: none; }
+      .tests-tree .file {
+        padding: 3px 6px; cursor: pointer; user-select: none;
+        color: var(--ink-2); display: flex; align-items: center;
+        gap: 6px; border-radius: var(--radius); font-size: 10px;
+      }
+      .tests-tree .file:hover { background: var(--rule-2); color: var(--ink); }
+      .tests-tree .file.sel {
+        color: var(--accent);
+        border-left: 2px solid var(--accent); padding-left: 4px;
+      }
+      .tests-tree .file .fchev {
+        display: inline-block; width: 10px; text-align: center;
+        color: var(--ink-3); font-size: 9px; flex-shrink: 0;
+        transition: transform 0.15s;
+      }
+      .tests-tree .file.collapsed .fchev { transform: rotate(-90deg); }
+      .tests-tree .file .fname {
+        flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .tests-tree .file .count { color: var(--ink-3); font-size: 10px; }
+      .tests-tree .subtests {
+        padding: 2px 0 4px 18px; border-left: 1px solid var(--rule-2);
+        margin-left: 9px;
+      }
+      .tests-tree .file.collapsed + .subtests { display: none; }
+      .tests-tree .subtest {
+        padding: 2px 6px; cursor: pointer; user-select: none;
+        color: var(--ink-3); font-size: 9px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        border-radius: var(--radius);
+      }
+      .tests-tree .subtest:hover { background: var(--rule-2); color: var(--ink); }
+      .tests-tree .subtest.sel {
+        color: var(--accent);
+        border-left: 2px solid var(--accent); padding-left: 4px;
+      }
+      .tests-tree-empty {
+        color: var(--ink-3); font-size: 10px; padding: 16px;
+        text-align: center; letter-spacing: 0.1em; text-transform: uppercase;
+      }
+      /* Controls */
+      .tests-controls { margin-bottom: 12px; }
+      .tests-controls-row {
+        display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+        margin-bottom: 8px;
+      }
+      .tests-controls-row:last-child { margin-bottom: 0; }
+      .tests-headed-toggle {
+        display: inline-flex; align-items: center; gap: 6px;
+        font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+        color: var(--ink-2); cursor: pointer;
+      }
+      .tests-headed-toggle input { accent-color: var(--accent); cursor: pointer; }
+      .tests-btn {
+        background: transparent; border: 1px solid var(--rule);
+        color: var(--ink-2); padding: 5px 14px; cursor: pointer;
+        font-family: var(--font-mono); font-size: 10px; font-weight: 500;
+        letter-spacing: 0.16em; text-transform: uppercase;
+        border-radius: var(--radius); transition: all 0.15s;
+      }
+      .tests-btn:hover:not(:disabled) {
+        color: var(--ink); border-color: var(--ink);
+      }
+      .tests-btn.primary { color: var(--accent); border-color: var(--accent); }
+      .tests-btn.primary:hover:not(:disabled) {
+        background: var(--accent); color: var(--paper);
+      }
+      .tests-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+      .tests-status {
+        font-size: 10px; letter-spacing: 0.08em; color: var(--ink-3);
+      }
+      .tests-status .live-dot {
+        display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+        background: var(--accent); margin-right: 6px;
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+      @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+      .tests-suite-line {
+        font-size: 10px; color: var(--ink-3); display: inline-flex;
+        align-items: center; gap: 8px;
+      }
+      .tests-suite-line code {
+        color: var(--ink-2); background: var(--rule-2);
+        padding: 2px 6px; border-radius: var(--radius); font-size: 10px;
+      }
+      .tests-clear-link {
+        background: transparent; border: none; color: var(--ink-3);
+        cursor: pointer; font-family: var(--font-mono); font-size: 9px;
+        letter-spacing: 0.14em; text-transform: uppercase; padding: 0;
+        text-decoration: underline; text-underline-offset: 2px;
+      }
+      .tests-clear-link:hover { color: var(--accent); }
+      /* Pills (markers + filters) */
+      .tests-pill {
+        display: inline-block; padding: 3px 9px; margin: 0 2px 2px 0;
+        border: 1px solid var(--rule); color: var(--ink-3);
+        background: transparent; cursor: pointer; user-select: none;
+        font-family: var(--font-mono); font-size: 9px; font-weight: 500;
+        letter-spacing: 0.12em; text-transform: uppercase;
+        border-radius: 999px; transition: all 0.15s;
+      }
+      .tests-pill:hover { color: var(--ink); border-color: var(--ink-2); }
+      .tests-pill.on {
+        color: var(--accent); border-color: var(--accent);
+        background: var(--glow-gold);
+      }
+      .tests-pill-label {
+        font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase;
+        color: var(--ink-3); margin-right: 6px;
+      }
+      /* Counts */
+      .tests-counts {
+        font-size: 10px; padding: 8px 0; color: var(--ink-2);
+        letter-spacing: 0.06em; display: flex; gap: 18px; flex-wrap: wrap;
+      }
+      .tests-counts .stat-num { color: var(--ink); font-weight: 600; }
+      .tests-counts .stat-pass { color: var(--good); }
+      .tests-counts .stat-fail { color: var(--accent); }
+      .tests-counts .stat-skip { color: var(--ink-3); }
+      /* Feed */
+      .tests-feed {
+        max-height: 50vh; overflow-y: auto; padding: 4px 0;
+      }
+      .tests-row {
+        display: flex; align-items: center; gap: 10px;
+        padding: 5px 8px; font-size: 11px;
+        border-bottom: 1px solid var(--rule-2);
+      }
+      .tests-row:last-child { border-bottom: none; }
+      .tests-row .pill {
+        display: inline-block; min-width: 60px; text-align: center;
+        padding: 2px 8px; font-size: 9px; font-weight: 600;
+        letter-spacing: 0.12em; text-transform: uppercase;
+        border-radius: 999px; flex-shrink: 0;
+      }
+      .tests-row .pill.passed   { color: var(--good); border: 1px solid var(--good); }
+      .tests-row .pill.failed,
+      .tests-row .pill.error    { color: var(--accent); border: 1px solid var(--accent); background: var(--glow-gold); }
+      .tests-row .pill.skipped  { color: var(--ink-3); border: 1px solid var(--rule); }
+      .tests-row .pill.running  {
+        color: var(--olive); border: 1px solid var(--olive);
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+      .tests-row .nodeid {
+        flex: 1; overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap; color: var(--ink-2); font-size: 10px;
+      }
+      .tests-row .dur {
+        color: var(--ink-3); font-size: 10px; flex-shrink: 0;
+      }
+      .tests-feed-empty {
+        color: var(--ink-3); font-size: 10px; padding: 30px;
+        text-align: center; letter-spacing: 0.16em; text-transform: uppercase;
+      }
+      /* Live test frame (MJPEG <img>) */
+      .tests-video-wrap img#test-video {
+        width: 100%; background: #000; display: block;
+        border-radius: var(--radius);
+      }
+      .tests-video-meta {
+        font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--ink-3); padding-bottom: 6px;
+      }
+      .tests-video-meta .display { color: var(--accent); }
+      /* History */
+      .tests-history { margin-top: 16px; }
+      .tests-history-row {
+        font-size: 10px; padding: 5px 8px; cursor: pointer;
+        color: var(--ink-2); display: flex; align-items: center; gap: 10px;
+        border-bottom: 1px solid var(--rule-2);
+      }
+      .tests-history-row:hover { background: var(--rule-2); color: var(--ink); }
+      .tests-history-row .icon { flex-shrink: 0; }
+      .tests-history-row .id { color: var(--ink); font-weight: 500; }
+      .tests-history-row .meta { color: var(--ink-3); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .tests-history-empty {
+        color: var(--ink-3); font-size: 10px; padding: 16px;
+        text-align: center; letter-spacing: 0.1em; text-transform: uppercase;
+      }
+      .tests-log-pre {
+        font: 10px var(--font-mono); white-space: pre-wrap;
+        color: var(--ink-2); padding: 8px; background: var(--paper);
+        border: 1px solid var(--rule); border-radius: var(--radius);
+        max-height: 50vh; overflow: auto;
+      }
+    </style>
+
+    <!-- Live video (only when headed; renders above the layout) -->
+    <div class="tests-pane tests-video-wrap tests-video-top" id="tests-video-wrap" style="display:none">
+      <div class="tests-pane-h">Live</div>
+      <div class="tests-video-meta">
+        Test browser · display <span class="display">:198</span>
+      </div>
+      <img id="test-video" alt="test browser live frame" />
+    </div>
+
+    <div class="tests-layout">
+      <!-- Suite tree (left) -->
+      <div class="tests-pane">
+        <div class="tests-pane-h">Suites</div>
+        <div class="tests-tree" id="tests-tree-pane">
+          <div class="tests-tree-empty">Loading…</div>
+        </div>
+      </div>
+
+      <!-- Center: controls + live feed + history -->
+      <div>
+        <div class="tests-pane tests-controls">
+          <div class="tests-controls-row">
+            <button class="tests-btn primary" id="tests-run-btn">Run</button>
+            <button class="tests-btn" id="tests-cancel-btn" disabled>Cancel</button>
+            <label class="tests-headed-toggle">
+              <input type="checkbox" id="tests-headed"> Headed
+            </label>
+            <span class="tests-status" id="tests-status"></span>
+          </div>
+          <div class="tests-controls-row tests-suite-row">
+            <span class="tests-suite-line">
+              <span class="tests-pill-label" style="margin:0">Suite</span>
+              <code id="tests-selected-suite">tests/</code>
+              <button class="tests-clear-link" id="tests-clear-suite">clear</button>
+            </span>
+          </div>
+        </div>
+
+        <div class="tests-pane">
+          <div class="tests-counts" id="tests-counts">
+            <span style="color:var(--ink-3)">No active run</span>
+          </div>
+          <div class="tests-controls-row" id="tests-filter-row" style="margin-bottom:6px;display:none">
+            <span class="tests-pill on" data-filter="all">All</span>
+            <span class="tests-pill" data-filter="running">Running</span>
+            <span class="tests-pill" data-filter="passed">Passed</span>
+            <span class="tests-pill" data-filter="failed">Failed</span>
+            <span class="tests-pill" data-filter="skipped">Skipped</span>
+          </div>
+          <div class="tests-feed" id="tests-feed">
+            <div class="tests-feed-empty">— Idle —</div>
+          </div>
+        </div>
+
+        <div class="tests-pane tests-history">
+          <div class="tests-pane-h">Run history</div>
+          <div id="tests-history-list">
+            <div class="tests-history-empty">No history yet</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
 </main>
 
 <!-- Lightbox -->
@@ -1173,6 +1496,7 @@ function connectWebSocket() {
         case 'activity':   onActivityNotification(msg.agent, msg.events, msg.ts); break;
         case 'heartbeat':  onHeartbeatNotification(msg.agents, msg.ts); break;
         case 'restart':    onRestartNotification(msg.ts); break;
+        case 'test_event': onTestEvent(msg.run_id, msg.event, msg.payload, msg.ts); break;
         case 'connected':  break; // handshake
       }
     } catch(e) {}
@@ -3083,6 +3407,527 @@ async function loadEvalResults() {
     container.innerHTML = `<div class="eval-empty">Error loading eval results: ${err.message}</div>`;
   }
 }
+
+/* ============================================================
+   Tests tab — pytest run launcher + live feed + headed HLS
+   ============================================================ */
+const Tests = (() => {
+  const state = {
+    selectedSuite: null,        // null = all of tests/
+    activeFilter: 'all',
+    runs: [],                   // [{run_id,...}]
+    currentRunId: null,
+    rows: new Map(),            // nodeid -> {outcome, duration, el}
+    pollTimer: null,             // /api/test/runs poll while tab visible
+    liveLogTimer: null,          // /api/test/run?id=… log-tail poll while running
+  };
+
+  function $(id) { return document.getElementById(id); }
+
+  // Group test files by their parent directory (relative to tests/).
+  // e.g. "tests/e2e/quests/core/test_01_foresting.py" → group "e2e/quests/core".
+  function groupFilesByDir(files) {
+    const groups = new Map();   // dir → [filepath, ...]
+    for (const f of files) {
+      const trimmed = f.replace(/^tests\//, '');
+      const parts = trimmed.split('/');
+      const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '(root)';
+      if (!groups.has(dir)) groups.set(dir, []);
+      groups.get(dir).push(f);
+    }
+    // Sort groups by a stable order: e2e/quests/core first, then extras, etc.
+    const orderHint = (k) => {
+      const order = [
+        'e2e/mcp', 'e2e/game', 'unit',
+        'e2e/quests/core', 'e2e/quests/extra', 'e2e/quests/bonus',
+        'e2e/quests/reachability', 'e2e/quests/skip', 'e2e/quests',
+        'e2e/helpers', '(root)'
+      ];
+      const idx = order.indexOf(k);
+      return idx === -1 ? 100 : idx;
+    };
+    return Array.from(groups.entries()).sort((a, b) => {
+      const oa = orderHint(a[0]), ob = orderHint(b[0]);
+      if (oa !== ob) return oa - ob;
+      return a[0].localeCompare(b[0]);
+    });
+  }
+
+  function loadCollapsedState() {
+    try { return new Set(JSON.parse(localStorage.getItem('tests.collapsed') || '[]')); }
+    catch (e) { return new Set(); }
+  }
+  function saveCollapsedState(set) {
+    try { localStorage.setItem('tests.collapsed', JSON.stringify(Array.from(set))); }
+    catch (e) {}
+  }
+  function loadFileExpandedState() {
+    try { return new Set(JSON.parse(localStorage.getItem('tests.fileExpanded') || '[]')); }
+    catch (e) { return new Set(); }
+  }
+  function saveFileExpandedState(set) {
+    try { localStorage.setItem('tests.fileExpanded', JSON.stringify(Array.from(set))); }
+    catch (e) {}
+  }
+
+  async function loadTree() {
+    const pane = $('tests-tree-pane');
+    pane.innerHTML = '<div class="tests-tree-empty">Loading…</div>';
+    try {
+      const r = await fetch('/api/test/tree').then(r => r.json());
+      if (!r.by_file || Object.keys(r.by_file).length === 0) {
+        pane.innerHTML = `<div class="tests-tree-empty">No tests collected${r.error ? ' — '+escapeHtml(r.error) : ''}</div>`;
+        return;
+      }
+      const files = Object.keys(r.by_file).sort();
+      const groups = groupFilesByDir(files);
+      const collapsed = loadCollapsedState();
+
+      const fileExpanded = loadFileExpandedState();
+      pane.innerHTML = groups.map(([dir, paths]) => {
+        const total = paths.reduce((acc, p) => acc + r.by_file[p].length, 0);
+        const isCollapsed = collapsed.has(dir);
+        const groupSuite = (dir === '(root)') ? 'tests/' : `tests/${dir}/`;
+        const filesHtml = paths.map(f => {
+          const fname = f.split('/').pop();
+          const nodeids = r.by_file[f] || [];
+          // Strip the "<file>::" prefix so the subtest list shows just the
+          // suffix (e.g. "test_observe_unified_shape" or
+          // "TestResolveQuestName::test_ambiguous_returns_error").
+          const stripped = nodeids.map(n => n.startsWith(f + '::') ? n.slice(f.length + 2) : n);
+          const fileCollapsed = !fileExpanded.has(f);
+          const subtestsHtml = stripped.map((label, i) => {
+            const nid = nodeids[i];
+            return `<div class="subtest" data-suite="${escapeHtml(nid)}" title="${escapeHtml(nid)}">${escapeHtml(label)}</div>`;
+          }).join('');
+          return `<div class="file${fileCollapsed ? ' collapsed' : ''}" data-suite="${escapeHtml(f)}" data-path="${escapeHtml(f)}" title="${escapeHtml(f)}">
+              <span class="fchev">▾</span>
+              <span class="fname">${escapeHtml(fname)}</span>
+              <span class="count">${nodeids.length}</span>
+            </div><div class="subtests">${subtestsHtml}</div>`;
+        }).join('');
+        return `<div class="tests-group${isCollapsed ? ' collapsed' : ''}" data-dir="${escapeHtml(dir)}">
+          <div class="tests-group-h" data-suite="${escapeHtml(groupSuite)}" title="Click to expand/collapse">
+            <span class="chev">▾</span>
+            <span class="label">${escapeHtml(dir)}</span>
+            <button class="run-this" data-suite="${escapeHtml(groupSuite)}" title="Select this whole subtree as the run target">use</button>
+            <span class="count">${total}</span>
+          </div>
+          <div class="tests-group-files">${filesHtml}</div>
+        </div>`;
+      }).join('');
+
+      // Click anywhere on the header → toggle collapse/expand.
+      pane.querySelectorAll('.tests-group-h').forEach(h => {
+        h.addEventListener('click', (e) => {
+          // The "use" button has its own handler; don't toggle when it's clicked.
+          if (e.target.closest('.run-this')) return;
+          const group = h.closest('.tests-group');
+          group.classList.toggle('collapsed');
+          const dir = group.getAttribute('data-dir');
+          const set = loadCollapsedState();
+          if (group.classList.contains('collapsed')) set.add(dir); else set.delete(dir);
+          saveCollapsedState(set);
+        });
+      });
+
+      // "use" button: select the whole subdirectory as the run target.
+      pane.querySelectorAll('.tests-group-h .run-this').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          clearSelection();
+          const h = btn.closest('.tests-group-h');
+          h.classList.add('sel');
+          state.selectedSuite = btn.getAttribute('data-suite');
+          $('tests-selected-suite').textContent = state.selectedSuite;
+        });
+      });
+
+      // File row: click chevron region → toggle subtests; click filename → select file as suite.
+      pane.querySelectorAll('.file').forEach(el => {
+        el.addEventListener('click', (e) => {
+          const file = el.getAttribute('data-path');
+          const set = loadFileExpandedState();
+          // Click on the chevron toggles expansion; click on the rest selects.
+          if (e.target.classList.contains('fchev')) {
+            const wasCollapsed = el.classList.contains('collapsed');
+            if (wasCollapsed) { el.classList.remove('collapsed'); set.add(file); }
+            else { el.classList.add('collapsed'); set.delete(file); }
+            saveFileExpandedState(set);
+            return;
+          }
+          clearSelection();
+          el.classList.add('sel');
+          state.selectedSuite = el.getAttribute('data-suite');
+          $('tests-selected-suite').textContent = state.selectedSuite;
+        });
+      });
+
+      // Subtest row: select that one nodeid as suite (pytest accepts file::test).
+      pane.querySelectorAll('.subtest').forEach(el => {
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          clearSelection();
+          el.classList.add('sel');
+          state.selectedSuite = el.getAttribute('data-suite');
+          $('tests-selected-suite').textContent = state.selectedSuite;
+        });
+      });
+    } catch (e) {
+      pane.innerHTML = `<div class="tests-tree-empty">Tree fetch failed</div>`;
+    }
+  }
+
+  function clearSelection() {
+    document.querySelectorAll('.tests-tree .file, .tests-tree .tests-group-h, .tests-tree .subtest').forEach(x => x.classList.remove('sel'));
+  }
+
+  async function loadRuns() {
+    try {
+      const r = await fetch('/api/test/runs').then(r => r.json());
+      state.runs = r.runs || [];
+      renderHistory();
+    } catch (e) { /* swallow */ }
+  }
+
+  async function loadCurrent() {
+    try {
+      const r = await fetch('/api/test/current').then(r => r.json());
+      if (r && r.current) {
+        state.currentRunId = r.current.run_id;
+        setRunningUi(true, r.current);
+        if (r.current.headed) attachTestStream(r.current.run_id);
+        // Restore detail (rows) from progress.json if present.
+        try {
+          const det = await fetch('/api/test/run?id=' + encodeURIComponent(r.current.run_id)).then(r => r.json());
+          if (det && det.progress && det.progress.counts) {
+            // We don't have per-test rows from progress.json (only counts);
+            // leave the feed empty until live events stream in.
+            updateCounts(det.progress.counts, det.progress.completed, det.progress.total);
+          }
+        } catch (e) {}
+      } else {
+        setRunningUi(false);
+        detachTestStream();
+      }
+    } catch (e) {}
+  }
+
+  function renderHistory() {
+    const el = $('tests-history-list');
+    if (!state.runs.length) { el.innerHTML = '<div class="tests-history-empty">No history yet</div>'; return; }
+    el.innerHTML = state.runs.slice(0, 12).map(r => {
+      const j = r.junit || {};
+      let icon = '⏳';
+      if (r.cancelled) icon = '✋';
+      else if (r.exit_code === 0) icon = '✓';
+      else if (r.exit_code != null) icon = '✗';
+      const totals = j.tests
+        ? `${j.tests}T · ${j.failures||0}F · ${j.errors||0}E · ${j.skipped||0}S`
+        : '';
+      const suite = (r.suite || 'tests/').replace(/^tests\//, '');
+      return `<div class="tests-history-row" data-id="${escapeHtml(r.run_id)}">
+        <span class="icon">${icon}</span>
+        <span class="id">${escapeHtml(r.run_id)}</span>
+        <span class="meta">${escapeHtml(suite)} · ${totals}</span>
+      </div>`;
+    }).join('');
+    el.querySelectorAll('.tests-history-row').forEach(row => {
+      row.onclick = () => loadHistoryRun(row.getAttribute('data-id'));
+    });
+  }
+
+  async function loadHistoryRun(runId) {
+    const det = await fetch('/api/test/run?id=' + encodeURIComponent(runId)).then(r => r.json());
+    if (!det || det.error) return;
+    // Don't tear down a live run when peeking at history. If a run is in
+    // flight we just render the historical log_tail in a side overlay-style
+    // pane below the live feed; the active run UI (status, video, current
+    // counts) stays put.
+    const liveRunActive = state.currentRunId && state.currentRunId !== runId;
+    const feed = $('tests-feed');
+    const html = det.log_tail
+      ? `<pre class="tests-log-pre">${escapeHtml(det.log_tail.slice(-12000))}</pre>`
+      : '<div class="tests-feed-empty">— No log captured —</div>';
+    if (liveRunActive) {
+      // Soft-overlay: prepend a banner saying "viewing history" without
+      // killing the active state. User can click another live event to
+      // re-render.
+      feed.innerHTML =
+        `<div style="font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);padding:6px 0">History · ${escapeHtml(runId)} · live run still active</div>`
+        + html;
+    } else {
+      setRunningUi(false);
+      feed.innerHTML = html;
+      if (det.progress && det.progress.counts) {
+        updateCounts(det.progress.counts, det.progress.completed, det.progress.total);
+      }
+    }
+  }
+
+  function escapeHtml(s) { return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  function setRunningUi(running, meta) {
+    // NOTE: this function never touches the live stream. Stream
+    // lifecycle is explicit at each callsite:
+    //   - runClick: attachTestStream(runId) after POST returns (headed only)
+    //   - loadCurrent: attachTestStream(runId) on page load if active + headed
+    //   - onTestEvent('session_finish'): detachTestStream()
+    //   - cancelClick / error paths: detachTestStream()
+    $('tests-run-btn').disabled = !!running;
+    $('tests-cancel-btn').disabled = !running;
+    const statusEl = $('tests-status');
+    if (running && meta) {
+      const dot = '<span class="live-dot"></span>';
+      statusEl.innerHTML = `${dot}Running · ${escapeHtml(meta.run_id)}${meta.headed ? ' · headed' : ''}`;
+      startLiveLogPoll();
+    } else {
+      statusEl.innerHTML = '';
+      stopLiveLogPoll();
+    }
+  }
+
+  // MJPEG live-stream attach. The dashboard's send_mjpeg_stream handler
+  // boundary-streams /tmp/test_run/frame.jpg as multipart/x-mixed-replace
+  // for as long as ffmpeg keeps overwriting the file. <img> handles all
+  // the multipart parsing natively — no decoder, no playlist, no JS.
+  function attachTestStream(runId) {
+    const wrap = $('tests-video-wrap');
+    const img  = $('test-video');
+    if (!wrap || !img) return;
+    wrap.style.display = '';
+    // Cache-bust per run so the browser opens a fresh long-lived
+    // connection rather than reusing one bound to a prior run.
+    img.onerror = () => console.warn('test-video stream error');
+    img.src = '/stream/test_run?run=' + encodeURIComponent(runId || Date.now());
+  }
+
+  function detachTestStream() {
+    const wrap = $('tests-video-wrap');
+    const img  = $('test-video');
+    if (wrap) wrap.style.display = 'none';
+    // Drop the connection — multipart fetches stay open until the client
+    // tears them down, even if the element is hidden.
+    if (img) img.removeAttribute('src');
+  }
+
+  function clearFeed() {
+    state.rows.clear();
+    state.currentRunId = null;
+    $('tests-feed').innerHTML =
+      '<div class="tests-feed-empty">Waiting for collection…</div>'
+      + '<pre id="tests-live-log" class="tests-log-pre" style="display:none;margin-top:10px;max-height:30vh"></pre>';
+    $('tests-counts').innerHTML = '<span style="color:var(--ink-3)">Pending</span>';
+    showFilterRow(true);
+  }
+
+  function startLiveLogPoll() {
+    stopLiveLogPoll();
+    state.liveLogTimer = setInterval(async () => {
+      const id = state.currentRunId;
+      if (!id) return;
+      try {
+        const det = await fetch('/api/test/run?id=' + encodeURIComponent(id)).then(r => r.json());
+        const tail = det && det.log_tail ? det.log_tail : '';
+        const pre = $('tests-live-log');
+        if (pre && tail) {
+          // Hide the "Waiting for collection" placeholder once log lines arrive.
+          const placeholder = $('tests-feed').querySelector('.tests-feed-empty');
+          if (placeholder) placeholder.remove();
+          // Show last ~8KB so we don't blow up the DOM mid-suite.
+          const visible = tail.slice(-8000);
+          if (pre.textContent !== visible) {
+            const stickToBottom = (pre.scrollTop + pre.clientHeight + 30) >= pre.scrollHeight;
+            pre.textContent = visible;
+            pre.style.display = '';
+            if (stickToBottom) pre.scrollTop = pre.scrollHeight;
+          }
+        }
+      } catch (e) { /* swallow */ }
+    }, 1500);
+  }
+  function stopLiveLogPoll() { if (state.liveLogTimer) { clearInterval(state.liveLogTimer); state.liveLogTimer = null; } }
+
+  function startRow(nodeid) {
+    if (state.rows.has(nodeid)) return;
+    const feed = $('tests-feed');
+    const empty = feed.querySelector('.tests-feed-empty');
+    if (empty) feed.innerHTML = '';
+    const el = document.createElement('div');
+    el.className = 'tests-row';
+    el.dataset.outcome = 'running';
+    el.innerHTML = `<span class="pill running">run</span><span class="nodeid"></span><span class="dur"></span>`;
+    el.querySelector('.nodeid').textContent = nodeid;
+    feed.appendChild(el);
+    state.rows.set(nodeid, { outcome: 'running', el });
+    applyFilter();
+  }
+
+  function finishRow(nodeid, outcome, duration) {
+    let row = state.rows.get(nodeid);
+    if (!row) { startRow(nodeid); row = state.rows.get(nodeid); }
+    row.outcome = outcome;
+    row.duration = duration;
+    const el = row.el;
+    el.dataset.outcome = outcome;
+    const pill = el.querySelector('.pill');
+    pill.className = 'pill ' + outcome;
+    pill.textContent = outcome;
+    el.querySelector('.dur').textContent = duration ? `${duration.toFixed(2)}s` : '';
+    applyFilter();
+  }
+
+  function updateCounts(counts, completed, total) {
+    if (!counts) return;
+    const passed = counts.passed || 0;
+    const failed = counts.failed || 0;
+    const error = counts.error || 0;
+    const skipped = counts.skipped || 0;
+    $('tests-counts').innerHTML =
+      `<span><span class="stat-num">${completed||0}/${total||0}</span> tests</span>` +
+      `<span class="stat-pass"><span class="stat-num">${passed}</span> passed</span>` +
+      `<span class="stat-fail"><span class="stat-num">${failed+error}</span> failed</span>` +
+      `<span class="stat-skip"><span class="stat-num">${skipped}</span> skipped</span>`;
+  }
+
+  function applyFilter() {
+    const f = state.activeFilter;
+    state.rows.forEach(row => {
+      const show = (f === 'all') || (row.outcome === f) || (f === 'running' && row.outcome === 'running');
+      row.el.style.display = show ? '' : 'none';
+    });
+  }
+
+  function showFilterRow(show) {
+    const row = $('tests-filter-row');
+    if (row) row.style.display = show ? '' : 'none';
+  }
+
+  function onFilterClick(e) {
+    const f = e.target.getAttribute('data-filter');
+    if (!f) return;
+    state.activeFilter = f;
+    document.querySelectorAll('.tests-pill[data-filter]').forEach(el => el.classList.remove('on'));
+    e.target.classList.add('on');
+    applyFilter();
+  }
+
+  function setStatusError(msg) {
+    const el = $('tests-status');
+    if (!el) return;
+    el.innerHTML = `<span style="color:var(--accent)">${escapeHtml(msg)}</span>`;
+  }
+
+  async function runClick() {
+    const headed = $('tests-headed').checked;
+    const suite = state.selectedSuite || null;
+    clearFeed();
+    // Optimistic UI; setRunningUi no longer touches video.
+    setRunningUi(true, { run_id: '…', headed });
+    try {
+      const r = await fetch('/api/test/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ suite, headed }),
+      });
+      if (r.status === 409) { setStatusError('Run already in flight'); setRunningUi(false); detachTestStream(); return; }
+      const j = await r.json();
+      if (!j.ok) { setStatusError('Start failed: ' + (j.error || r.status)); setRunningUi(false); detachTestStream(); return; }
+      state.currentRunId = j.run_id;
+      $('tests-status').innerHTML =
+        `<span class="live-dot"></span>Running · ${escapeHtml(j.run_id)}${headed ? ' · headed' : ''}`;
+      // Backend has guaranteed HLS pipeline is hot (it blocked on
+      // _wait_for_hls_ready before responding). Now kick the video.
+      if (headed) attachTestStream(j.run_id);
+    } catch (e) {
+      setStatusError('Start failed (try again): ' + (e.message || 'network'));
+      setRunningUi(false);
+      detachTestStream();
+    }
+  }
+
+  async function cancelClick() {
+    try { await fetch('/api/test/cancel', { method: 'POST' }); } catch (e) {}
+    // session_finish via WS will detach video; cancel is best-effort.
+  }
+
+  function onTestEvent(runId, event, payload) {
+    if (!runId) return;
+    if (event === 'run_started') {
+      state.currentRunId = runId;
+      setRunningUi(true, payload);
+      return;
+    }
+    if (state.currentRunId && runId !== state.currentRunId && event !== 'session_finish') {
+      // Different run — ignore.
+      return;
+    }
+    if (event === 'collection_finish') {
+      const feed = $('tests-feed');
+      feed.innerHTML = '';
+      $('tests-counts').textContent = `0/${payload.total || 0}`;
+    } else if (event === 'runtest_start') {
+      startRow(payload.nodeid);
+    } else if (event && event.startsWith('runtest_')) {
+      const outcome = event.slice('runtest_'.length);
+      finishRow(payload.nodeid, outcome, payload.duration);
+      updateCounts(payload.counts, payload.completed, payload.total);
+    } else if (event === 'session_finish') {
+      setRunningUi(false);
+      detachTestStream();
+      $('tests-status').textContent =
+        `Done — exit ${payload.exit_code}${payload.cancelled ? ' (cancelled)' : ''}`;
+      loadRuns();
+    }
+  }
+
+  function init() {
+    loadTree();
+    loadRuns();
+    loadCurrent();
+    document.querySelectorAll('.tests-pill[data-filter]').forEach(el => el.addEventListener('click', onFilterClick));
+    $('tests-run-btn').addEventListener('click', runClick);
+    $('tests-cancel-btn').addEventListener('click', cancelClick);
+    $('tests-clear-suite').addEventListener('click', () => {
+      state.selectedSuite = null;
+      $('tests-selected-suite').textContent = 'tests/';
+      clearSelection();
+    });
+  }
+
+  function clearFeedToIdle() {
+    state.rows.clear();
+    $('tests-feed').innerHTML = '<div class="tests-feed-empty">— Idle —</div>';
+    $('tests-counts').innerHTML = '<span style="color:var(--ink-3)">No active run</span>';
+    showFilterRow(false);
+  }
+
+  function startPolling() {
+    stopPolling();
+    state.pollTimer = setInterval(() => { loadRuns(); }, 8000);
+  }
+  function stopPolling() { if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; } }
+
+  return { init, onTestEvent, startPolling, stopPolling, loadRuns, loadTree };
+})();
+
+window.onTestEvent = (run_id, event, payload, ts) => Tests.onTestEvent(run_id, event, payload);
+
+document.addEventListener('DOMContentLoaded', () => {
+  Tests.init();
+  // Hook into existing tab activation: when "tests" tab becomes active, start polling.
+  document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => {
+      if (t.getAttribute('data-tab') === 'tests') {
+        Tests.loadRuns();
+        Tests.loadTree();
+        Tests.startPolling();
+      } else {
+        Tests.stopPolling();
+      }
+    });
+  });
+});
 </script>
 </body>
 </html>

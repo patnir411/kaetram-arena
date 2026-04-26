@@ -174,6 +174,7 @@ class XvfbProcess:
     height: int = 810
     depth: int = 24
     process: subprocess.Popen | None = None
+    log_dir: Path | None = None
 
     @property
     def display(self) -> int:
@@ -189,7 +190,10 @@ class XvfbProcess:
     def start(self) -> bool:
         if not XVFB_AVAILABLE:
             return False
-        log_path = Path(f"/tmp/kaetram_agent_{self.agent_id}/xvfb_{self.display}.log")
+        if self.log_dir is not None:
+            log_path = Path(self.log_dir) / f"xvfb_{self.display}.log"
+        else:
+            log_path = Path(f"/tmp/kaetram_agent_{self.agent_id}/xvfb_{self.display}.log")
         log_path.parent.mkdir(parents=True, exist_ok=True)
         self._log = open(log_path, "a")
         self._log.write(f"\n--- Xvfb start at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
@@ -248,7 +252,12 @@ class XvfbProcess:
 
 @dataclass
 class FfmpegEncoder:
-    """ffmpeg x11grab → HLS segments under /tmp/hls/agent_N/."""
+    """ffmpeg x11grab → HLS segments under /tmp/hls/agent_N/.
+
+    Agent-mode HLS only. Tests-tab live video uses a separate MJPEG
+    ffmpeg invocation in dashboard/test_runner.py (HLS's live-edge
+    segment-rotation race made it unreliable for short test runs).
+    """
 
     agent_id: int
     display: int

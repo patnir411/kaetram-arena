@@ -49,6 +49,12 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
                 self.handle_ingest_state(parsed)
             elif path == "/ingest/activity":
                 self.handle_ingest_activity(parsed)
+            elif path == "/ingest/test_event":
+                self.handle_ingest_test_event(parsed)
+            elif path == "/api/test/run":
+                self.handle_test_run()
+            elif path == "/api/test/cancel":
+                self.handle_test_cancel()
             else:
                 self.send_error(404)
         except Exception as e:
@@ -131,6 +137,81 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Content-Length", "0")
         self.end_headers()
+
+    def handle_ingest_test_event(self, parsed):
+        """POST /ingest/test_event → broadcast as {type:test_event}.
+
+        Body: {run_id, event, payload}. Loopback-only; the
+        dashboard_progress_plugin posts here from inside the pytest
+        subprocess.
+        """
+        if not self._is_loopback():
+            return self.send_error(403)
+        body = self._read_json_body()
+        if body == "_TOO_LARGE_":
+            return self.send_error(413)
+        if body is None or not isinstance(body, dict):
+            return self.send_error(400)
+        run_id = str(body.get("run_id") or "")
+        event = str(body.get("event") or "")
+        payload = body.get("payload") or {}
+        try:
+            from dashboard.server import get_relay
+            relay = get_relay()
+            if relay is not None:
+                relay.notify_test_event(run_id, event, payload)
+        except Exception:
+            pass
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def handle_test_run(self):
+        """POST /api/test/run — start a pytest run.
+
+        Body: {suite?, markers?, headed?}. Returns {ok, run_id} on success
+        or 409 if a run is already in flight.
+        """
+        clen = int(self.headers.get("Content-Length", 0) or 0)
+        raw = self.rfile.read(clen) if clen else b""
+        try:
+            payload = json.loads(raw) if raw else {}
+        except Exception:
+            payload = {}
+        suite = payload.get("suite") or None
+        markers = payload.get("markers") or None
+        headed = bool(payload.get("headed", False))
+
+        from dashboard import test_runner
+        try:
+            run_id = test_runner.start(suite=suite, markers=markers, headed=headed)
+        except RuntimeError as e:
+            if str(e) == "run-in-flight":
+                body = json.dumps({"ok": False, "error": "run-in-flight"}).encode()
+                self.send_response(409)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            raise
+        body = json.dumps({"ok": True, "run_id": run_id}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def handle_test_cancel(self):
+        """POST /api/test/cancel — cancel the in-flight run, if any."""
+        from dashboard import test_runner
+        ok = test_runner.stop()
+        body = json.dumps({"ok": ok}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def handle_restart_run(self):
         """POST /api/restart-run — kick off restart-agent.sh with optional payload."""
@@ -250,6 +331,15 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
                 self.send_eval_latest()
             elif path == "/api/eval/live":
                 self.send_eval_live()
+            elif path == "/api/test/tree":
+                self.send_test_tree()
+            elif path == "/api/test/runs":
+                self.send_test_runs()
+            elif path == "/api/test/run":
+                run_id = qs.get("id", [None])[0]
+                self.send_test_run_detail(run_id)
+            elif path == "/api/test/current":
+                self.send_test_current()
             elif path == "/api/raw":
                 which = qs.get("file", [None])[0]
                 self.send_raw_file(which, qs)
@@ -452,7 +542,11 @@ class DashboardHandler(APIMixin, http.server.BaseHTTPRequestHandler):
         """Serve MJPEG stream from an agent's live_screen.jpg."""
         raw = self.path.split("?")[0]
         parts = raw.strip("/").split("/")
-        if len(parts) >= 2 and parts[1].startswith("agent_"):
+        if len(parts) >= 2 and parts[1] == "test_run":
+            # Tests-tab live video. ffmpeg writes this single frame in
+            # /tmp/test_run/ from dashboard/test_runner.py (MJPEG mode).
+            ss_path = "/tmp/test_run/frame.jpg"
+        elif len(parts) >= 2 and parts[1].startswith("agent_"):
             idx = parts[1].replace("agent_", "")
             ss_path = os.path.join("/tmp", f"kaetram_agent_{idx}", "state", "live_screen.jpg")
         elif len(parts) >= 2 and parts[1].startswith("eval_"):

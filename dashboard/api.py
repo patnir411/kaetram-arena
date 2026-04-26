@@ -83,6 +83,33 @@ class APIMixin:
     def send_json_state(self, qs=None):
         self._send_json({})
 
+    # ── Tests tab ──
+
+    def send_test_tree(self):
+        """GET /api/test/tree → cached `pytest --collect-only` tree."""
+        from dashboard import test_runner
+        self._send_json(test_runner.collect_tree())
+
+    def send_test_runs(self):
+        """GET /api/test/runs → all persisted runs newest-first."""
+        from dashboard import test_runner
+        self._send_json({"runs": test_runner.list_runs()})
+
+    def send_test_run_detail(self, run_id):
+        """GET /api/test/run?id=<id> → full detail for one run."""
+        from dashboard import test_runner
+        if not run_id:
+            return self._send_json({"error": "missing id"})
+        run = test_runner.get_run(run_id)
+        if run is None:
+            return self._send_json({"error": "not found"})
+        self._send_json(run)
+
+    def send_test_current(self):
+        """GET /api/test/current → meta of the in-flight run, or null."""
+        from dashboard import test_runner
+        self._send_json({"current": test_runner.get_current()})
+
     def send_game_state(self, qs=None):
         state_dir = self._resolve_state_dir(qs)
         data = {}
