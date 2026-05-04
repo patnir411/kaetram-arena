@@ -1,7 +1,7 @@
 ## PRIMARY OBJECTIVE
 
-You are scored on the **CORE 5** quests. Finish them before anything else.
-After the Core 5 are done, advance to EXTRA. Bonus quests are completable
+You are scored on the **CORE 3** quests. Finish them before anything else.
+After the Core 3 are done, advance to EXTRA. Bonus quests are completable
 add-ons; off-limits quests are broken — don't waste turns on them.
 
 `interact_npc` only reads dialogue by default. To commit, call
@@ -22,13 +22,11 @@ stage, items needed, and `live_gate_status` evaluated against your state.
 | 1 | **CORE** | Foresting | Forester (216, 114) | None | `ironaxe` | Warmup — 10+10 oak logs, turn in twice |
 | 2 | **CORE** | Herbalist's Desperation | Herby Mc. Herb (333, 281) | **None for acceptance** — Foraging 5 is a *progress* gate (all three required nodes — bluelily, tomato, paprika — share Lv5). Talk to Herby Mc. Herb at (333, 281) immediately on arriving at Lakesworld — Stage 0→1 has no skill requirement. | `hotsauce` + 1500 Foraging XP | Turn in blue lily, then paprika + tomato |
 | 3 | **CORE** | Rick's Roll | Rick (1088, 833) | None | **1987 gold** | Fish + cook 5 shrimp, deliver `seaweedroll` |
-| 4 | **CORE** | Arts and Crafts | Babushka (702, 608) | **Aynor warp** (finish Ancient Lands first; overland from Mudwich is map-disjoint) — then door 463 (406,292)→(433,270), then door (483,275)→(702,613) into Babushka's room | **Crafting unlock on start** | `berylpendant → bowlsmall → stew` (`stew` needs `bowlmedium`) |
-| 5 | **CORE** | Sea Activities | Sponge (52, 310) | **`waterguardian` achievement** for undersea; **`mermaidguard`** for door 556 (kill Mermaid at (676, 851)) | **10000 gold** + sea quest gates | Sponge/Pickle talk chain (Pickle's `interact_npc` name is **`Sea Cucumber`**, not `Pickle`), then kill `picklemob` (also display-name `Sea Cucumber`) |
-| 6 | EXTRA | Desert Quest | Dying Soldier (288, 134) | None | Unlocks `crullfield` + `lakesworld` warps | Deliver `cd` to Wife, then return |
-| 7 | EXTRA | Royal Drama | Royal Guard (282, 887) | None | **10000 gold** | `royalguard2 → ratnpc → king2` |
-| 8 | EXTRA | Royal Pet | King (284, 884) | **Royal Drama** finished | `catpet` (pet) | Deliver 3 books, return to King |
-| 9 | EXTRA | Scientist's Potion | Scientist (763, 666) | None | **Alchemy unlock on start** | Talk once and accept |
-| 10 | EXTRA | Ancient Lands | Ancient Monument (415, 294) | `icesword` from Ice Knight (808, 813), L62 | `snowpotion` + mountain gate | Bring `icesword` to Monument |
+| 4 | EXTRA | Desert Quest | Dying Soldier (288, 134) | None | Unlocks `crullfield` + `lakesworld` warps | Deliver `cd` to Wife, then return |
+| 5 | EXTRA | Royal Drama | Royal Guard (282, 887) | None | **10000 gold** | `royalguard2 → ratnpc → king2` |
+| 6 | EXTRA | Royal Pet | King (284, 884) | **Royal Drama** finished | `catpet` (pet) | Deliver 3 books, return to King |
+| 7 | EXTRA | Scientist's Potion | Scientist (763, 666) | None | **Alchemy unlock on start** | Talk once and accept |
+| 8 | EXTRA | Ancient Lands | Ancient Monument (415, 294) | `icesword` from Ice Knight (808, 813), L62 | `snowpotion` + mountain gate | Bring `icesword` to Monument |
 | — | bonus | Anvil's Echoes | Blacksmith (~199, 169) | None | `bronzeboots` | Talk to Blacksmith twice |
 | — | bonus | Scavenger | Village Girl (~136, 146) | None | **7500 gold** | Turn in `tomato x2 + strawberry x2 + string x1` |
 | — | bonus | Clam Chowder | (coastal NPC) | Practical: Fishing 10 + Cooking 15 + Fletching 3 | **7500 gold** | 5 clams, then 2 chowders, then 2 more |
@@ -45,11 +43,11 @@ stage, items needed, and `live_gate_status` evaluated against your state.
 ## CURRENT TREE TRUTHS
 
 - Tutorial is auto-finished at spawn; starter kit (bronzeaxe, knife, fishingpole, coppersword, woodenbow) is already in your inventory. Ignore all tutorial dialogue / NPCs.
-- 5 CORE + 5 EXTRA + 5 bonus = 15 completable quests; 5 are Off-limits (see table above).
-- Start **Arts and Crafts** to unlock Crafting. Start **Scientist's Potion** to unlock Alchemy.
-- Cooking is always available on a cauldron click. Fletching requires a `knife` (already in spawn kit). **Mining and Smithing/Smelting are not part of the playthrough** — buy ores, beryl, and finished weapons/armor from the Miner shop instead.
-- `undersea` access requires the `waterguardian` achievement (kill Water Guardian at (293, 729), L36, 350 HP). **Ancient Lands** (EXTRA #10) opens the mountain gate. **Evil Santa** (bonus) unlocks `iceworld`.
-- Liar quests (in-game reward strings disagree with what you actually receive — trust `query_quest`'s `actual_rewards`): `Foresting` (Rusted Axe → ironaxe), `Royal Drama`, `Rick's Roll`, `Sea Activities`, `Scientist's Potion`, `Arts and Crafts`, `Herbalist's Desperation` (Mystical Potion → hotsauce + 1500 Foraging XP), `Anvil's Echoes` (Smithing Gloves → bronzeboots only), `Scavenger` (fake shopping list), `Clam Chowder` (fish clams, don't kill them).
+- 3 CORE + 5 EXTRA + 5 bonus = 13 completable quests; 5 are Off-limits (see table above).
+- Start **Scientist's Potion** to unlock Alchemy.
+- Cooking is always available on a cauldron click. Fletching requires a `knife` (already in spawn kit). **Mining and Smithing/Smelting are not part of the playthrough** — buy ores and finished weapons/armor from the Miner shop instead.
+- **Ancient Lands** (EXTRA) opens the mountain gate. **Evil Santa** (bonus) unlocks `iceworld`.
+- Liar quests (in-game reward strings disagree with what you actually receive — trust `query_quest`'s `actual_rewards`): `Foresting` (Rusted Axe → ironaxe), `Royal Drama`, `Rick's Roll`, `Scientist's Potion`, `Herbalist's Desperation` (Mystical Potion → hotsauce + 1500 Foraging XP), `Anvil's Echoes` (Smithing Gloves → bronzeboots only), `Scavenger` (fake shopping list), `Clam Chowder` (fish clams, don't kill them).
 
 ---
 
@@ -68,10 +66,8 @@ XP per kill scales with mob HP. Move up quickly once low mobs stop paying.
 | 50-60 | Snow Wolf | 1185 | 2370 | Snow zone (x:451-785, y:251-767) |
 | 60-80 | Dark Skeleton | 740 | 1480 | Widespread (x:38-1145, y:411-851) |
 | 80+ | Frozen Bat | 825 | 1650 | Ice zone (x:549-701, y:282-367) |
-| 40 (req) | Mermaid | 150 | — | Sea Activities prereq — kill once for `mermaidguard` (676, 851 undersea); door 556 gate |
-| 88 (boss) | picklemob (Sea Cucumber) | 1250 | — | Sea Activities Stage 4 boss; END-GAME GEAR — mid-route gear is marginal (audit predicts ~1900 dmg taken vs ~1389 max HP at Lv50) |
 
-Goblins past Lv20 give poor XP. Dark Skeletons are the main efficient late grind. For Sea Activities Stage 4 (picklemob L88, 1250 HP) you need lvl 80+ combat skills *and* end-game gear; mid-route gear is marginal per the audit.
+Goblins past Lv20 give poor XP. Dark Skeletons are the main efficient late grind.
 
 ---
 
@@ -83,15 +79,15 @@ Coords are first valid placement in `world.json` — useful as a `navigate(x,y)`
 |---|---|---|---|---|
 | Oak Tree | Lumberjacking | 1 | Mudwich north (~210, 110) | Foresting |
 | Blueberry Bush | Foraging | 1 | Mudwich (105–238, 103–209), e.g. (155, 103) | Foraging grind |
-| Blue Lily Bush | Foraging | 5 | (278–441, 250–363), e.g. (278, 250) | Arts and Crafts (`string`) |
+| Blue Lily Bush | Foraging | 5 | (278–441, 250–363), e.g. (278, 250) | (foraging XP) |
 | Tomato Plant Thingy | Foraging | 5 | (113–386, 107–326), e.g. (220, 107) | Herbalist's, Scavenger |
-| Paprika Bush | Foraging | 5 | (286–390, 240–484), e.g. (298, 300) | Herbalist's |
+| Paprika Bush | Foraging | 5 | (286–390, 240–484); e.g. (286, 326) or (305, 360) — **avoid (298, 300)** (real bush there but in a 1k-tile disjoint pocket BFS can't reach from Mudwich/Lakesworld) | Herbalist's |
 | Strawberry Bush | Foraging | 1 | various | Scavenger (bonus) |
 | Shrimp Fishing Spot | Fishing | 1 + **fishingpole** | (269–383, 328–397), e.g. (325, 360) shore at (324, 360) | Rick's Roll |
 | Tuna Fishing Spot | Fishing | 25 | (269–376, 296–402) | — |
 | Clam Spot | Fishing | 5 + **fishingpole** | (268–381, 253–398), e.g. (322, 318) | Clam Chowder (bonus) |
 
-**Mining is not part of the agent playthrough.** Beryl, copper/tin/coal/iron/gold ores are all sold by the Miner shop (see Stores section). Do not attempt to mine — Miner's Quest I/II are off-limits.
+**Mining is not part of the agent playthrough.** Copper/tin/coal/iron/gold ores are all sold by the Miner shop (see Stores section). Do not attempt to mine — Miner's Quest I/II are off-limits.
 
 ⚠️ Spots **in water** require approach from a shore tile, not standing on the spot. If `gather` reports "No resource matching X nearby" but you're at the listed coords, you're probably on the wrong tile — `observe` to see `nearby_entities` and pick the spot with `kind: rock|fish|tree|forage`.
 
@@ -115,20 +111,16 @@ These are NPC task chains or kill rewards. They do not show up in the quest pane
 | Rat Infestation | Forester (~216,114) | Kill 20 rats / ice rats | 369 Str XP |
 | Boxing Man | Bike Lyson (~166,114) | Kill 25 sneks | **Run ability** + 2000 Str XP |
 | Oh Crab! | Bubba (~121,231) | Kill 10 crabs / hermit crabs | 696 Acc XP |
-| Zombie Lovers | Zombie Girlfriend (undersea) | Kill 20 zombies | 4269 Str XP |
-| Mermaid Guard | Mermaid (676, 851), undersea | Kill 1 Mermaid (L40, 150 HP) | Unlocks door 556 (Sponge ↔ Pickle corridor) |
 
-Boss kills also grant achievements. Highest-value route kills: **Water Guardian** for `undersea` warp; **Mermaid** for `mermaidguard` (door 556 gate). The door-block error message says "Mermaid **Sword**" but the achievement display is "Mermaid **Guard**" — same gate, just a confusing alias.
+Boss kills also grant achievements.
 
 ---
 
 ## STORES / WARPS
 
 Use `buy_item(npc_name, item_index, count)`:
-- **Babushka** (ingredients store): **gated behind Ancient Lands** — Mudwich and Babushka's region are map-disjoint, so the only in-game route is `warp("aynor")` (lands at (411, 288)) → walk to door 463 at (406, 292) → teleports to (433, 270) → walk to door (483, 275) → teleports to (702, 613) inside her room. Items: 0=Blue Lily, 1=Tomato, 2-3=Mushroom, 4=Egg, 5=Corn, 6=Raw Pork, 7=Raw Chicken. ⚠️ Store is unavailable while `Arts and Crafts` is active — Babushka's NPC slot is claimed by quest dialogue. Gather ingredients from the world instead, or finish the quest first. For Herbalist, gathering is faster than waiting for Ancient Lands.
 - **Miner** (~323,178 OR ~1007,664): general outfitter. Buy via `buy_item(npc_name="Miner", item_index=N)`:
   - **Ores**: 0=Coal(3g), 1=Copper Ore(5g), 2=Tin Ore(5g), 3=Bronze Ore(8g), 4=Gold Ore(20g)
-  - **Beryl** (Arts and Crafts): 5=Beryl(20g)
   - **Starter swords**: 6=Copper Sword(10g), 7=Tin Sword(10g)
   - **Bronze kit** (~560g full): 8=Bronze Sword(120g), 9=Bronze Helmet(100g), 10=Bronze Chestplate(140g), 11=Bronze Legplates(100g), 12=Bronze Boots(100g)
   - **Gold kit** (~3700g full): 13=Gold Sword(700g), 14=Gold Helmet(700g), 15=Gold Chestplate(900g), 16=Gold Legplates(700g), 17=Gold Boots(700g)
@@ -143,8 +135,6 @@ Use `buy_item(npc_name, item_index, count)`:
 | Crullfield | `crullfield` | (266,158) | Finish Desert Quest |
 | Lakesworld | `lakesworld` | (319,281) | Finish Desert Quest |
 | Patsow | `patsow` | (343,127) | Enter Patsow area |
-| Aynor | `aynor` | (411,288) | Finish Ancient Lands |
-| Undersea | `undersea` | (43,313) | Kill Water Guardian |
 
 ---
 

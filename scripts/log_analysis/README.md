@@ -18,14 +18,14 @@ python3 scripts/log_analysis/analyze.py             # full report (default)
 python3 scripts/log_analysis/analyze.py status      # one-line per agent (run-aggregated)
 python3 scripts/log_analysis/analyze.py runs -n 10  # last N runs across all agents (run.meta.json)
 python3 scripts/log_analysis/analyze.py timeline -n 30   # chronological events across the run
-python3 scripts/log_analysis/analyze.py metrics     # paper metrics: format/argument/tool-sel/core5_stages/turn-eff
+python3 scripts/log_analysis/analyze.py metrics     # paper metrics: format/argument/tool-sel/core3_stages/turn-eff
 python3 scripts/log_analysis/analyze.py quests      # quest delta first→last in run + NPC interactions
-python3 scripts/log_analysis/analyze.py quest       # per-quest progression timeline (default: Core 5)
+python3 scripts/log_analysis/analyze.py quest       # per-quest progression timeline (default: Core 3)
 python3 scripts/log_analysis/analyze.py quest rick  # scope to a single quest by substring match
 python3 scripts/log_analysis/analyze.py quest --cross-run  # max-stage histogram across every run per agent
 python3 scripts/log_analysis/analyze.py tools       # tool call counts + error rates across the run
 python3 scripts/log_analysis/analyze.py errors      # CATEGORIZED errors + next-action transitions
-python3 scripts/log_analysis/analyze.py errors --by-quest    # slice errors by which Core 5 quest was active
+python3 scripts/log_analysis/analyze.py errors --by-quest    # slice errors by which Core 3 quest was active
 python3 scripts/log_analysis/analyze.py recent -n 8 # last N tool calls (latest session — session-scoped)
 python3 scripts/log_analysis/analyze.py thinking -n 3   # last N reasoning blocks (latest session — session-scoped)
 python3 scripts/log_analysis/analyze.py agent 1 -n 10   # deep-dive single agent (run-aggregated)
@@ -53,16 +53,16 @@ specific one.
 
 `status` is the fastest signal — run_id, level, HP, pos, cumulative quest
 state across the run, total turns, total errors, total cost. `metrics` emits
-the 5 paper-claim numbers per agent. **Core 5 progress is summed in stages
-across the 5 quests** (denominator from `prompts/quest_walkthroughs.json`,
-currently 21), with the per-quest delta computed as
+the 5 paper-claim numbers per agent. **Core 3 progress is summed in stages
+across the 3 quests** (denominator from `prompts/quest_walkthroughs.json`,
+currently 10), with the per-quest delta computed as
 `last_observe stage − first_observe stage` — so partial progress moves the
 metric *and* resume-state replays don't inflate it. Tool-selection is
 DEFERRED — needs a Claude-as-judge sample.
 
 `quest` is the per-quest progression view: stage transitions, the trigger
 tool call for each, the model's reasoning right before each advance, NPCs
-talked to, and tool/error breakdown while each Core 5 quest was active.
+talked to, and tool/error breakdown while each Core 3 quest was active.
 Pass a quest name (or substring) to scope to one, or `--cross-run` to
 histogram max-stage reached across every run per agent — directly answers
 "where do agents plateau?".
@@ -72,7 +72,7 @@ NPC_NOT_FOUND, STATION_UNREACHABLE, COMBAT_BLOCKED_WARP, MCP_DISCONNECT,
 SKILL_GATED, …) and shows the top 3 follow-up actions per category — directly
 diagnoses recovery vs loop, and is where rule-adoption questions like "did
 agents warp after BFS_NO_PATH or just retry navigate?" get answered. Pass
-`--by-quest` to slice the same data by which Core 5 quest was active when
+`--by-quest` to slice the same data by which Core 3 quest was active when
 the error fired (e.g. "Rick's Roll active → 9× STATION_UNREACHABLE means
 the agent couldn't reach a cooking station").
 

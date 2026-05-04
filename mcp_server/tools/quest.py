@@ -22,10 +22,9 @@ def _detect_production_skills(quest: dict) -> list[str]:
     """Scan the quest's text fields for mentions of production skills.
 
     Returns a list of skill names the agent will likely need a station for
-    (e.g. Rick's Roll → ['cooking']; Arts and Crafts → ['crafting',
-    'cooking', 'fletching']). Skills mentioned outside crafting context
-    (e.g. "Foraging 25") are also caught — over-inclusion is cheap, the
-    payload caps at 3 stations per skill anyway.
+    (e.g. Rick's Roll → ['cooking']). Skills mentioned outside crafting
+    context (e.g. "Foraging 25") are also caught — over-inclusion is
+    cheap, the payload caps at 3 stations per skill anyway.
     """
     haystack = " ".join(
         str(quest.get(k) or "")
@@ -50,7 +49,7 @@ def _compute_live_gate_status(requirements: dict, live: dict) -> dict:
         "skills":           ["Foraging 25", ...],
         "quests_finished":  ["Royal Drama", ...],
         "quests_started":   [...],
-        "achievements":     ["waterguardian", ...],
+        "achievements":     [...],
         "practical":        [...]            # human-readable, not auto-checked
       }
     """

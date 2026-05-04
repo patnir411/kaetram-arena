@@ -33,9 +33,9 @@ async def _observe_nav(session) -> tuple[dict, dict]:
 async def test_nav_obstacle_cluster_reroutes_and_escapes(test_username):
     """Regression: a local reroute near Mudwich should not park behind trees.
 
-    This seeds the player in the exact obstacle cluster that repeatedly trapped
-    the Arts and Crafts reachability walk. The browser nav should use BFS and
-    move the player materially off the cluster instead of idling in place.
+    Seeds the player in a known obstacle cluster — the browser nav should
+    use BFS and move the player materially off the cluster instead of
+    idling in place.
     """
     cleanup_player(test_username)
     seed_player(

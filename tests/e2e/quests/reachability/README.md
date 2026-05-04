@@ -1,4 +1,4 @@
-# Reachability tests — Core 2-5
+# Reachability tests — Core 3
 
 These tests answer **"can the agent complete this discrete quest step from
 the cumulative playthrough state it realistically has at that point?"**
@@ -8,7 +8,11 @@ achievements, and gear/gold on top of a vanilla post-tutorial baseline
 (Mudwich spawn + tutorial starter kit + 3039 HP / 15M Health-XP buffer
 so nav-only tests don't fail on stray aggro).
 
-## Coverage — 31 tests across 4 files
+A separate static layer (`test_static_world_connectivity.py`) verifies
+the prompt-knowledge claims about quest coords against the offline
+`world.json` collision data — runs in <1s without a game server.
+
+## Coverage
 
 ### Herbalist's Desperation (7 tests)
 | ID | What | Marker |
@@ -32,74 +36,26 @@ so nav-only tests don't fail on stray aggro).
 | R6 | Stage-2 quest door teleport + deliver to Lena → 1987 gold | |
 | R7 | Negative: Lena rejects rawshrimp (only seaweedroll completes stage 2) | |
 
-### Arts and Crafts (8 tests)
-| ID | What | Marker |
-|---|---|---|
-| A1 | Mudwich → Babushka door via **warp Aynor + door 463** (subsumes the prior A1+A2 split) | `slow` |
-| A2 | Crafting unlocks on quest **start** (per `player.ts:2110 canUseCrafting() := isStarted()`) | |
-| A3 | Accept quest | |
-| A4 | Buy beryl from the Miner shop (item_index=5, 20g) — canonical post-economy-patch path. Live-suite skipped (warm-pool caches MQ at stage 0 in-memory; cold pytest still exercises). | |
-| A5 | Craft string from bluelily | |
-| A6 | Fletch 4 sticks → 1 bowlmedium | |
-| A7 | Farm mushroom1 from goblins (asserts only damage>0 — drop-rate math is upstream) | `slow` |
-| A8 | Cook stew + final turn-in | |
-
-> **A1 is not pure overland.** Mudwich (188,157) and the Babushka exterior
-> (483,276) are in disjoint walkable regions per `world.json` static
-> collision data. The only in-game route uses the **Aynor warp** (gated
-> behind the `ancientlands` quest, which the seed pre-finishes) and an
-> unmarked door at (406,292) → (433,270) inside the Babushka exterior.
-> A1 verifies that route works end-to-end.
-
-> **A4 was rewritten 2026-04-29** as `test_a4_buy_beryl_from_miner` —
-> verifies the canonical post-economy-patch acquisition path (Miner shop
-> at 20g). Seed is `(323, 179)` directly south of the Miner with 50g and
-> Miner's Quest 1 finished + Miner's Quest 2 started-but-never-completed
-> (MQ2 is off-limits per `game_knowledge.md`; the started state is the
-> minimum that keeps the shop UI from being shadowed by repeated MQ2
-> dialogue offers). Live-suite skipped — warm-pool MCP sessions cache
-> `minersquest.isFinished()` from the FIRST login, so by the time A4 runs
-> the shop UI has already been gated against the cached stage-0 state.
-> Cold-mode pytest (each test relogs) exercises this test correctly.
-> The historical A4a/A4b mining tests are gone.
-
-> **A7 is xfail.** Goblin loot math from Kaetram-Open data: mushrooms
-> droptable rolls at 6%, then 1-of-8 mushrooms = ~0.75% chance of
-> mushroom1 per kill. The audit's "~5 kills" estimate was wrong. Combat
-> path verified (kills land), so A7 stays as xfail to flag if Kaetram
-> rebalances drops.
-
-### Sea Activities (10 tests)
-| ID | What | Marker |
-|---|---|---|
-| S1 | Overland walk Mudwich → Water Guardian (~680 tiles) | `slow` |
-| S3 | Kill Water Guardian at lvl-35 combat | |
-| S4 | Warp undersea after `waterguardian` achievement | |
-| S4b | Kill Mermaid at (676, 851) and verify `mermaidguard` achievement is granted (door 556 gate) | |
-| S5 | Dialogue chain Sponge↔Pickle stages 0→4 | |
-| S6 | Arena door teleport | |
-| **S7** | Picklemob fight with **realistic mid-route gear** | `slow` |
-| S7' | Picklemob fight with end-game gear (control) | `slow` |
-| S8 | Final turn-in chain → 10000 gold | |
-| S9 | Negative: undersea warp blocked without `waterguardian` achievement | |
-
-> **S7 is the critical diagnostic.** If it passes, Sea Activities is
-> genuinely playable by a fresh route agent. If it fails while S7' passes,
-> Core 5 must formally acknowledge Stage 4 requires a seeded checkpoint.
+### Static world connectivity (6 tests, no game server)
+| What |
+|---|
+| Forester (216, 114) vanilla-reachable from Mudwich |
+| Herbalist (333, 281) vanilla-reachable |
+| Rick door 1025 entry (379, 388) vanilla-reachable |
+| Full Rick's Roll pin-chain coords vanilla-reachable |
+| Recommended Paprika coords vanilla-reachable; (298, 300) disjoint-pocket regression guard |
+| Paprika cluster has ≥100 walkable cells from Mudwich |
 
 ## Seed model
 
 Every step seeds the cumulative state an agent realistically has when
 arriving at that step under `prompts/game_knowledge.md`'s suggested play
-order (Foresting → Herbalist → Rick's Roll → Arts and Crafts → Sea
-Activities). Prior-quest rewards, accumulated skill XP, achievements, and
-gear/gold are all layered on top of the vanilla post-tutorial baseline.
+order (Foresting → Herbalist → Rick's Roll). Prior-quest rewards,
+accumulated skill XP, achievements, and gear/gold are all layered on top
+of the vanilla post-tutorial baseline.
 
 Seeds are centralized in `playthrough_seed_kwargs(step_id)` in
-`conftest.py`. S7 / S7' (Sea Activities picklemob with mid-route vs
-end-game gear) is the prototype this pattern generalizes from — both
-test functions seed playthrough state at different gear levels for the
-same step.
+`conftest.py`.
 
 Every test carries the `@reachability` marker.
 
@@ -111,34 +67,10 @@ DISPLAY=:99 pytest tests/e2e/quests/reachability/ -m "reachability and not slow"
 
 # Full reachability audit (includes 15-30 min walk + combat tests):
 DISPLAY=:99 pytest tests/e2e/quests/reachability/ -m reachability -v
+
+# Static-only (no game server, ~1s):
+.venv/bin/pytest tests/e2e/quests/reachability/test_static_world_connectivity.py -v
 ```
-
-## Suite score (2026-04-28 baseline, fast subset)
-
-> Pre-2026-04-29 patch baseline. R6 + S8 + R4 + A2 listed below have
-> since been patched; rerun the suite to re-baseline.
-
-```
-22 collected, 5 deselected (slow)
-20 PASSED, 2 FAILED, 0 XFAIL — runtime 9:38
-```
-
-**Patches landed 2026-04-29 (re-run pending):**
-
-- `test_r4_cook_shrimp_via_craft_item` + `test_a2_crafting_unlocks_on_quest_start`:
-  switched from `count_saved_inventory` to `wait_for_inventory_count` — the
-  warm-pool MCP session never triggers Kaetram's 60s autosave, so Mongo
-  reads raced the craft. Live observe is authoritative.
-- `test_r6_door_teleport_and_deliver_to_lena`: stage-2 maze is a 4-door
-  puzzle, not a single teleport. Test now walks the explicit chain via
-  `(424, 902)` → `(425, 901)` → `(453, 904)` → `(453, 907)` → `(426, 927)`
-  → `(431, 920)` → `(455, 930)` → Lena.
-- `test_s8_final_turnin_chain_5_to_7`: target was `(688, 844)` — door tile
-  itself, which the BFS treats as collision. Corrected to `(688, 843)`.
-- `test_s9_undersea_warp_blocked_without_waterguardian`: `skipif
-  KAETRAM_LIVE_SUITE` — warm-pool caches the `waterguardian` achievement
-  flag from the FIRST login, so seeding the next test without it doesn't
-  invalidate the in-memory state. Cold pytest still exercises it.
 
 ## Common pitfalls (read before debugging)
 
@@ -199,17 +131,17 @@ If a `traverse_door` call lands `move(doorX, doorY)` with `No path found,
 distance: 1`, that patch regressed.
 
 ### 4. Map regions can be disjoint
-Some "obvious" overland walks are physically impossible. Mudwich →
-Babushka exterior is the canonical example. Always verify connectivity
-via offline BFS over `world.json` before writing a long-walk test, and
-fall back to `warp` + door chains where needed (see A1 for the pattern).
+Some "obvious" overland walks are physically impossible. Always verify
+connectivity via offline BFS over `world.json` before writing a long-walk
+test. The static layer (`test_static_world_connectivity.py`) does this
+proactively for every Core 3 quest's agent-visible coords.
 
 ### 5. Probabilistic gather/combat needs tolerant loops
 Single-attempt `gather` calls return zero items frequently — the rock or
 fishing spot has a chance miss. `gather_until_count` in
 `tests/e2e/quests/conftest.py` keeps trying instead of asserting on the
 first miss. Per-attack damage is also small; goblins (90 HP) take 5–15
-swings to kill. A7 demonstrates the swing-loop pattern.
+swings to kill.
 
 ## Debugging a failed test
 

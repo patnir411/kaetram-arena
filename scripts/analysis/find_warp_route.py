@@ -8,8 +8,6 @@ shortest route in terms of (warp + door hops).
 Usage:
   scripts/analysis/find_warp_route.py 333 281        # Herbalist
   scripts/analysis/find_warp_route.py 1088 833       # Rick
-  scripts/analysis/find_warp_route.py 293 729        # Water Guardian
-  scripts/analysis/find_warp_route.py 52 310         # Sponge
 """
 from __future__ import annotations
 import json
@@ -147,23 +145,23 @@ def find_route(world, region, edges, target_x, target_y):
         target = best
     target_region = region[target]
 
-    warps = {
-        "mudwich":    (188, 157),
-        "aynor":      (411, 288),
-        "lakesworld": (319, 281),
-        "patsow":     (343, 127),
-        "crullfield": (266, 158),
-        "undersea":   (43, 313),
-    }
-    warp_quests = {
-        "aynor":      "ancientlands",
-        "lakesworld": "desertquest",
-        "crullfield": "desertquest",
-    }
-    warp_achievements = {
-        "patsow": "patsow",
-        "undersea": "waterguardian",
-    }
+    # Mirror world.json's warp definitions so the script auto-tracks any
+    # gate the game adds/changes.
+    warps: dict[str, tuple[int, int]] = {}
+    warp_quests: dict[str, str] = {}
+    warp_achievements: dict[str, str] = {}
+    for entry in world.get("areas", {}).get("warps", []) or []:
+        name = entry.get("name")
+        if not name:
+            continue
+        wx, wy = entry.get("x"), entry.get("y")
+        if wx is None or wy is None:
+            continue
+        warps[name] = (int(wx), int(wy))
+        if entry.get("quest"):
+            warp_quests[name] = entry["quest"]
+        if entry.get("achievement"):
+            warp_achievements[name] = entry["achievement"]
 
     best = None
     for wname, wpos in warps.items():

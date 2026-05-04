@@ -172,7 +172,7 @@ Full reference: `dashboard/DASHBOARD.md`.
 | `state_extractor.js` | Browser-side helpers exposed via `window.__extractGameState()` etc. Called by `mcp_server` only — never by the agent. |
 | `mcp_server/resource_gates.py` | Loads resource→skill+level requirements from Kaetram-Open data files at MCP startup. `gather()` uses it to surface a structured `gate` block when "no items collected" is actually a skill-level gate. Override the data dir via `KAETRAM_DATA_DIR`. |
 | `mcp_server/mob_stats.py` | Same pattern for mobs.json. `observe()` enriches each `nearby.mobs[]` entry with `level` + `aggressive` so the agent doesn't have to recall the MOB PROGRESSION table by name. |
-| `state/quest_resume.json` (per-sandbox) | Written on every `observe()` by `mcp_server/tools/observe.py`. Read by `orchestrate.py` at session start and prepended to the agent prompt as a "Resume from last session" block — closes the per-session amnesia gap so multi-stage Core 5 quests can complete across sessions. |
+| `state/quest_resume.json` (per-sandbox) | Written on every `observe()` by `mcp_server/tools/observe.py`. Read by `orchestrate.py` at session start and prepended to the agent prompt as a "Resume from last session" block — closes the per-session amnesia gap so multi-stage Core 3 quests can complete across sessions. |
 | `orchestrate.py:_recent_failures_from_prev_session()` | Scans the previous session's log on each new session start, buckets distinct tool errors (BFS-fail × N, NPC arrived: false × N, etc.), and injects a `recent_failures (don't repeat)` block into the resume prompt. Carries cross-session FAILURE memory — agents stop re-trying the same dead-ends across sessions. Distinct from quest_resume's STATE memory. |
 | `extract_turns.py` | JSONL log → OODA turn extraction. |
 | `convert_to_qwen.py` | Turns → Qwen3.5 9B SFT/GRPO format. |
@@ -182,7 +182,7 @@ Full reference: `dashboard/DASHBOARD.md`.
 | `dashboard/server.py` | Dashboard entry point (HTTP :8080 + WS :8081). Full reference: `dashboard/DASHBOARD.md`. |
 | `eval_harness.py` + `scripts/run-eval.sh` | Eval orchestrator: r9-sft vs base on dedicated ports 9061 / 9071. |
 | `play_qwen.py` / `play_qwen.sh` | Finetuned-model harness — calls Modal SGLang endpoint, spawns the same MCP server. |
-| `tests/e2e/quests/` | Reachability tier — per-step playthrough tests for Core 4 (Herbalist, Rick's Roll, Arts and Crafts, Sea Activities). Each step seeds the cumulative state an agent has at that point per game_knowledge.md. |
+| `tests/e2e/quests/` | Reachability tier — per-step playthrough tests for Core 3 (Herbalist's Desperation, Rick's Roll). Foresting is exercised under `tests/e2e/game/`. Each step seeds the cumulative state an agent has at that point per game_knowledge.md. |
 
 ## Ports
 
@@ -325,11 +325,11 @@ python3 scripts/log_analysis/analyze.py --run <run_id> status # full breakdown o
 
 # Behavioral audits (use these when assessing whether prompt/tool changes worked)
 python3 scripts/log_analysis/analyze.py errors                # CATEGORIZED errors (BFS_NO_PATH, STILL_MOVING, NPC_NOT_FOUND, STATION_UNREACHABLE, …) + top next-action transitions — also where you read off rule-adoption (e.g. BFS→warp vs BFS→navigate retry)
-python3 scripts/log_analysis/analyze.py errors --by-quest     # same, sliced by which Core 5 quest was active at the error
+python3 scripts/log_analysis/analyze.py errors --by-quest     # same, sliced by which Core 3 quest was active at the error
 python3 scripts/log_analysis/analyze.py timeline -n 30        # chronological event stream across the run, with session boundaries
 
 # Quest progression (where the agent actually got stuck)
-python3 scripts/log_analysis/analyze.py quest                 # per-Core-5 stage timeline + reasoning at each advance
+python3 scripts/log_analysis/analyze.py quest                 # per-Core-3 stage timeline + reasoning at each advance
 python3 scripts/log_analysis/analyze.py quest rick            # scope to one quest by substring match
 python3 scripts/log_analysis/analyze.py quest --cross-run     # max-stage histogram across every run per agent — answers "where do agents plateau?"
 
@@ -346,7 +346,7 @@ python3 scripts/log_analysis/analyze.py agent 1 -n 10              # full per-ag
 - Just stopped/restarted agents → `status` to confirm they're up + see run_id/elapsed/cost
 - "Did my prompt fix actually change behavior?" → `errors` (next-action transitions show whether rules landed — BFS_NO_PATH → warp vs retry-navigate)
 - "Why is agent N looping?" → `errors` shows what failed + what it did next
-- "How much real Core 5 progress this run?" → `metrics` — uses last-vs-first-observe DELTA so resume-state replays don't inflate the count
+- "How much real Core 3 progress this run?" → `metrics` — uses last-vs-first-observe DELTA so resume-state replays don't inflate the count
 - "What did agent N do today?" → `timeline` for an emoji-tagged event stream across sessions
 - "How does this run compare to last week's?" → `runs -n 20` or `--all-runs`
 

@@ -53,7 +53,7 @@ The 30 latest Claude sessions show real behavioral variation, not collapse — b
 **Curious (S21-S30) — most consistent:**
 - S30 talks to 12 distinct NPCs (Programmer, Royal Guard, Enchantment Vendor, Banker, Clerk, Kosmetics Vendor, Miner, Billey, Herby, Secret Agent, Villager, Bike Lyson) across 3 zones in one session.
 - S23 cycles Scavenger + Sorcery + Miner's + Herbalist quests across Mudwich + Crullfield + Lakesworld + Crab Cave + an underground section.
-- S27 visits 9 NPCs (Programmer, Royal Guard, 4 vendors, Mad Scientisto, Banker, Babushka, Herby) before settling into combat at T079.
+- S27 visits 9 NPCs (Programmer, Royal Guard, 4 vendors, Mad Scientisto, Banker, Herby) before settling into combat at T079.
 - Even S26, a low-level death-prone session, cycles 4 distinct NPC/quest interactions.
 
 **Stopping condition met:** the first 9 sessions did NOT collapse into "all three look identical" — clear differences exist. But the differences are noisy and concentrated in specific personality × situation combinations.

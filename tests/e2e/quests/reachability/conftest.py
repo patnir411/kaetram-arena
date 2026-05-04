@@ -3,15 +3,14 @@
 These tests ask whether an agent — seeded with the cumulative playthrough
 state it realistically has when arriving at a given step under
 `prompts/game_knowledge.md`'s suggested play order — can complete each
-discrete step of a Core-4 quest using only MCP tools.
+discrete step of a Core 3 quest using only MCP tools.
 
 Per-step seeds are produced by `playthrough_seed_kwargs(step_id)`. The
 seed layers on top of a vanilla post-tutorial baseline (Mudwich spawn,
 tutorial starter kit, 3039 HP / 15M Health-XP buffer that keeps nav-only
 tests from failing on stray aggro) the prior-quest rewards, accumulated
 skill XP, achievements, and gear an agent would have walking the canonical
-path (Foresting -> Herbalist -> Rick's Roll -> Arts and Crafts -> Sea
-Activities).
+path (Foresting -> Herbalist's Desperation -> Rick's Roll).
 
 Reachability tests catch benchmark fairness bugs — hidden region gates,
 stale NPC coords, missing resource placements, unsurvivable boss fights —
@@ -66,21 +65,15 @@ def playthrough_seed_kwargs(step_id: str, **overrides: Any) -> dict[str, Any]:
     Returns a `seed_player(**kwargs)`-compatible dict encoding the
     cumulative state an agent realistically has when arriving at `step_id`
     under `prompts/game_knowledge.md`'s suggested play order
-    (Foresting -> Herbalist -> Rick's Roll -> Arts and Crafts -> Sea
-    Activities). On top of the vanilla post-tutorial baseline (Mudwich
-    spawn, starter kit, 3039 HP / 15M Health-XP buffer so nav-only tests
-    don't fail on stray aggro), this layers prior-quest rewards,
-    accumulated skill XP, achievements, and gear/gold the agent would
-    have picked up walking the canonical path.
+    (Foresting -> Herbalist's Desperation -> Rick's Roll). On top of the
+    vanilla post-tutorial baseline (Mudwich spawn, starter kit, 3039 HP
+    / 15M Health-XP buffer so nav-only tests don't fail on stray aggro),
+    this layers prior-quest rewards, accumulated skill XP, achievements,
+    and gear/gold the agent would have picked up walking the canonical
+    path.
 
     Item keys referenced are verified against
     `Kaetram-Open/packages/server/data/items.json` where possible.
-    Discrepancies surfaced during construction:
-      - `ironchest` is NOT a real item key; the iron-tier chestpiece is
-        `ironchestplate`. Used here for S3/S7-realistic.
-      - `platearmor` (referenced by existing S7) does not exist in
-        items.json (unverified — items.json check failed); preserved as
-        the pre-existing test surface.
     """
     base = _baseline_seed_kwargs()
     sid = step_id.upper()
@@ -91,9 +84,6 @@ def playthrough_seed_kwargs(step_id: str, **overrides: Any) -> dict[str, Any]:
     foresting_done = {"key": "foresting", "stage": 3, "subStage": 0, "completedSubStages": []}
     herbalist_done = {"key": "herbalistdesperation", "stage": 3, "subStage": 0, "completedSubStages": []}
     ricksroll_done = {"key": "ricksroll", "stage": 4, "subStage": 0, "completedSubStages": []}
-    artsandcrafts_done = {"key": "artsandcrafts", "stage": 4, "subStage": 0, "completedSubStages": []}
-    ancientlands_done = {"key": "ancientlands", "stage": 2, "subStage": 0, "completedSubStages": []}
-    waterguardian_ach = {"key": "waterguardian", "stage": 1, "stageCount": 1}
 
     # Per-step cumulative state. Each block stamps over `base`.
     if sid == "H1":
@@ -228,252 +218,6 @@ def playthrough_seed_kwargs(step_id: str, **overrides: Any) -> dict[str, Any]:
             foresting_done, herbalist_done,
             {"key": "ricksroll", "stage": 2, "subStage": 0, "completedSubStages": []},
         ]
-    elif sid == "A1":
-        # Rick's done (1987g) + Ancient Lands done (Aynor warp). Already
-        # the existing A1 seed; add Foresting/Herbalist for completeness.
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done, ancientlands_done,
-        ]
-    elif sid == "A2":
-        # Gap-fill: at-Babushka, quest just accepted (stage 1).
-        base["position"] = (702, 609)
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done, ancientlands_done,
-            {"key": "artsandcrafts", "stage": 1, "subStage": 0, "completedSubStages": []},
-        ]
-    elif sid == "A3":
-        base["position"] = (702, 609)
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done, ancientlands_done,
-        ]
-    elif sid == "A4":
-        # A4 verifies the canonical beryl-acquisition path: buy from the
-        # Miner shop (item_index=5, 20g). Mining via bronzepickaxe also
-        # works at runtime, but the prompt-canonical path is buying.
-        #
-        # Important: the Miner NPC cannot open the shop UI while he is
-        # offering Miner's Quest dialogue. The shop opens once MQ1 is
-        # finished AND MQ2 is at least started (so the NPC isn't
-        # repeatedly offering MQ2 as a fresh quest). MQ2 is off-limits
-        # per game_knowledge.md (circular nisocrock dependency), so we
-        # seed it at stage 1 — accepted but never completed. This is
-        # the minimum state that unblocks the shop without claiming MQ2
-        # as finished.
-        base["position"] = (323, 179)  # directly south of Miner (323, 178)
-        base["inventory"] = [{"index": 0, "key": "gold", "count": 50}]
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done, ancientlands_done,
-            {"key": "artsandcrafts", "stage": 1, "subStage": 0, "completedSubStages": []},
-            {"key": "minersquest",  "stage": 2, "subStage": 0, "completedSubStages": []},
-            {"key": "minersquest2", "stage": 1, "subStage": 0, "completedSubStages": []},
-        ]
-        base["skills"] = [
-            {"type": 3, "experience": REACHABILITY_HEALTH_XP},
-        ]
-    elif sid == "A5":
-        base["position"] = (702, 609)
-        base["inventory"] = [{"key": "bluelily", "count": 1}]
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done, ancientlands_done,
-            {"key": "artsandcrafts", "stage": 1, "subStage": 0, "completedSubStages": []},
-        ]
-        base["skills"] = [
-            {"type": 3, "experience": REACHABILITY_HEALTH_XP},
-            {"type": 11, "experience": 1_000},
-        ]
-    elif sid == "A6":
-        base["position"] = (702, 609)
-        base["inventory"] = [
-            {"index": 0, "key": "knife", "count": 1},
-            {"key": "stick", "count": 4},
-        ]
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done, ancientlands_done,
-            {"key": "artsandcrafts", "stage": 1, "subStage": 0, "completedSubStages": []},
-        ]
-        base["skills"] = [
-            {"type": 3, "experience": REACHABILITY_HEALTH_XP},
-            {"type": 13, "experience": 1_000},
-        ]
-    elif sid == "A7":
-        # Combat skill ~lvl 20 from any prior grind.
-        base["position"] = (190, 205)
-        base["inventory"] = [{"index": 0, "key": "coppersword", "count": 1}]
-        base["equipment"] = [
-            {"type": 4, "key": "coppersword", "count": 1, "ability": -1, "abilityLevel": 0},
-        ]
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done, ancientlands_done,
-            {"key": "artsandcrafts", "stage": 3, "subStage": 0, "completedSubStages": []},
-        ]
-        base["skills"] = [
-            {"type": 3, "experience": REACHABILITY_HEALTH_XP},
-            {"type": 6, "experience": 10_000},
-        ]
-    elif sid == "A8":
-        base["position"] = (702, 609)
-        base["inventory"] = [
-            {"key": "bowlmedium", "count": 1},
-            {"key": "mushroom1", "count": 1},
-            {"key": "tomato", "count": 1},
-        ]
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done, ancientlands_done,
-            {"key": "artsandcrafts", "stage": 3, "subStage": 0, "completedSubStages": []},
-        ]
-        base["skills"] = [
-            {"type": 3, "experience": REACHABILITY_HEALTH_XP},
-            {"type": 9, "experience": 100_000},
-        ]
-    elif sid == "S1":
-        # A&C done (Crafting unlocked). Combat XP from the path.
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done,
-            artsandcrafts_done, ancientlands_done,
-        ]
-        base["skills"] = [
-            {"type": 3, "experience": REACHABILITY_HEALTH_XP},
-            {"type": 6, "experience": 100_000},
-        ]
-        base["achievements"] = [waterguardian_ach]
-    elif sid == "S3":
-        # Combat ~Lv30, mid-tier gear (ironsword + ironchestplate +
-        # ironboots — note `ironchest` is NOT a valid items.json key).
-        wgx, wgy = 293, 729
-        base["position"] = (wgx - 1, wgy)
-        base["hit_points"] = 1089
-        base["inventory"] = [{"index": 0, "key": "ironsword", "count": 1}]
-        base["equipment"] = [
-            {"type": 4, "key": "ironsword", "count": 1, "ability": -1, "abilityLevel": 0},
-            {"type": 3, "key": "ironchestplate", "count": 1, "ability": -1, "abilityLevel": 0},
-            {"type": 11, "key": "ironboots", "count": 1, "ability": -1, "abilityLevel": 0},
-        ]
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done,
-            artsandcrafts_done, ancientlands_done,
-        ]
-        base["skills"] = [
-            {"type": 3, "experience": REACHABILITY_HEALTH_XP},
-            {"type": 1, "experience": 200_000},
-            {"type": 6, "experience": 200_000},
-            {"type": 7, "experience": 200_000},
-        ]
-    elif sid == "S4":
-        base["position"] = (188, 157)
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done,
-            artsandcrafts_done, ancientlands_done,
-        ]
-        base["achievements"] = [waterguardian_ach]
-    elif sid == "S4B":
-        # Mermaid nav + kill + achievement-grant test. Mermaid (mob
-        # `mermaid`) at (676, 851) — L40, 150 HP per Kaetram-Open
-        # mobs.json. Achievement `mermaidguard` is hidden, single-stage,
-        # granted on kill; it gates door 556 in the Sponge↔Pickle
-        # corridor (S5/S8 currently *seed* it; S4B earns it canonically).
-        # Seeded at the undersea landing area near Sponge (52, 311) —
-        # the test walks the full canonical route an agent would take:
-        # navigate to door 539 approach → traverse_door 539 → navigate
-        # SE to Mermaid → kill loop → assert achievement.  Gives us
-        # reachability coverage on the post-door-539 leg (~15 tiles
-        # south to (676, 851)), which neither S4 nor S5 exercises.
-        # End-game-equivalent gear so the kill resolves quickly — combat
-        # tuning is not the question here (S7 covers that for picklemob).
-        # `waterguardian` is required to be in the region at all, so
-        # seed that achievement; `mermaidguard` is the one we're testing
-        # for and is deliberately omitted.
-        base["position"] = (52, 311)
-        base["hit_points"] = 3039
-        base["mana"] = 200
-        base["inventory"] = [{"key": "apple", "count": 5}]
-        base["equipment"] = [
-            {"type": 0,  "key": "conquerorhelmet",     "count": 1, "ability": -1, "abilityLevel": 0},
-            {"type": 3,  "key": "conquerorchestplate", "count": 1, "ability": -1, "abilityLevel": 0},
-            {"type": 4,  "key": "moongreataxe",        "count": 1, "ability": -1, "abilityLevel": 0},
-            {"type": 11, "key": "hellkeeperboots",     "count": 1, "ability": -1, "abilityLevel": 0},
-        ]
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done,
-            artsandcrafts_done, ancientlands_done,
-        ]
-        base["achievements"] = [waterguardian_ach]
-        base["skills"] = [
-            {"type": 3, "experience": REACHABILITY_HEALTH_XP},
-            {"type": 1, "experience": 15_000_000},
-            {"type": 6, "experience": 15_000_000},
-            {"type": 7, "experience": 15_000_000},
-        ]
-    elif sid == "S5":
-        base["position"] = (52, 311)
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done,
-            artsandcrafts_done, ancientlands_done,
-        ]
-        base["achievements"] = [
-            waterguardian_ach,
-            {"key": "mermaidguard", "stage": 1, "stageCount": 1},
-        ]
-    elif sid == "S6":
-        base["position"] = (693, 837)
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done,
-            artsandcrafts_done, ancientlands_done,
-            {"key": "seaactivities", "stage": 4, "subStage": 0, "completedSubStages": []},
-        ]
-        base["achievements"] = [waterguardian_ach]
-    elif sid == "S7":
-        # Mid-route gear: lvl 50 combat skills, ironspear + platearmor +
-        # 10 burgers — the realistic loadout an agent following
-        # game_knowledge.md could assemble en route to picklemob. Note
-        # `platearmor` is the pre-existing test-surface item key
-        # (unverified against items.json).
-        wgx, wgy = 858, 815  # PICKLEMOB_POS
-        base["position"] = (wgx - 2, wgy)
-        base["hit_points"] = 1539  # 39 + 50*30
-        base["mana"] = 200
-        base["inventory"] = [
-            {"index": 0, "key": "ironspear", "count": 1},
-            {"index": 1, "key": "burger", "count": 10},
-        ]
-        base["equipment"] = [
-            {"type": 4, "key": "ironspear", "count": 1, "ability": -1, "abilityLevel": 0},
-            {"type": 3, "key": "platearmor", "count": 1, "ability": -1, "abilityLevel": 0},
-        ]
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done,
-            artsandcrafts_done, ancientlands_done,
-            {"key": "seaactivities", "stage": 4, "subStage": 0, "completedSubStages": []},
-        ]
-        base["achievements"] = [waterguardian_ach]
-        base["skills"] = [
-            {"type": 3, "experience": REACHABILITY_HEALTH_XP},
-            {"type": 1, "experience": 500_000},
-            {"type": 6, "experience": 500_000},
-            {"type": 7, "experience": 500_000},
-        ]
-    elif sid == "S8":
-        base["position"] = (691, 839)
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done,
-            artsandcrafts_done, ancientlands_done,
-            {"key": "seaactivities", "stage": 5, "subStage": 0, "completedSubStages": []},
-        ]
-        base["achievements"] = [
-            waterguardian_ach,
-            {"key": "mermaidguard", "stage": 1, "stageCount": 1},
-        ]
-        base["skills"] = [
-            {"type": 3, "experience": REACHABILITY_HEALTH_XP},
-            {"type": 6, "experience": 100_000},
-        ]
-    elif sid == "S9":
-        # Negative gate test (gap-fill): no waterguardian achievement.
-        base["position"] = (188, 157)
-        base["quests"] = [
-            foresting_done, herbalist_done, ricksroll_done,
-            artsandcrafts_done, ancientlands_done,
-        ]
-        # NOTE: deliberately NO achievements list -> defaults / not seeded.
     else:
         raise ValueError(f"playthrough_seed_kwargs: unknown step_id {step_id!r}")
 

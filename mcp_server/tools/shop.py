@@ -16,7 +16,7 @@ async def buy_item(ctx: Context, npc_name: str, item_index: int, count: int = 1)
     """Buy an item from an NPC's shop.
 
     Args:
-        npc_name: Store NPC name (e.g. 'Forester', 'Miner', 'Babushka', 'Clerk')
+        npc_name: Store NPC name (e.g. 'Forester', 'Miner', 'Clerk')
         item_index: Index of item in the shop (0-based)
         count: Number to buy (default 1)
     """

@@ -102,8 +102,8 @@ def assert_achievement_unlocked(username: str, achievement_key: str) -> None:
     Achievements live in `player_achievements.achievements[]` as
     `{key, stage, stageCount}`. A stage of 0 means not started; >= 1
     means the achievement task chain has fired at least once. For
-    single-stage achievements (`stageCount: 1`, e.g. `mermaidguard`,
-    `waterguardian`) stage == 1 means earned/finished.
+    single-stage achievements (`stageCount: 1`) stage == 1 means
+    earned/finished.
     """
     snap = snapshot_player(username)
     achs = (snap.get("player_achievements") or {}).get("achievements") or []

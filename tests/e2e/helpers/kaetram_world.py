@@ -27,10 +27,8 @@ NPCS: dict[str, tuple[int, int]] = {
     "royalguard2":        (282, 887),   # Royal Drama
     "king":               (284, 884),   # Royal Pet (delivers 3 books)
 
-    # Under the Sea / beach / fishing zone
+    # Beach / fishing zone
     "beachnpc":           (121, 231),   # Bubba — achievement (crabs)
-    "sponge":             (52, 310),    # Sea Activities (start)
-    "picklenpc":          (691, 838),   # Sea Activities (Sea Cucumber)
     "rick":               (1088, 833),  # Rick's Roll
     "rickgf":             (455, 924),   # Lena — delivery
 
@@ -46,13 +44,11 @@ NPCS: dict[str, tuple[int, int]] = {
     # Skill quest givers
     "sorcerer":           (706, 101),   # Sorcery and Stuff
     "scientist":          (763, 666),   # Scientist's Potion (Alchemy unlock)
-    "iamverycoldnpc":     (702, 608),   # Babushka — Arts and Crafts (Crafting unlock)
     "herbalist":          (333, 281),   # Herbalist's Desperation
     "oldlady":            (776, 106),   # Scavenger turn-in
     "oldlady2":           (919, 590),   # Clam Chowder turn-in
     "bluebikinigirlnpc":  (676, 359),   # Pretzel — Clam Chowder
     "doctor":            (698, 550),   # Doctor — Clam Chowder
-    "picklemob":         (858, 815),   # Sea Activities mob (use attack(), not interact_npc)
 
     # Endgame
     "ancientmanumentnpc": (415, 294),   # Ancient Lands
@@ -76,10 +72,7 @@ NPC_DISPLAY_NAMES: dict[str, str] = {
     "king": "King",
     "sorcerer": "Sorcerer",
     "scientist": "Scientist",
-    "iamverycoldnpc": "Babushka",
     "herbalist": "Herby Mc. Herb",
-    "sponge": "Sponge",
-    "picklenpc": "Sea Cucumber",
     "bluebikinigirlnpc": "Pretzel",
     "ancientmanumentnpc": "Ancient Monument",
     "beachnpc": "Bubba",
@@ -90,7 +83,6 @@ NPC_DISPLAY_NAMES: dict[str, str] = {
     "shepherdboy": "Shepherd Boy",
     "ratnpc": "Rat",
     "doctor": "Doctor",
-    "picklemob": "Sea Cucumber",
 }
 
 
@@ -146,23 +138,11 @@ QUESTS: dict[str, dict] = {
         "reward": "7500 gold",
         "stages": 3,
     },
-    "seaactivities": {
-        "npc": "sponge",
-        "display": "Sponge",
-        "reward": "10000 gold",
-        "stages": 7,
-    },
     "scientistspotion": {
         "npc": "scientist",
         "display": "Scientist",
         "reward": "alchemy unlock",
         "stages": 1,
-    },
-    "artsandcrafts": {
-        "npc": "iamverycoldnpc",
-        "display": "Babushka",
-        "reward": "crafting unlock (on start)",
-        "stages": 4,
     },
     "minersquest": {
         "npc": "miner",

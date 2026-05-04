@@ -3,23 +3,31 @@ _Keep under 30 lines. Update at end of every session. Most recent first._
 
 ---
 
-## 2026-05-01 — Core 5 prompt knowledge parity (e2e tests as source-of-truth) + S4B Mermaid test + unit-test refresh
+## 2026-05-04 — Core 3 benchmark refactor
 
-**E2E reachability now treated as single source of truth for Core 5 knowledge.** Five parallel audits compared `tests/e2e/quests/reachability/test_*_steps.py` against `prompts/game_knowledge.md` + `prompts/quest_walkthroughs.json`; 18 misalignments fixed across tiers A (blockers) and B/C (drift / underspec). Top items: `mermaidguard` gate added to ACHIEVEMENTS table + catalog row 5; "Pickle" → **`Sea Cucumber`** call-name footgun called out (explains 0/282 historical Pickle interactions); A&C catalog "Gate: None" → **Aynor warp + Ancient Lands**; Rick's Roll cooking-station now points at runtime `query_quest.station_locations.cooking` (was AL-gated dead-end at 706,605); Rick + Lena turn-ins documented as **TWO `interact_npc` calls** (matches R5 test, explains "Thank you, I'm so touched" stuck-state); MOB PROGRESSION table extended with Mermaid L40/150HP and picklemob L88/1250HP; Mermaid level corrected (was L55, actual L40 per mobs.json); tomato/paprika coords drifted 1 tile, fixed; A&C A6 step rewrote bowl chain (Lumberjacking+3 logs+6 sticks split for bowlsmall+bowlmedium, was wrong); Rick stage-2 puzzle decoys expanded from 1 of 7 to all 7 in `tips`; chained-craft + 2-call turn-in caveats added to GAME MECHANICS; Coder's Glitch/Glitch II/Coder's Fallacy walkthrough JSON statuses flipped to `off-limits` with `blocked_reason` populated.
+**Benchmark scope contracts to Core 3 (Foresting + Herbalist's Desperation + Rick's Roll).** Offline BFS over `Kaetram-Open/.../world.json` confirms two prior benchmark quests are structurally unreachable from a vanilla Mudwich state — the chain gates form circular dependencies / cross-region disjoints that can't be resolved by any in-game tool sequence. Empirical confirmation lined up: in the most recent 6h Claude run, all three agents finished Foresting + Herbalist's + Rick's Roll; the unreachable pair was never accepted by any agent.
 
-**S4B reachability test added.** `test_s4b_kill_mermaid_grants_mermaidguard` walks undersea → door 539 → ~15-tile SE leg → Mermaid kill loop → asserts `mermaidguard` via new `assert_achievement_unlocked` helper. Closes the only Sea Activities reachability gap (S5/S7/S8 all *seeded* the achievement).
+**Refactor surface.** ~30 files swept clean across code (`scripts/log_analysis/{parse,analyze}.py` — `CORE_3_QUEST_NAMES`, `core3_total_stage_count`, `/10` denominator), prompts (`system.md`, `game_knowledge.md`, `quest_walkthroughs.json`, all three personalities), tests (deleted A&C/Sea reachability files + the A&C-specific craft_item test; surgical edits to seed/world helpers, dialog flows, unit knowledge tests, navigation regressions), docs (`CLAUDE.md`, `README.md`, log-analysis README + slash command, archive notes in `docs/`), and the research narrative across `INDEX.md`, `contribution.md`, `training-runs.md`, `data-quality.md`, related-work files. Static layer (`test_static_world_connectivity.py`) verifies Core 3 quest coords against `world.json` BFS in <1s.
 
-**Unit tests refreshed.** Pre-existing `parent.parent` path bug fixed across 9 unit-test files (`parents[2]`, fallout from the unit/ + e2e/ split). `test_quest_knowledge.py` rewritten against current truth (15-completable count, Coder chain in off-limits, Mermaid Guard + Sea Cucumber snippet checks, Herbalist NPC name parity, Mermaid L40 fact, Aynor-gate hoist check). `convert_to_qwen.py` PERSONALITY_SUFFIXES + AGENT_PERSONALITY_MAP migrated from legacy aggressive/methodical/curious to current grinder/completionist/explorer_tinkerer. `test_prompt_parity.py`, `test_dataset_filters.py`, `test_tool_vocab_drift.py` updated; vocab-drift now scans `mcp_server/tools/` package (was scanning the 19-line stub). Skipif gates added to `test_think_roundtrip` (modal SDK) and `test_truncation` (HF cache). Result: **104 passed, 2 legit skips** across the full unit suite.
+**Verification:** `analyze.py metrics --stale` against the 6h run reports `core3_stages: 10/10` per agent (Foresting 3 + Herbalist's 3 + Rick's Roll 4); 12/12 static + unit tests green; pytest collection clean (291 tests).
+
+**Next:** open a single PR for the refactor; restart 3 agents on the new prompt for a fresh data-collection run; tier-D prompt-architecture pass once the new run baselines.
+
+---
+
+## 2026-05-01 — Quest knowledge parity (e2e tests as source-of-truth) + unit-test refresh
+
+**E2E reachability now treated as single source of truth for prompt knowledge.** Parallel audits compared `tests/e2e/quests/reachability/test_*_steps.py` against `prompts/game_knowledge.md` + `prompts/quest_walkthroughs.json`; misalignments fixed across blocker and drift tiers. Top items: Rick's Roll cooking-station now points at runtime `query_quest.station_locations.cooking` (was a hard-coded coord that wasn't always reachable); Rick + Lena turn-ins documented as **TWO `interact_npc` calls** (matches R5 test, explains "Thank you, I'm so touched" stuck-state); tomato/paprika coords drifted 1 tile, fixed; Rick stage-2 puzzle decoys expanded from 1 of 7 to all 7 in `tips`; chained-craft + 2-call turn-in caveats added to GAME MECHANICS; Coder's Glitch / Glitch II / Coder's Fallacy walkthrough JSON statuses flipped to `off-limits` with `blocked_reason` populated.
+
+**Unit tests refreshed.** Pre-existing `parent.parent` path bug fixed across 9 unit-test files (`parents[2]`, fallout from the unit/ + e2e/ split). `test_quest_knowledge.py` rewritten against current truth (completable-quest count, Coder chain in off-limits, Herbalist NPC name parity). `convert_to_qwen.py` PERSONALITY_SUFFIXES + AGENT_PERSONALITY_MAP migrated from legacy aggressive/methodical/curious to current grinder/completionist/explorer_tinkerer. `test_prompt_parity.py`, `test_dataset_filters.py`, `test_tool_vocab_drift.py` updated; vocab-drift now scans `mcp_server/tools/` package (was scanning the 19-line stub). Skipif gates added to `test_think_roundtrip` (modal SDK) and `test_truncation` (HF cache). Result: **104 passed, 2 legit skips** across the full unit suite.
 
 **Deferred:** SOTA prompting compliance (6.3K-token bloat, 2× MUST overuse, missing `<verification>` block, rule duplication). Knowledge-parity must be 100% before restructuring the prompt frame.
-
-**Next:** restart 3 agents on opencode/deepseek-v4-pro for an A/B run; watch any `interact_npc("Sea Cucumber")`, any `interact_npc("Babushka")`, Rick 2-call turn-in conversion, Mermaid kill at (676, 851) pre-door-556. Then plan tier-D prompt-architecture pass.
 
 ---
 
 ## 2026-04-30 — Run-Scoped Analysis + OpenCode Parser Parity + Tier-A Removal + quest_resume Reset Fix
 
-**Analysis now spans entire runs, not just latest sessions.** `scripts/log_analysis/analyze.py` consumed one `SessionView` per agent (latest log only); 8 of 9 subcommands silently reported on a single session. Added `RunSessionsView` + `parse_run_sessions()` to `parse.py`; rewrote `_load_views` to return run-scoped views; converted every cmd_* (except `recent`/`thinking` — temporal-locality semantics) to aggregate across sessions in the run. `--run <id>` now parses ALL sessions in the run dir (was: `logs[-1]`); new `--session N` flag drills into one session. `metrics` core5 now computed as `last_observe.finished_core5 − first_observe.finished_core5` so resume-state replays don't inflate. EST timestamps switched to 12-hour AM/PM.
+**Analysis now spans entire runs, not just latest sessions.** `scripts/log_analysis/analyze.py` consumed one `SessionView` per agent (latest log only); 8 of 9 subcommands silently reported on a single session. Added `RunSessionsView` + `parse_run_sessions()` to `parse.py`; rewrote `_load_views` to return run-scoped views; converted every cmd_* (except `recent`/`thinking` — temporal-locality semantics) to aggregate across sessions in the run. `--run <id>` now parses ALL sessions in the run dir (was: `logs[-1]`); new `--session N` flag drills into one session. `metrics` quest-stage progress now computed as `last_observe − first_observe` so resume-state replays don't inflate. EST timestamps switched to 12-hour AM/PM.
 
 **OpenCode/DeepSeek parser parity.** `parse_session_opencode` was at ~70% parity: cost/tokens dropped on the floor, `<think>` tags from the SSE proxy collapsed into thinking with no n_text accounting, no synthetic result_summary, no init_info. Now: aggregates `step_finish.cost` and `step_finish.tokens` across the log (current 6h run reports a real $93.27 / $108.54 / $99.83 per agent vs the prior `(asst)` fallback); splits `<think>...</think>` from prose; counts text and reasoning records correctly; synthesizes a `result_summary` so downstream code doesn't special-case None.
 
@@ -31,7 +39,7 @@ _Keep under 30 lines. Update at end of every session. Most recent first._
 
 Cumulative training-data scale per `export_report`: 105 runs, 656 sessions, 68k turns, $1,887 spent across all agents to date. Per-agent: agent_0 = 37 runs / $603, agent_1 = 34 runs / $622, agent_2 = 34 runs / $662.
 
-**Next:** lift Rick's Roll stage-2+ knowledge from `tests/e2e/quests/reachability/test_ricksroll_steps.py` into `prompts/game_knowledge.md` (puzzle-room door chain, Lena coords, decoy ladders) — every agent in both recent DeepSeek runs ground out at Rick's Roll 1/4 because the prompt only documents stage 1.
+**Next:** lift Rick's Roll stage-2+ knowledge from `tests/e2e/quests/reachability/test_ricksroll_steps.py` into `prompts/game_knowledge.md` (puzzle-room door chain, Lena coords, decoy ladders) — every agent in both recent DeepSeek runs ground out at Rick's Roll 1/4 because the prompt only documented stage 1.
 
 ---
 
@@ -43,7 +51,7 @@ Cumulative training-data scale per `export_report`: 105 runs, 656 sessions, 68k 
 
 **Resume harness/model auto-detect.** `resume-agent.sh` reads prior harness from log mtime (>120s old to avoid in-flight poisoning) and prior opencode model from `/tmp/kaetram_agent_N/opencode.json` so a bare `--hours N` resume preserves harness identity. Without this, orchestrate.py:1804 silently padded missing slots with Claude.
 
-**Reachability sweep landed.** R4/A2 (Mongo autosave race fixed by polling live observe instead of `count_saved_inventory`); R6 stage-2 maze (explicit 4-door chain via `(424,902)` waypoint → `(425,901)` → `(453,904)` → `(453,907)` → `(426,927)` → `(431,920)` → `(455,930)`); A4 rewritten as `test_a4_buy_beryl_from_miner` (canonical buy path; mining off-route per economy patch); S8 door-step coord fix; S9 + A4 `skipif KAETRAM_LIVE_SUITE` (warm-pool in-memory quest state caches MQ at stage 0). `prompts/quest_walkthroughs.json` patched: Rick's Roll 4-door maze with decoy callouts; Sea Activities adds Mermaid `mermaidguard` prereq, fixes door-556 landing lie, adds explicit arena entry door `(693,836) → (858,808)`; A&C adds chained-fletch caveat (force menu closed between crafts).
+**Reachability sweep landed.** R4 (Mongo autosave race fixed by polling live observe instead of `count_saved_inventory`); R6 stage-2 maze (explicit 4-door chain via `(424,902)` waypoint → `(425,901)` → `(453,904)` → `(453,907)` → `(426,927)` → `(431,920)` → `(455,930)`). `prompts/quest_walkthroughs.json` patched: Rick's Roll 4-door maze with decoy callouts.
 
 **Dashboard Tests tab upgraded.** `KAETRAM_DEBUG=1` default for dashboard runs (per-test JSONL trace). Run history rebuilt with slim per-test case chips, JSONL reach-log tail viewer at `/api/test/reach_log`, last-run summary card. `/api/live` + `/api/agents` filter agents whose game-server port isn't listening (kills stale-sandbox UI ghosts after partial resumes). `_kill_helpers.sh` adds `/proc/$pid/cwd` sandbox detection so opencode subprocesses don't escape `kill_scoped` after orchestrate is killed first.
 
@@ -53,7 +61,7 @@ Cumulative training-data scale per `export_report`: 105 runs, 656 sessions, 68k 
 
 ## 2026-04-28 — Economy Patch + Mining-Free Playthrough
 
-**Game-source + prompt patch landed on Niral's lane** to unblock Q2 (Herbalist) and remove Mining from the agent's mental model. Foraging gates dropped twice today (25 → 10 → 5) for `bluelilybush`, `tomatobush`, `paprikabush` — single ~25-blueberry grind unlocks all three Herbalist nodes. Miner shop reframed as a general outfitter: ores deeply cut (coal 3g, copper/tin 5g, gold 20g), beryl added at 20g (so Arts and Crafts no longer needs to mine), copper/tin starter swords (10g), full bronze kit (~560g), full gold kit (~3700g). Ghost-stock high-tier ores and the dead `alloweditems` field removed. Halved consumable prices in startshop + forester. Added price fields to coppersword/tinsword/bronzesword/goldsword so they sell back. Miner's Quest I/II marked off-limits in walkthroughs; pickaxe stays out of agent flow entirely. **Comprehensive .md sweep** also landed across both repos: `game_knowledge.md` (post-merge-conflict revert re-applied), `PLAYTHROUGH.md`, `GAME_SYSTEMS.md`, `QUEST_CITATIONS.md`, reachability `README.md` A4 marked deprecated.
+**Game-source + prompt patch landed on Niral's lane** to unblock Herbalist's Desperation and remove Mining from the agent's mental model. Foraging gates dropped twice today (25 → 10 → 5) for `bluelilybush`, `tomatobush`, `paprikabush` — single ~25-blueberry grind unlocks all three Herbalist nodes. Miner shop reframed as a general outfitter: ores deeply cut (coal 3g, copper/tin 5g, gold 20g), copper/tin starter swords (10g), full bronze kit (~560g), full gold kit (~3700g). Ghost-stock high-tier ores and the dead `alloweditems` field removed. Halved consumable prices in startshop + forester. Added price fields to coppersword/tinsword/bronzesword/goldsword so they sell back. Miner's Quest I/II marked off-limits in walkthroughs; pickaxe stays out of agent flow entirely. **Comprehensive .md sweep** also landed across both repos: `game_knowledge.md` (post-merge-conflict revert re-applied), `PLAYTHROUGH.md`, `GAME_SYSTEMS.md`, `QUEST_CITATIONS.md`.
 
 **Kaetram-Open commits:** `005244e62` (foraging Lv5 + miner outfitter + items prices), follow-up doc-fix commit pending.
 **kaetram-arena commits:** `421b4e2` (prompts: Foraging Lv5 + mining-free), follow-up doc-fix commit pending.
@@ -63,15 +71,15 @@ Cumulative training-data scale per `export_report`: 105 runs, 656 sessions, 68k 
 
 ---
 
-## 2026-04-28 — Code Red Doc Catch-up + KAE-50 Q2/Q3 Strike Team
+## 2026-04-28 — Code Red Doc Catch-up + Quest Strike Team
 
-**10-day commit gap closed with documentation pass.** 7-agent strike team audited every tracked .md file against the cofounder's ~30 commits since Apr 18. Updates landed: `CLAUDE.md` (4-agent default, test-lane port 9191 / `TEST_AGENT_ID=99` callout), `dataset/DATA.md` (1,422 logs / r10 superseded / Tier-A signals listed / 3 archetypes named), `docs/r10_launch_gate.md` marked SUPERSEDED with pointer to `KAE-50`, `docs/dataset-regeneration-plan.md` marked HISTORICAL, `docs/behavior-audit.md` archival banner added (n=30 audit motivated KAE-46 reframe), `tests/e2e/quests/reachability/README.md` corrected (27 tests not 30, suite score replaced with live 2026-04-28 VM run: 20 PASSED / 2 FAILED on the fast subset).
+**10-day commit gap closed with documentation pass.** 7-agent strike team audited every tracked .md file against the cofounder's ~30 commits since Apr 18. Updates landed: `CLAUDE.md`, `dataset/DATA.md`, `docs/r10_launch_gate.md` marked SUPERSEDED, `docs/dataset-regeneration-plan.md` marked HISTORICAL, `docs/behavior-audit.md` archival banner added, `tests/e2e/quests/reachability/README.md` corrected (suite score replaced with live 2026-04-28 VM run).
 
-**KAE-50 Q2 + Q3 strike-team audit landed earlier today** on branch `barathvelmu/kae-50-q2-q3-strike-team` (8 parallel agents, file:line evidence). Findings: **Q2 Herbalist** = decision gap — `game_knowledge.md` claims ~440 blueberry gathers to Lv25 (real number ~873); agents bail after 3-5 gathers; Blue Lily requires Foraging Lv10 but quest stage 0 needs 3 of them, structural wall at L1. **Q3 Rick's Roll** = data hallucination + capability gap — agents invent an "L25 zone gate" that doesn't exist (game_knowledge has shrimp spots at Fishing 1, no level requirement) and pivot to Desert Quest, where they die to L16 Sneks at L8. Live VM run snapshot: 0/3 agents accepted Q2 or Q3 across 38min of the active 4hr Sonnet run. Patch list staged on branch, deferred — Niral confirmed harness/game patches are his lane via KAE-44.
+**Strike-team audit landed earlier today** on branch `barathvelmu/kae-50-q2-q3-strike-team` (8 parallel agents, file:line evidence). Findings: **Herbalist's Desperation** = decision gap — `game_knowledge.md` claims ~440 blueberry gathers to Lv25 (real number ~873); agents bail after 3-5 gathers; Blue Lily requires Foraging Lv10 but quest stage 0 needs 3 of them, structural wall at L1. **Rick's Roll** = data hallucination + capability gap — agents invent an "L25 zone gate" that doesn't exist (game_knowledge has shrimp spots at Fishing 1, no level requirement) and pivot to Desert Quest, where they die to L16 Sneks at L8. Patch list staged on branch.
 
-**Linear:** KAE-44 closed (Niral, Core 5 narrowed to 5 quests). KAE-45 closed (e2e harness on GPU server). KAE-46 closed (capability archetypes shipped). KAE-47 closed (PR #29 reviewed). KAE-48 closed (Tests tab onboarded). KAE-49 created (Barath assigned — design-variables paper catalog, VARIABLES.md attachment fetched). KAE-50 created Apr 28 (Sonnet → 100% Core 5; Barath owns Q2 Herbalist + Q3 Rick's Roll, Niral owns Q4 Arts and Crafts + Q5 Sea Activities). KAE-43 cancelled as duplicate of KAE-41.
+**Linear:** several tickets closed/created — see Linear directly for the latest state.
 
-**Next:** ship Q2/Q3 prompt-data fixes from `barathvelmu/kae-50-q2-q3-strike-team` (game_knowledge grind tables, Rick's Roll L1-safe-route note, Rule 9 tightening) once Niral validates. Capstone parallel.
+**Next:** ship the staged prompt-data fixes (game_knowledge grind tables, Rick's Roll L1-safe-route note, Rule 9 tightening) once validated.
 
 ---
 
@@ -93,13 +101,13 @@ Cumulative training-data scale per `export_report`: 105 runs, 656 sessions, 68k 
 
 ---
 
-## 2026-04-25 — PR #29: Modular MCP + Core 5 + OpenCode + Capability Archetypes
+## 2026-04-25 — PR #29: Modular MCP + Quest Benchmark + OpenCode + Capability Archetypes
 
-**THE BIG ONE.** PR #29 merged — `mcp_game_server.py` collapsed from 2039 lines to a 19-line stub; tools split into modular `mcp_server/` package (`{core, helpers, login, mob_stats, resource_gates, state_heartbeat, utils}.py` + `tools/` subdir) preserving the 17-tool surface. Core 5 prompts/tests scaffolded as the canonical quest baseline (`core/test_0{1..5}_*.py` + `extra/`, `bonus/`, `skip/`, `reachability/` tiers — 136 quest tests total). `--opencode` harness added as fourth peer alongside Claude/Codex/Gemini, routes Qwen via NVIDIA NIM free tier through `scripts/nim_proxy.py` (SSE rewriter that surfaces reasoning tokens around opencode bug #5674). Capability archetypes — GRINDER / COMPLETIONIST / EXPLORER_TINKERER — replace AGGRESSIVE/METHODICAL/CURIOUS as the active personality system (KAE-46 closed). Same day: PR #30 synced KaetramGPU forked changes; `fe99dd7` made dashboard ~900× faster on log tail under multi-tab load (permessage-deflate WS, slim heartbeat); `68d63ef` documented archetype rename in `dataset/DATA.md` + `CLAUDE.md` freshness pass.
+**THE BIG ONE.** PR #29 merged — `mcp_game_server.py` collapsed from 2039 lines to a 19-line stub; tools split into modular `mcp_server/` package (`{core, helpers, login, mob_stats, resource_gates, state_heartbeat, utils}.py` + `tools/` subdir) preserving the 17-tool surface. Per-step quest reachability suite scaffolded under `tests/e2e/quests/reachability/` as the canonical benchmark surface. `--opencode` harness added as fourth peer alongside Claude/Codex/Gemini, routes Qwen via NVIDIA NIM free tier through `scripts/nim_proxy.py` (SSE rewriter that surfaces reasoning tokens around opencode bug #5674). Capability archetypes — GRINDER / COMPLETIONIST / EXPLORER_TINKERER — replace AGGRESSIVE/METHODICAL/CURIOUS as the active personality system. Same day: PR #30 synced KaetramGPU forked changes; `fe99dd7` made dashboard ~900× faster on log tail under multi-tab load (permessage-deflate WS, slim heartbeat); `68d63ef` documented archetype rename in `dataset/DATA.md` + `CLAUDE.md` freshness pass.
 
-**Decision:** the frozen r10 dataset retains AGGRESSIVE/METHODICAL/CURIOUS labels in `metadata.json` — rename only goes forward. r10 launch becomes increasingly unlikely on this artifact; framing pivots toward Core 5 completion as the actual benchmark.
+**Decision:** the frozen r10 dataset retains AGGRESSIVE/METHODICAL/CURIOUS labels in `metadata.json` — rename only goes forward. r10 launch becomes increasingly unlikely on this artifact; framing pivots toward quest completion as the actual benchmark.
 
-**Linear:** KAE-46 closed (archetypes). KAE-47 closed (PR #29 reviewed).
+**Linear:** capability-archetype + PR #29 review tickets closed.
 
 ---
 
@@ -113,7 +121,7 @@ Cumulative training-data scale per `export_report`: 105 runs, 656 sessions, 68k 
 
 **Shipped on `feat/kae-42-remaining-patches` (6 commits):** KAE-42 data-pipeline patches (window_size 5→3, observe→observe bigram filter + post-build dedup, observe tool_result entity caps, stale click_tile filter removed, pre-tokenize truncation gate); Qwen3.5-9B thinking-general decode params wired into `serve_modal*.py`; three new regression tests (`test_truncation`, `test_think_roundtrip`, `test_loop_noise`); r10 launch gate doc.
 
-**Dataset rebuild:** `23,382` train / `2,590` val (vs r9's `5,871` / `575`). Observe: `33,291 / 61,412` tool calls = 54%. **All 78 tests pass on rebuilt dataset.** 9 of 11 launch-gate criteria green; smoke SFT + eval matrix never executed — overtaken by Core 5 pivot. Gate marked SUPERSEDED 2026-04-28.
+**Dataset rebuild:** `23,382` train / `2,590` val (vs r9's `5,871` / `575`). Observe: `33,291 / 61,412` tool calls = 54%. **All 78 tests pass on rebuilt dataset.** 9 of 11 launch-gate criteria green; smoke SFT + eval matrix never executed — overtaken by the benchmark pivot. Gate marked SUPERSEDED 2026-04-28.
 
 ---
 

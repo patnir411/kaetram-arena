@@ -872,7 +872,23 @@ def parse_run_sessions(agent_dir: Path, run_dir: Path,
     per session — usually unnecessary since each session's meta.json carries
     the harness."""
     rmeta = run_meta(run_dir)
-    paths = sorted(run_dir.glob("session_*.log"))
+
+    def _session_sort_key(p: Path) -> tuple[int, str]:
+        # Filenames are session_<N>_<YYYYMMDD>_<HHMMSS>.log.
+        # Lex sort puts session_10..session_99 before session_1..session_9,
+        # which silently corrupts last_observe_in_run() and every chronological
+        # consumer (status, metrics, timeline) on runs with >=10 sessions.
+        # Sort by the integer index, falling back to the timestamp tail.
+        stem = p.stem  # session_14_20260502_052847
+        parts = stem.split("_", 2)
+        try:
+            idx = int(parts[1])
+        except (IndexError, ValueError):
+            idx = -1
+        tail = parts[2] if len(parts) > 2 else ""
+        return (idx, tail)
+
+    paths = sorted(run_dir.glob("session_*.log"), key=_session_sort_key)
     sessions: list[SessionView] = []
     for p in paths:
         try:
@@ -904,12 +920,10 @@ def latest_run_sessions_per_agent(*, harness: str | None = None) -> list[RunSess
 # record of every quest, kept in sync with Kaetram-Open. Loaded lazily on
 # first use so consumers that don't touch quest analysis pay no startup cost.
 
-CORE_5_QUEST_NAMES: tuple[str, ...] = (
+CORE_3_QUEST_NAMES: tuple[str, ...] = (
     "Foresting",
     "Herbalist's Desperation",
     "Rick's Roll",
-    "Arts and Crafts",
-    "Sea Activities",
 )
 
 _QUEST_WALKTHROUGHS_PATH = REPO / "prompts" / "quest_walkthroughs.json"
@@ -938,11 +952,11 @@ def quest_stage_counts() -> dict[str, int]:
     return out
 
 
-def core5_total_stage_count() -> int:
-    """Sum of stages across the Core 5. Used as the denominator when scoring
+def core3_total_stage_count() -> int:
+    """Sum of stages across the Core 3. Used as the denominator when scoring
     stage progression as a fraction (Niral's '/N stages' framing)."""
     counts = quest_stage_counts()
-    return sum(counts.get(n, 0) for n in CORE_5_QUEST_NAMES)
+    return sum(counts.get(n, 0) for n in CORE_3_QUEST_NAMES)
 
 
 def _active_quest_signature(active_quests: object) -> dict[str, tuple[int, int]]:
@@ -1044,10 +1058,10 @@ def progression_for_quests(
     plus `finished_quests` set. The trigger tool is the most recent
     non-observe call before the transition was first observed.
 
-    `quest_names` defaults to the Core 5. Pass a different iterable (or
+    `quest_names` defaults to the Core 3. Pass a different iterable (or
     `None` and pass quest names later) to scope to other quests.
     """
-    targets = list(quest_names) if quest_names is not None else list(CORE_5_QUEST_NAMES)
+    targets = list(quest_names) if quest_names is not None else list(CORE_3_QUEST_NAMES)
     counts = quest_stage_counts()
     progs: dict[str, QuestProgression] = {
         n: QuestProgression(quest_name=n, stage_count=counts.get(n, 1))

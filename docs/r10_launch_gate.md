@@ -1,13 +1,10 @@
 # R10 Launch Gate
 
 > **Status: SUPERSEDED (2026-04-28).** r10 SFT was never launched. The active gate is now
-> Sonnet → 100% Core 5 completion (Linear `KAE-50`), driven by harness/prompt patches and
-> the `tests/e2e/quests/` benchmark — not an SFT artifact. The frozen r10 dataset on the VM
+> Sonnet → 100% Core 3 completion, driven by harness/prompt patches and the
+> `tests/e2e/quests/` benchmark — not an SFT artifact. The frozen r10 dataset on the VM
 > retains legacy AGGRESSIVE/METHODICAL/CURIOUS personality labels (per `dataset/DATA.md`)
 > and is preserved as historical record. Do not re-launch on this artifact.
->
-> See `KAE-50` (Sonnet 100% Core 5), `KAE-44` (Core 5 narrowed), `KAE-46` (capability
-> archetypes shipped), and `KAE-47` (PR #29 modular MCP review) for the post-pivot lanes.
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Research project (target: ICLR 2027)** on **structured game-agent distillation** — distilling frontier LLM gameplay reasoning (Claude Sonnet) into a small open student model (Qwen3.5 9B) using a typed MCP tool API as the shared teacher–student interface in a persistent 2D pixel MMORPG ([Kaetram](https://github.com/Kaetram/Kaetram-Open)).
 
-The agent calls 17 structured tools (observe, attack, navigate, interact_npc, gather, craft_item, …) — never writes JavaScript or clicks pixels. Sessions across **4 frontier-LLM harnesses** (Claude / Codex / Gemini / OpenCode) are collected as SFT + KTO training data, with OpenCode multiplexing across xAI Grok, NVIDIA Qwen3.5, and DeepSeek V4 via `--opencode-model`. Progress is measured against the **Core 5 quest benchmark** (see below).
+The agent calls 17 structured tools (observe, attack, navigate, interact_npc, gather, craft_item, …) — never writes JavaScript or clicks pixels. Sessions across **4 frontier-LLM harnesses** (Claude / Codex / Gemini / OpenCode) are collected as SFT + KTO training data, with OpenCode multiplexing across xAI Grok, NVIDIA Qwen3.5, and DeepSeek V4 via `--opencode-model`. Progress is measured against the **Core 3 quest benchmark** (see below).
 
 > **For developers:** see [`CLAUDE.md`](CLAUDE.md) for the full developer reference and [`session_log.md`](session_log.md) for the most recent decisions.
 
@@ -15,19 +15,17 @@ The agent calls 17 structured tools (observe, attack, navigate, interact_npc, ga
 - Supports multi-agent mode: run N agents in parallel for scaled data collection
 - 3 capability archetypes (GRINDER, COMPLETIONIST, EXPLORER_TINKERER) as a data factory for diverse training trajectories
 
-## The Core 5 benchmark
+## The Core 3 benchmark
 
-Capability progress is measured against five canonical quests that span combat, gathering, crafting, dialogue, and exploration. Each is implemented as a headed pytest under `tests/e2e/quests/core/` and run from the dashboard's **Tests tab** (see below).
+Capability progress is measured against three canonical quests that span combat, gathering, crafting, dialogue, and long-route navigation. Each is implemented as a headed pytest under `tests/e2e/quests/` and run from the dashboard's **Tests tab** (see below).
 
 | # | Quest | What it exercises |
 |---|-------|-------------------|
 | Q1 | **Foresting** | Woodcutting + simple multi-step gather/turn-in |
 | Q2 | **Herbalist's Desperation** | Long-tail gathering (blueberries, Blue Lily) + skill-gated foraging |
-| Q3 | **Rick's Roll** | Fishing + dialogue branching + safe-route navigation at low level |
-| Q4 | **Arts and Crafts** | Crafting/smelting production chain |
-| Q5 | **Sea Activities** | Boat travel + cross-zone exploration |
+| Q3 | **Rick's Roll** | Fishing + cooking via `craft_item` + dialogue branching + cross-region door routing |
 
-The student model's quest completion rate on the Core 5 — alongside the Sonnet teacher's — is the primary capability metric, replacing earlier ad-hoc XP/level deltas.
+The student model's quest completion rate on the Core 3 — alongside the Sonnet teacher's — is the primary capability metric, replacing earlier ad-hoc XP/level deltas.
 
 ## Current status
 
@@ -166,7 +164,7 @@ kaetram-agent/
 ├── finetune/                # SFT / KTO / GRPO training on Modal + serving endpoints
 ├── world/                   # WIP forward dynamics model (2.2M param Transformer)
 ├── prompts/                 # system.md, game_knowledge.md, personalities/
-├── tests/                   # 136 e2e quest tests, including Core 5 under tests/e2e/quests/core/
+├── tests/                   # e2e quest tests, including Core 3 reachability under tests/e2e/quests/reachability/
 ├── scripts/                 # restart/resume/nuke agents, eval, dashboards
 ├── dataset/, state/, logs/  # Runtime artefacts (gitignored)
 ├── session_log.md           # Running decision log across sessions
@@ -188,7 +186,7 @@ kaetram-agent/
 
 ## Tests tab (dashboard)
 
-The dashboard at `http://localhost:8080` includes a **Tests tab** for launching headed pytest runs from the UI with live MJPEG video of the browser. This is how the Core 5 (and the broader 136-test quest suite under `tests/e2e/quests/`) are exercised end-to-end against a real Kaetram instance.
+The dashboard at `http://localhost:8080` includes a **Tests tab** for launching headed pytest runs from the UI with live MJPEG video of the browser. This is how the Core 3 reachability suite (and the broader quest suite under `tests/e2e/quests/`) is exercised end-to-end against a real Kaetram instance.
 
 - Uses a dedicated test-lane game server on **port 9191** (db `kaetram_e2e`) — start via `scripts/start-test-kaetram.sh`.
 - Renders the headed browser into Xvfb display `:198`, captured by ffmpeg as a single overwriting MJPEG stream (lockstep reliable on short test runs, unlike HLS).

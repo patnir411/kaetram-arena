@@ -13,20 +13,20 @@ Usage:
     python3 scripts/log_analysis/analyze.py runs [-n 10]     # recent runs across all agents
     python3 scripts/log_analysis/analyze.py timeline [-n 30] # chronological events across the run
     python3 scripts/log_analysis/analyze.py quests           # quest delta first→last in run
-    python3 scripts/log_analysis/analyze.py quest [name]     # per-quest progression timeline (default: Core 5)
+    python3 scripts/log_analysis/analyze.py quest [name]     # per-quest progression timeline (default: Core 3)
     python3 scripts/log_analysis/analyze.py quest --cross-run [name]  # max-stage histogram across all runs
     python3 scripts/log_analysis/analyze.py tools            # tool counts + error rates across the run
     python3 scripts/log_analysis/analyze.py recent [-n 10]   # last N tool calls (latest session — session-scoped)
     python3 scripts/log_analysis/analyze.py errors [--by-quest]  # categorized errors + next-action transitions across the run
     python3 scripts/log_analysis/analyze.py thinking [-n 5]  # last N reasoning blocks (latest session — session-scoped)
-    python3 scripts/log_analysis/analyze.py metrics          # paper metrics (run-scoped, stage-level Core 5 denominator)
+    python3 scripts/log_analysis/analyze.py metrics          # paper metrics (run-scoped, stage-level Core 3 denominator)
     python3 scripts/log_analysis/analyze.py agent <N>        # deep-dive single agent (run-aggregated)
 
 Filters:
     --run <id>      scope to that run dir (parses ALL sessions in it)
     --session N     drill down to one session inside the resolved run
     --stale         include agents whose latest run hasn't been touched in 10+ min
-    --by-quest      (errors) slice errors by which Core 5 quest was active
+    --by-quest      (errors) slice errors by which Core 3 quest was active
     --cross-run     (quest)  walk every run per agent for a max-stage histogram
     --opencode/--claude  force a parser (default: auto-detect from each session's meta.json)
 """
@@ -42,12 +42,12 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
 from scripts.log_analysis.parse import (  # noqa: E402
-    CORE_5_QUEST_NAMES,
+    CORE_3_QUEST_NAMES,
     QuestProgression,
     RunSessionsView,
     SessionView,
     categorize_error,
-    core5_total_stage_count,
+    core3_total_stage_count,
     deaths,
     first_observe,
     fmt_duration,
@@ -222,7 +222,7 @@ def cmd_errors(rvs: list[RunSessionsView], by_quest: bool = False) -> None:
     the entire run. The next-action transition is THE diagnostic for whether
     a rule landed (e.g. BFS_NO_PATH → warp vs BFS_NO_PATH → navigate retry).
 
-    `by_quest=True` slices each agent's errors by which Core 5 quest was
+    `by_quest=True` slices each agent's errors by which Core 3 quest was
     active at the time, surfacing per-quest failure modes (e.g. Rick's Roll
     stage-1 STATION_UNREACHABLE vs Herbalist's BFS_NO_PATH on overland walk).
     """
@@ -236,7 +236,7 @@ def cmd_errors(rvs: list[RunSessionsView], by_quest: bool = False) -> None:
 
         if by_quest:
             # Build a per-quest progression so we know, for each tool-call
-            # index, which Core 5 quests were active. Then group errors by
+            # index, which Core 3 quests were active. Then group errors by
             # the active set at error time.
             progs = progression_for_quests(rv)
             # Replay observes to build a per-run-idx → active set map.
@@ -246,7 +246,7 @@ def cmd_errors(rvs: list[RunSessionsView], by_quest: bool = False) -> None:
                 if tc.short_name == "observe" and isinstance(tc.result_payload, dict):
                     current = {
                         q.get("name") for q in (tc.result_payload.get("active_quests") or [])
-                        if isinstance(q, dict) and q.get("name") in CORE_5_QUEST_NAMES
+                        if isinstance(q, dict) and q.get("name") in CORE_3_QUEST_NAMES
                     }
                 active_at.append(set(current))
 
@@ -304,29 +304,28 @@ _ARG_ERROR_KEYWORDS = (
     "could not parse", "invalid argument",
 )
 
-# Core 5 quest names for stage-completion scoring (Niral's metric #4).
-_CORE_5_QUEST_NAMES = {
+# Core 3 quest names for stage-completion scoring (Niral's metric #4).
+_CORE_3_QUEST_NAMES = {
     "Foresting", "Herbalist's Desperation", "Rick's Roll",
-    "Arts and Crafts", "Sea Activities",
 }
 
 
 def cmd_metrics(rvs: list[RunSessionsView]) -> None:
     """Paper metrics scored over the entire run (Niral's 5).
 
-    core5 is the **stage** delta first→last observe — captures partial
+    core3 is the **stage** delta first→last observe — captures partial
     progress (e.g. Rick's Roll 1→3 counts as +2 of 4) so the metric moves
-    week-over-week instead of remaining 0/5 until a whole quest finishes.
+    week-over-week instead of remaining 0/3 until a whole quest finishes.
     turn-eff denominator is total_turns across the run.
     """
-    total_stages = core5_total_stage_count()
+    total_stages = core3_total_stage_count()
     counts = quest_stage_counts()
-    core5_set = set(CORE_5_QUEST_NAMES)
+    core3_set = set(CORE_3_QUEST_NAMES)
 
     print(_bar("METRICS — paper-claim scorer (run-scoped)"))
     print(f"{'agent':<7}{'persona':<14}{'calls':<7}"
           f"{'format':<10}{'argument':<11}{'tool-sel':<10}"
-          f"{'core5_stages':<14}{'turn-eff':<18}")
+          f"{'core3_stages':<14}{'turn-eff':<18}")
     print("─" * 100)
 
     for rv in rvs:
@@ -358,22 +357,22 @@ def cmd_metrics(rvs: list[RunSessionsView]) -> None:
         # 3. Tool selection — needs LLM judge; deferred.
         tool_sel = "DEFERRED"
 
-        # 4. Core 5 STAGE completion across the run. Compute first-of-run
-        # and last-of-run state for each Core 5 quest (active stage if
+        # 4. Core 3 STAGE completion across the run. Compute first-of-run
+        # and last-of-run state for each Core 3 quest (active stage if
         # active, full stage_count if finished, 0 otherwise) and sum the
         # delta. Subtracting the first observe's state defends against
         # quest_resume.json replaying prior-run completions into session 1.
         def _stage_state_at(observe_payload: dict) -> dict[str, int]:
-            out: dict[str, int] = {n: 0 for n in core5_set}
+            out: dict[str, int] = {n: 0 for n in core3_set}
             for q in (observe_payload.get("finished_quests") or []):
                 if isinstance(q, dict):
                     n = q.get("name")
-                    if n in core5_set:
+                    if n in core3_set:
                         out[n] = counts.get(n, 0)
             for q in (observe_payload.get("active_quests") or []):
                 if isinstance(q, dict):
                     n = q.get("name")
-                    if n in core5_set:
+                    if n in core3_set:
                         st = q.get("stage")
                         if isinstance(st, int) and st > out[n]:
                             out[n] = st
@@ -383,10 +382,10 @@ def cmd_metrics(rvs: list[RunSessionsView]) -> None:
         gs1 = rv.last_observe_in_run() or {}
         s0 = _stage_state_at(gs0)
         s1 = _stage_state_at(gs1)
-        new_stages = sum(max(0, s1[n] - s0[n]) for n in core5_set)
-        core5_str = f"{new_stages}/{total_stages}"
+        new_stages = sum(max(0, s1[n] - s0[n]) for n in core3_set)
+        core3_str = f"{new_stages}/{total_stages}"
 
-        # 5. Turn efficiency — Core 5 stage progress / total turns.
+        # 5. Turn efficiency — Core 3 stage progress / total turns.
         n_turns = rv.total_turns
         if n_turns and new_stages:
             eff = f"{new_stages}/{n_turns}={new_stages/n_turns:.4f}"
@@ -397,16 +396,16 @@ def cmd_metrics(rvs: list[RunSessionsView]) -> None:
 
         print(f"{aid:<7}{persona:<14}{n_calls:<7}"
               f"{format_pct:>5.1f}%    {arg_pct:>5.1f}%     {tool_sel:<10}"
-              f"{core5_str:<14}{eff:<18}")
+              f"{core3_str:<14}{eff:<18}")
     print()
     print("Caveats:")
     print("  format       = % tool results where the JSON payload parsed (decoder ok)")
     print("  argument     = format-ok AND no schema/validation error in result.")
     print("                 Game-state errors (NPC_NOT_FOUND, BFS_NO_PATH, …) do NOT count.")
     print("  tool-sel     = DEFERRED — needs LLM-judge or hand-labeled sample.")
-    print(f"  core5_stages = NEW Core 5 stages reached this run (last − first observe).")
+    print(f"  core3_stages = NEW Core 3 stages reached this run (last − first observe).")
     print(f"                 Denominator {total_stages} = sum of stage counts: "
-          + ", ".join(f"{n}={counts.get(n,'?')}" for n in CORE_5_QUEST_NAMES))
+          + ", ".join(f"{n}={counts.get(n,'?')}" for n in CORE_3_QUEST_NAMES))
     print("  turn-eff     = new stages / total_turns. Higher = better planning.")
     print("                 total_turns sums per-session num_turns across the run.")
 
@@ -517,12 +516,12 @@ def cmd_agent_run(rv: RunSessionsView, n_recent: int = 10) -> None:
 def _resolve_quest_filter(quest_arg: str | None) -> list[str]:
     """Translate a `quest <name>` argument into a concrete name list.
 
-    No arg / `core5` → the Core 5. Any other string → resolve against
+    No arg / `core3` → the Core 3. Any other string → resolve against
     quest_walkthroughs.json keys; case-insensitive substring match wins.
     Unknown names fall through as-is so callers always get *something*.
     """
-    if not quest_arg or quest_arg.lower() == "core5":
-        return list(CORE_5_QUEST_NAMES)
+    if not quest_arg or quest_arg.lower() == "core3":
+        return list(CORE_3_QUEST_NAMES)
     targets = list(quest_stage_counts().keys())
     needle = quest_arg.lower()
     matches = [n for n in targets if needle in n.lower()]
@@ -583,7 +582,7 @@ def cmd_quest(rvs: list[RunSessionsView], quest_arg: str | None = None,
               cross_run: bool = False, harness_override: str | None = None) -> None:
     """Per-quest progression timeline + diagnostics across the run.
 
-    Default scope: Core 5. Pass a quest name (or substring) to scope to one.
+    Default scope: Core 3. Pass a quest name (or substring) to scope to one.
     `--cross-run` switches to a max-stage histogram across every run for
     each agent — answers "where do agents plateau on quest X?".
     """
@@ -654,14 +653,14 @@ def _cmd_quest_cross_run(targets: list[str], harness_override: str | None = None
 
 
 def cmd_full(rvs: list[RunSessionsView]) -> None:
-    """Full report across the run: status + quests + tools + core5 quest progression + errors."""
+    """Full report across the run: status + quests + tools + core3 quest progression + errors."""
     print(_bar("STATUS"))
     cmd_status(rvs)
     print(_bar("QUESTS"))
     cmd_quests(rvs)
     print(_bar("TOOLS"))
     cmd_tools(rvs)
-    print(_bar("CORE 5 PROGRESSION"))
+    print(_bar("CORE 3 PROGRESSION"))
     cmd_quest(rvs)
     has_errs = any(tc.is_error for rv in rvs for tc in rv.all_tool_calls)
     if has_errs:
@@ -875,14 +874,14 @@ def main() -> int:
     pr = sub.add_parser("recent"); pr.add_argument("-n", type=int, default=8)
     pe = sub.add_parser("errors")
     pe.add_argument("--by-quest", action="store_true",
-                    help="slice errors by which Core 5 quest was active at the time")
+                    help="slice errors by which Core 3 quest was active at the time")
     pt = sub.add_parser("thinking"); pt.add_argument("-n", type=int, default=3)
     pa = sub.add_parser("agent"); pa.add_argument("agent_id", type=int); pa.add_argument("-n", type=int, default=10)
     sub.add_parser("full")
     sub.add_parser("metrics")
     pq = sub.add_parser("quest")
     pq.add_argument("name", nargs="?", default=None,
-                    help="quest name (or substring). Defaults to all Core 5.")
+                    help="quest name (or substring). Defaults to all Core 3.")
     pq.add_argument("--cross-run", action="store_true",
                     help="show max-stage histogram across every run for each agent")
     pn = sub.add_parser("runs"); pn.add_argument("-n", type=int, default=10)

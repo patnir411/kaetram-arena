@@ -201,20 +201,19 @@ async def test_r3_fish_shrimp_at_nearest_spot(test_username):
 @reachability
 async def test_r4_cook_shrimp_via_craft(test_username):
     """R4: Can the player cook 5× rawshrimp via `craft_item`? This proves
-    the cooking station infrastructure is accessible from the quest region.
+    the cooking station infrastructure is accessible.
 
-    Seeds adjacent to Babushka (iamverycoldnpc at 702,608) — the same
-    pattern A8 uses successfully. The cooking station at (706,605) sits
-    ~4 tiles away, well within `craft_item`'s 6-tile reach. Seeding
-    adjacent to "doctor" landed the player at (698,551), 62 tiles from
-    the station, and `craft_item` aborted with "Could not reach cooking
-    station".
+    Seeds the player at (702, 609), within `craft_item`'s 6-tile reach
+    of a cooking station at (706, 605). The seed uses an explicit
+    coordinate rather than an NPC reference because the test isolates
+    the cooking-station infrastructure check from any quest-route
+    state.
     """
     seed_player(
         test_username,
         **playthrough_seed_kwargs(
             "R4",
-            position=adjacent_to("iamverycoldnpc"),
+            position=(702, 609),
             inventory=[
                 {"key": "rawshrimp", "count": 5},
             ],
@@ -224,10 +223,9 @@ async def test_r4_cook_shrimp_via_craft(test_username):
     try:
         dbg = get_current_test_debug()
         async with mcp_session(username=test_username) as session:
-            # Pre-craft observe — confirm seed actually placed the player
-            # adjacent to iamverycoldnpc (702, 608) and not somewhere
-            # else. Distance to cooking station (706, 605) must be ≤ 6
-            # for craft_item to reach.
+            # Pre-craft observe — confirm seed placed the player at
+            # (702, 609); distance to cooking station (706, 605) must
+            # be ≤ 6 for craft_item to reach.
             obs0 = await session.call_tool("observe", {})
             if dbg is not None:
                 dbg.action(

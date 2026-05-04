@@ -79,8 +79,8 @@ async def observe(ctx: Context) -> str:
     # Write game_state.json for dashboard (live state, no log parsing needed)
     # AND a compact quest_resume.json that the orchestrator injects into the
     # next session's prompt — gives the next session a "where I was" anchor
-    # so multi-stage quests (Rick's Roll, Sea Activities, Arts and Crafts)
-    # can survive the per-session context reset.
+    # so multi-stage quests (Rick's Roll, Herbalist's Desperation) can
+    # survive the per-session context reset.
     try:
         gs_json = result.split("\n\nASCII_MAP:")[0] if "\n\nASCII_MAP:" in result else result
         if not gs_json.startswith("ERROR"):

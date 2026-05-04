@@ -314,88 +314,18 @@
       "Raw Shrimp": "Fish shrimp spots.",
       "Cooked Shrimp": "Cook `rawshrimp` at a cooking station."
     },
-    "tips": "Stage-2 puzzle: each room has 3-4 ladder/door tiles where most loop back. Decoy tiles by room — first room (entry 425,909): {(421,903), (425,905), (429,903)}; upper room (entry 453,904): {(449,904), (453,901), (457,904)}; lower-left room (entry 426,927): {(422,920)}. Real exits in order: (425,901) → (453,907) → (431,920) → walk to Lena. Inside the first room, the straight-north path from (425, 909) to (425, 901) crosses a decoy at (425, 905), so detour off the center column via (424, 902). Stage-1 turn-in to Rick and stage-2 turn-in to Lena both often need TWO interact_npc calls — first opens dialogue, second consumes items / advances stage.",
+    "tips": "Stage-2 puzzle: each room has 3-4 ladder/door tiles where most loop back. Decoy tiles by room \u2014 first room (entry 425,909): {(421,903), (425,905), (429,903)}; upper room (entry 453,904): {(449,904), (453,901), (457,904)}; lower-left room (entry 426,927): {(422,920)}. Real exits in order: (425,901) \u2192 (453,907) \u2192 (431,920) \u2192 walk to Lena. Inside the first room, the straight-north path from (425, 909) to (425, 901) crosses a decoy at (425, 905), so detour off the center column via (424, 902). Stage-1 turn-in to Rick and stage-2 turn-in to Lena both often need TWO interact_npc calls \u2014 first opens dialogue, second consumes items / advances stage.",
     "walkthrough_steps": [
       "Rick at (1088, 833) is in a region disjoint from Mudwich. Use the warp+door route: warp(location='mudwich') (or just stay there at start), navigate from Mudwich southeast through the corridor, step on door 1025 at (379, 388) which teleports you to (1138, 800), then walk west to Rick.",
       "Once adjacent to Rick: interact_npc(name='Rick', accept_quest_offer=True).",
       "Equip the starter fishingpole (slot 2 of starter kit). gather('Shrimp Fishing Spot') from a shore tile \u2014 e.g. seed-friendly approach is (324, 360) standing west of spot (325, 360). Repeat until you have 5 rawshrimp.",
-      "Walk to a cooking station — call query_quest('Rick\\'s Roll') and read station_locations.cooking for the nearest reachable cooking tile to your current position (the runtime lookup is the source of truth). Babushka's room (706, 605) is on this list ONLY post-Ancient-Lands; pre-AL agents must use whichever cooking tile station_locations returns from their reachable region. Then craft_item(skill='cooking', recipe_key='cookedshrimp', count=5).",
-      "Return to Rick and interact_npc(npc_name='Rick') TWICE — first call opens dialogue ('I\\'m so touched'), second call consumes the 5 cookedshrimp, gives you a `seaweedroll`, and advances stage 1 → 2. If after one call your inventory still has the cookedshrimp and quest_state_changed=false, do NOT assume failure; call again.",
+      "Walk to a cooking station \u2014 call query_quest('Rick\\'s Roll') and read station_locations.cooking for the nearest reachable cooking tile to your current position (the runtime lookup is the source of truth). Then craft_item(skill='cooking', recipe_key='cookedshrimp', count=5).",
+      "Return to Rick and interact_npc(npc_name='Rick') TWICE \u2014 first call opens dialogue ('I\\'m so touched'), second call consumes the 5 cookedshrimp, gives you a `seaweedroll`, and advances stage 1 \u2192 2. If after one call your inventory still has the cookedshrimp and quest_state_changed=false, do NOT assume failure; call again.",
       "Stage-2 door 1 of 4: step on (260, 229) \u2014 teleports to (425, 909) inside an enclosed puzzle room. Decoys at (421, 903), (425, 905), (429, 903) all loop back here.",
       "Stage-2 door 2 of 4: walk to (424, 902) FIRST (off-column waypoint \u2014 the straight-north path would cross the (425, 905) decoy and bounce you back). Then walk to (425, 901) and step on it \u2014 teleports to (453, 904) inside Lena's upper room.",
       "Stage-2 door 3 of 4: walk south to (453, 907) and step on it \u2014 teleports to (426, 927) in the lower-left room. Decoys (449, 904), (453, 901), (457, 904) in the upper room loop back to the start; avoid them.",
       "Stage-2 door 4 of 4: walk NE to (431, 920) and step on it \u2014 teleports to (455, 930) in a narrow corridor adjacent to Lena's room. The other ladder (422, 920) is a decoy back to (425, 909).",
       "From (455, 930), walk one tile north into Lena's room and navigate to her at (455, 924). interact_npc('Lena') \u2014 may need TWO calls (first opens dialogue, second consumes the seaweedroll). Quest finishes; receive 1987 gold (popup text mentions Cooking XP \u2014 that's a typo, the actual reward is gold)."
-    ]
-  },
-  "Sea Activities": {
-    "name": "Sea Activities",
-    "status": "working",
-    "phase": 1,
-    "order": 9,
-    "npc": "Sponge (`sponge`), Pickle NPC (`picklenpc`), Sea Cucumber boss (`picklemob`)",
-    "stages": 7,
-    "prereqs": "Undersea route access required",
-    "requirements": {
-      "quests_finished": [],
-      "quests_started": [],
-      "skills": [],
-      "achievements": [
-        "waterguardian"
-      ],
-      "practical": [
-        "Undersea route is unavailable before Water Guardian.",
-        "Door 556 (between (683,844) and (688,844)) requires the `mermaidguard` achievement — kill the Mermaid at (676, 851) on the FIRST trip through the corridor.",
-        "Pickle's `interact_npc(npc_name=...)` call-string is `Sea Cucumber`, NOT `Pickle` — calling with `Pickle` silently fails. The picklemob boss is also display-name `Sea Cucumber`.",
-        "Stage 4 picklemob (L88, 1250 HP) is MARGINAL with mid-route gear (audit predicts ~1900 dmg taken vs ~1389 max HP at Lv50). Plan end-game gear or 10+ burger food buffer."
-      ]
-    },
-    "unlocks": {
-      "on_start": [],
-      "on_finish": [
-        "Sea region quest gates"
-      ]
-    },
-    "actual_rewards": [
-      "10000 gold"
-    ],
-    "reward_caveats": [
-      "Stage 5 gives 1 gold temporarily, but you hand it back in at stage 6.",
-      "Net payout is 10000 gold, not 10001.",
-      "Top-level reward text says 1000 gold."
-    ],
-    "known_mismatches": [],
-    "blocked_reason": null,
-    "stage_summary": [
-      "Talk to Sponge.",
-      "Talk to Pickle NPC.",
-      "Report back to Sponge.",
-      "Talk to Pickle NPC again.",
-      "Kill `picklemob` in the arena.",
-      "Talk to Pickle NPC and receive 1 gold.",
-      "Return the coin to Sponge for the final payout."
-    ],
-    "walkthrough": "Complete the Sponge and Pickle talk chain (multi-room door routing), kill the Mermaid en route to earn `mermaidguard`, then enter the stage-4 arena via a SEPARATE door from the Pickle room, defeat `picklemob`, take the temporary coin from Pickle, and return it to Sponge for the 10,000 gold payout.",
-    "items_needed": "None",
-    "boss": {
-      "name": "picklemob",
-      "level": 88,
-      "hp": 1250,
-      "notes": "Sea Cucumber fight during stage 4."
-    },
-    "tips": "Door routing has TWO traps: (1) the Mermaid at (676, 851) is a hard prereq for door 556 \u2014 kill her on the FIRST trip through the corridor to grant `mermaidguard`. (2) Door 556 lands you NEAR Pickle, NOT in the picklemob arena. The arena is a separate teleport at (693, 836) \u2192 (858, 808); do not skip this step or `attack(Sea Cucumber)` will fail with 'mob not nearby'.",
-    "walkthrough_steps": [
-      "Hard prerequisite: kill the Water Guardian at (293, 729) to earn the `waterguardian` achievement. Without it, warp(location='undersea') silently fails. Water Guardian is lvl 36, 350 HP \u2014 bring at least mid-tier gear (coppersword + Strength Lv30+).",
-      "Once `waterguardian` is earned: warp(location='undersea') lands you near (43, 313). Sponge is at (52, 310).",
-      "Stage 0 \u2192 1: interact_npc(name='Sponge', accept_quest_offer=True).",
-      "Stage 1\u21922 leg 1 (Sponge \u2192 Pickle corridor): navigate to door 539 at (46, 363) and step on it \u2014 teleports to (665, 836). You are now in the same region as Pickle but separated from him by a gated door.",
-      "Stage 1\u21922 leg 2 (kill Mermaid): the Mermaid spawns at (676, 851), ~15 tiles SE of door 539's landing tile (665, 836). Lvl 40, 150 HP, 28 defense \u2014 a free intermediate fight for any chained-playthrough agent. Killing her grants the `mermaidguard` achievement, which is the gate on door 556. Skip this and door 556 will block with 'You need to complete the achievement Mermaid Sword to pass through this door' (the in-game error says 'Sword' but the achievement display name is 'Mermaid Guard' \u2014 same gate, confusing alias).",
-      "Stage 1\u21922 leg 3 (Sponge \u2192 Pickle): walk NE to (688, 843), one tile NORTH of door 556. Then traverse_door (683, 844) \u2014 DO NOT navigate directly to (683, 844) or to (688, 844); both are door tiles and stepping on them mid-navigate will teleport you before traverse_door fires. Door 556 lands you at (688, 844), which is NEAR Pickle (691, 838) but is NOT the picklemob arena \u2014 Pickle stands in a small chamber adjacent to the arena entry.",
-      "Stage 1\u21922 leg 4 (talk Pickle): walk to Pickle at (691, 838) and interact_npc(name='Sea Cucumber') \u2014 that advances stage 1\u21922.",
-      "Stages 2\u21923 (Pickle \u2192 Sponge): reverse the chain \u2014 navigate to (688, 843), traverse_door (688, 844) \u2192 (683, 844), navigate to (665, 837), traverse_door (665, 836) \u2192 (46, 363), then walk overland to Sponge at (52, 310). interact_npc('Sponge') \u2014 stage 2\u21923.",
-      "Stages 3\u21924 (Sponge \u2192 Pickle, repeat the chain): same as the stage 1\u21922 chain. interact_npc on Pickle at the end advances stage 3\u21924. The Mermaid stays dead so doors 556/557 are open both directions.",
-      "Stage 4 (enter the arena and kill picklemob): from Pickle (691, 838) walk to the arena entry door at (693, 836) and step on it \u2014 teleports to (858, 808) inside the arena. picklemob (display name 'Sea Cucumber') is at (858, 815), 7 tiles south. Lvl 88, 1250 HP \u2014 needs mid-route gear at minimum. attack(mob_name='Sea Cucumber') in a swing loop until killed:true.",
-      "Stages 5\u21927: walk back to Pickle (out of the arena via the same door, 858,808 \u2194 693,836), interact_npc('Sea Cucumber') \u2014 receives 1 gold, advances stage 4\u21925. Then traverse the full reverse chain back to Sponge (door 557 \u2192 door 538 \u2192 overland), interact_npc('Sponge'). Final reward is 10,000 gold net (the 1 gold from stage 5 is consumed at stage 6)."
     ]
   },
   "Scientist's Potion": {
@@ -435,69 +365,11 @@
     "items_needed": "None",
     "tips": "Do this as soon as you want Alchemy; no follow-up route exists on this tree."
   },
-  "Arts and Crafts": {
-    "name": "Arts and Crafts",
-    "status": "working",
-    "phase": 2,
-    "order": 11,
-    "npc": "Babushka (`iamverycoldnpc`)",
-    "stages": 4,
-    "prereqs": "None",
-    "requirements": {
-      "quests_finished": [],
-      "quests_started": [],
-      "skills": [],
-      "achievements": [],
-      "practical": [
-        "Crafting unlocks as soon as the quest is started.",
-        "Pendant path needs Foraging 5 and 1 beryl from the Miner shop (20g).",
-        "Bowlsmall needs Fletching 3.",
-        "Final stew needs Fletching 5 and Cooking 1."
-      ]
-    },
-    "unlocks": {
-      "on_start": [
-        "Crafting benches"
-      ],
-      "on_finish": []
-    },
-    "actual_rewards": [],
-    "reward_caveats": [
-      "The real unlock is on quest start, not on completion."
-    ],
-    "known_mismatches": [
-      "The final stew recipe uses `bowlmedium`, not the `bowlsmall` she takes at stage 2."
-    ],
-    "blocked_reason": null,
-    "stage_summary": [
-      "Talk to Babushka to unlock Crafting.",
-      "Craft and turn in `berylpendant`.",
-      "Fletch and turn in `bowlsmall`.",
-      "Cook and turn in `stew` using `bowlmedium + mushroom1 + tomato`."
-    ],
-    "walkthrough": "Start the quest with Babushka, craft `berylpendant`, then `bowlsmall`, then a fresh `bowlmedium` for the final `stew` recipe.",
-    "items_needed": "berylpendant x1, bowlsmall x1, stew x1",
-    "crafting_chain": {
-      "berylpendant": "beryl x1 + string x1",
-      "string": "bluelily x1 at Crafting Lv1",
-      "bowlsmall": "stick x2 at Fletching Lv3",
-      "stew": "bowlmedium x1 + mushroom1 x1 + tomato x1"
-    },
-    "tips": "Babushka's ingredients store is inconvenient while her NPC slot is claimed by this quest, so source the final mushroom from drops. Chained-fletch caveat: Kaetram's Crafting interface stays open after a craft_item call; a second craft_item on the same skill may land as a no-op (selected_name updates client-side, but inventory does not). Workaround: between fletch crafts, force the menu closed (move 1 tile or call interact_npc on a non-shop NPC) before re-opening. The seeded reachability path uses pre-fletched intermediates to sidestep this.",
-    "walkthrough_steps": [
-      "Babushka at (702, 608) is in a region disjoint from Mudwich. The canonical route requires the Aynor warp (gated by ancientlands quest) plus door 463 at (406, 292) \u2192 (433, 270), then walk to door (483, 275) which teleports to (702, 613) inside her room.",
-      "Without ancientlands, an alternate route is: get to door (483, 275) on the Babushka exterior region somehow (no overland path from Mudwich exists per the static map). For a vanilla agent the practical route is: complete enough other quests to unlock a connecting warp, OR seed the agent at Babushka.",
-      "Once adjacent to Babushka: interact_npc(name='Babushka', accept_quest_offer=True). This UNLOCKS Crafting on quest start (the unlock fires before you complete).",
-      "Stage 1 \u2192 2 (berylpendant): gather('Blue Lily Bush') at (278, 250) for 1 bluelily, then craft_item(skill='crafting', recipe_key='string'). Buy 1 beryl from the Miner shop via buy_item(npc_name='Miner', item_index=5, count=1) at 20g \u2014 Miner is a generic vendor; mining the rock yourself is OFF-ROUTE (Miner's Quest is off-limits, so the shop is the only canonical path). craft_item(skill='crafting', recipe_key='berylpendant'). interact_npc('Babushka') to turn in (TWO calls: first opens dialogue, second consumes the pendant).",
-      "Stage 2 \u2192 3 (bowlsmall): collect 3 logs from Oak Tree near Mudwich at (~210, 110) using **Lumberjacking** (skill 0; the bronzeaxe in your starter kit is enough). 3 logs \u2192 craft_item(skill='fletching', recipe_key='stick', count=3) \u2192 6 sticks total (need 2 for bowlsmall now, 4 for bowlmedium at stage 3). **Force the Fletching menu closed before the next craft** (move 1 tile or call interact_npc on a non-shop NPC) \u2014 chaining stick\u2192bowlsmall in the same open interface lands the second packet as a no-op. Then craft_item(skill='fletching', recipe_key='bowlsmall', count=1) (consumes 2 sticks). interact_npc('Babushka') TWICE to turn in.",
-      "Stage 3 \u2192 4 (stew): NOTE \u2014 server actually wants `bowlmedium`, not `bowlsmall`, for the final stew despite Babushka taking bowlsmall at stage 2. Same chained-craft caveat applies: close the Fletching menu before craft_item(skill='fletching', recipe_key='bowlmedium', count=1) (consumes the remaining 4 sticks). gather one tomato at (220, 107) and one mushroom1 (drops from goblins/ogres/etc \u2014 slow, ~0.75% per kill; consider Babushka's store after the quest finishes). craft_item(skill='cooking', recipe_key='stew', count=1) using bowlmedium + tomato + mushroom1. interact_npc('Babushka') TWICE to finish."
-    ]
-  },
   "Miner's Quest": {
     "name": "Miner's Quest",
     "status": "off-limits",
     "npc": "Miner (`miner`)",
-    "blocked_reason": "Auto-bypassed on login (no Mining XP granted). Mining is not part of the agent playthrough. Treat the Miner NPC as a generic vendor only — buy ores, beryl, weapons, and armor from the shop.",
+    "blocked_reason": "Auto-bypassed on login (no Mining XP granted). Mining is not part of the agent playthrough. Treat the Miner NPC as a generic vendor only \u2014 buy ores, beryl, weapons, and armor from the shop.",
     "walkthrough": "Do not accept this quest. The Miner is a vendor, not a quest giver."
   },
   "Miner's Quest II": {
@@ -552,14 +424,14 @@
     },
     "tips": "All three required nodes share a single Foraging 5 gate \u2014 grind once (~25 blueberry gathers), harvest in any order.",
     "walkthrough_steps": [
-      "From Mudwich: warp(location='lakesworld') lands at (319, 281). Walk ~14 tiles east to Herby Mc. Herb at (333, 281). (Overland is reachable too via the pin chain (245,170)→(285,190)→(293,242)→(311,254)→(327,268), but the warp is faster after Desert Quest is finished.)",
+      "From Mudwich: warp(location='lakesworld') lands at (319, 281). Walk ~14 tiles east to Herby Mc. Herb at (333, 281). (Overland is reachable too via the pin chain (245,170)\u2192(285,190)\u2192(293,242)\u2192(311,254)\u2192(327,268), but the warp is faster after Desert Quest is finished.)",
       "Once adjacent: interact_npc(npc_name='Herby Mc. Herb', accept_quest_offer=True).",
       "Grind Foraging on Blueberry Bush at Mudwich (155, 103). ~52 gathers to Lv5 unlocks Blue Lily, Tomato, and Paprika together.",
       "Walk to Blue Lily Bush (278, 250). Gather 3x bluelily.",
-      "Return to Herby Mc. Herb and interact_npc to turn in the lilies. (May need TWO calls — first opens dialogue, second consumes items.)",
+      "Return to Herby Mc. Herb and interact_npc to turn in the lilies. (May need TWO calls \u2014 first opens dialogue, second consumes items.)",
       "Walk to Paprika Bush (298, 300). Gather 2 paprika.",
       "Walk to Tomato Plant Thingy (220, 107). Gather 2 tomato.",
-      "Return to Herby Mc. Herb for final turn-in (interact_npc — again, may need 2 calls)."
+      "Return to Herby Mc. Herb for final turn-in (interact_npc \u2014 again, may need 2 calls)."
     ]
   },
   "Scavenger": {
@@ -599,7 +471,7 @@
     "item_sources": {
       "Tomato": "Forage at Foraging 5, buy from ingredients store, or get vegetable-table drops.",
       "Strawberry": "Fruit-table drop from goblins, ogres, ants, hobgoblins \u2014 now ~10% per kill after drop-rate patch (was 0.8%). Plan ~20 goblin kills for 2 strawberries.",
-      "String": "Craft from bluelily at Crafting 1 (requires Arts and Crafts started) or get ordinary-table drops."
+      "String": "Ordinary-table drop from common mobs."
     },
     "tips": "The ingredient turn-in is simple, but sourcing the items can take time if you have low Foraging."
   },

@@ -25,7 +25,7 @@ from tests.e2e.helpers.seed import cleanup_player, seed_player, snapshot_player
 # should reliably advance stage 0 → > 0 via interact_npc.
 SIMPLE_ACCEPT_QUESTS = [
     "foresting", "anvilsechoes", "scientistspotion", "minersquest",
-    "herbalistdesperation", "artsandcrafts", "ricksroll", "seaactivities",
+    "herbalistdesperation", "ricksroll",
     "royaldrama", "royalpet", "clamchowder", "scavenger", "sorcery",
     "desertquest", "ancientlands",
 ]

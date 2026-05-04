@@ -1,10 +1,10 @@
 ---
-description: Trigger when the user asks to analyze a Sonnet/Claude/DeepSeek/etc agent run, score paper metrics, find why agents got stuck on a quest, see per-quest stage progression, plateau histograms across runs, error buckets, BFS→warp compliance, "what happened in the last run", "score this run on the 5 metrics", "did agents finish any Core 5 quests", "where do agents plateau on Rick's Roll", or wants a per-agent summary of recent activity.
+description: Trigger when the user asks to analyze a Sonnet/Claude/DeepSeek/etc agent run, score paper metrics, find why agents got stuck on a quest, see per-quest stage progression, plateau histograms across runs, error buckets, BFS→warp compliance, "what happened in the last run", "score this run on the 5 metrics", "did agents finish any Core 3 quests", "where do agents plateau on Rick's Roll", or wants a per-agent summary of recent activity.
 ---
 
 Analyze the latest (or specified) agent run on the GCP VM and produce a clean
-per-agent + per-quest summary, including the 5 paper metrics from KAE-50 /
-KAE-49 and Core 5 stage progression.
+per-agent + per-quest summary, including the 5 paper metrics and Core 3
+stage progression.
 
 **Setup — SSH to the VM and locate the repo:**
 ```bash
@@ -36,27 +36,27 @@ ssh patnir41@34.28.111.6 "cd /home/patnir41/projects/kaetram-agent && \
 ```
 
 Emits per-agent (run-aggregated): format accuracy, argument accuracy,
-tool-selection (DEFERRED — needs Claude-as-judge or hand-label), **Core 5
+tool-selection (DEFERRED — needs Claude-as-judge or hand-label), **Core 3
 stages newly reached this run** (last_observe stage − first_observe stage
-summed across the 5 quests, denominator 21), and turn efficiency (new stages
+summed across the 3 quests, denominator 10), and turn efficiency (new stages
 ÷ total turns). Headline number framework for the paper. Subtracting the
 first observe defends against `quest_resume.json` replaying prior-run
 completions into session 1's prompt; only stages genuinely reached this run
 count.
 
-## Step 3 — Core 5 progression timeline
+## Step 3 — Core 3 progression timeline
 
 ```bash
 ssh patnir41@34.28.111.6 "cd /home/patnir41/projects/kaetram-agent && \
     python3 scripts/log_analysis/analyze.py --stale quest"
 ```
 
-Per-quest timeline for each Core 5 (Foresting, Herbalist's Desperation,
-Rick's Roll, Arts and Crafts, Sea Activities). For each: stage transitions
-(when 0→1, 1→2, etc. happened, which session/turn, which tool triggered it),
-the model's reasoning right before each advance, NPCs talked to, tool/error
-breakdown while the quest was active. **THE primary diagnostic for "why did
-agent N get stuck on Rick's Roll?".**
+Per-quest timeline for each Core 3 (Foresting, Herbalist's Desperation,
+Rick's Roll). For each: stage transitions (when 0→1, 1→2, etc. happened,
+which session/turn, which tool triggered it), the model's reasoning right
+before each advance, NPCs talked to, tool/error breakdown while the quest
+was active. **THE primary diagnostic for "why did agent N get stuck on
+Rick's Roll?".**
 
 Scope to one quest by substring:
 ```bash
@@ -71,7 +71,7 @@ ssh patnir41@34.28.111.6 "cd /home/patnir41/projects/kaetram-agent && \
     python3 scripts/log_analysis/analyze.py quest --cross-run"
 ```
 
-For each agent, max-stage reached per Core 5 quest across **every run ever**.
+For each agent, max-stage reached per Core 3 quest across **every run ever**.
 Answers "where do agents plateau?" with a histogram like
 `Rick's Roll  [0]×88  [1]×9  [4]×1  →  finished 1/98`. Heavy — re-parses
 every run dir; expect ~30s.
@@ -90,7 +90,7 @@ recovery vs loop patterns and rule adoption (BFS_NO_PATH → warp count
 vs BFS_NO_PATH → navigate-retry count tells you whether the BFS→warp rule
 landed).
 
-Slice by which Core 5 quest was active when the error fired:
+Slice by which Core 3 quest was active when the error fired:
 ```bash
 ssh patnir41@34.28.111.6 "cd /home/patnir41/projects/kaetram-agent && \
     python3 scripts/log_analysis/analyze.py --stale errors --by-quest"
@@ -139,8 +139,8 @@ After running the relevant subset of the above (don't run every step if not
 needed — pick by question type), write a tight summary:
 
 - **Run scope:** which run, how long, total cost, did it finish or get terminated mid-flight
-- **Per-agent:** final level, deaths, total turns, total cost, **Core 5 stages reached this run**
-- **Per-Core-5-quest plateau:** for each agent, did they touch each quest at all? If yes, what stage did they reach? If they got stuck, which error bucket dominated *while that quest was active*?
+- **Per-agent:** final level, deaths, total turns, total cost, **Core 3 stages reached this run**
+- **Per-Core-3-quest plateau:** for each agent, did they touch each quest at all? If yes, what stage did they reach? If they got stuck, which error bucket dominated *while that quest was active*?
 - **Top error pattern:** which bucket dominated and what agents did after — surfaces rule-adoption (BFS_NO_PATH → navigate-retry vs warp tells you whether the BFS→warp rule landed)
 - **Reasoning at stage transitions:** quote the `quest` output's "thinking before stage advance" lines when relevant — agents' self-narration usually contains the answer
 - **Recommendation:** what to change before the next run (game patch, prompt rule, tool surfacing)
@@ -155,7 +155,7 @@ rather than grepping logs by hand.
 | `--stale` | include agents whose latest run hasn't been touched in 10+ min (default: only currently-running) |
 | `--run <id>` | scope to specific historical run; parses every session in it |
 | `--session N` | drill down to a single session inside the resolved run (1-based) |
-| `--by-quest` | (errors) slice errors by which Core 5 quest was active at the time |
+| `--by-quest` | (errors) slice errors by which Core 3 quest was active at the time |
 | `--cross-run` | (quest) walk every run per agent for a max-stage histogram |
 | `--all-runs` | for `runs` cmd, list every run instead of recent N |
 | `--claude` / `--opencode` | force a parser (default: auto-detect from each session's meta.json) |
@@ -168,9 +168,9 @@ rather than grepping logs by hand.
   tool_result JSON + observe-only `\n\nASCII_MAP:` split for Claude;
   step_finish cost/token aggregation + `<think>` extraction for OpenCode)
 - `scripts/log_analysis/README.md` — programmatic API docs
-- `prompts/quest_walkthroughs.json` — canonical Core 5 stage counts (used as the metrics denominator)
-- Niral's metrics proposal (KAE-49): format / argument / tool-selection /
-  stage completion / turn efficiency
+- `prompts/quest_walkthroughs.json` — canonical Core 3 stage counts (used as the metrics denominator)
+- Niral's metrics proposal: format / argument / tool-selection / stage
+  completion / turn efficiency
 
 ## Output expectations
 

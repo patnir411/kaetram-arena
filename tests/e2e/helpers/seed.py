@@ -54,15 +54,10 @@ NON_STACKABLE_KEYS: frozenset[str] = frozenset({
     "tomato",         # Scavenger, Herbalist's
     "strawberry",     # Scavenger
     "paprika",        # Herbalist's
-    "mushroom1",      # Arts and Crafts
-    "bowlsmall",      # Arts and Crafts, Clam Chowder
-    "bowlmedium",     # Arts and Crafts
-    "stew",           # Arts and Crafts
+    "bowlsmall",      # Clam Chowder
     "clamobject",     # Clam Chowder
     "clamchowder",    # Clam Chowder
-    "beryl",          # Arts and Crafts
-    "berylpendant",   # Arts and Crafts
-    "string",         # Scavenger, Arts and Crafts
+    "string",         # Scavenger
     "cd",             # Desert Quest
     "seaweedroll",    # Rick's Roll
     "rawshrimp",      # Rick's Roll
