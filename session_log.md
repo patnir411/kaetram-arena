@@ -3,6 +3,16 @@ _Keep under 30 lines. Update at end of every session. Most recent first._
 
 ---
 
+## 2026-05-06 — r10 corpus boundary: archive everything pre-Core-3 + non-Claude
+
+Drew a hard line for the r10 SFT corpus: **post-Core-3 Claude only**. Moved 291 run dirs (198 pre-Core-3 Claude + 81 opencode + 12 gemini + 6 codex, ≈1.92 GB) into `dataset/raw/_archive/<harness>/agent_N/run_*`. Active corpus is now 12 run dirs (4 per agent × 3) totaling ~190 MB across 4 May-4-or-later Claude runs: `run_20260504_140418`, `run_20260504_172157`, `run_20260504_221206`, `run_20260505_150033`. Also archived 3 stray `runs/state/` Apr-27 relics into `_archive/_legacy_state/` and the `_deleted_browser_run_code_sessions.manifest` scrub artifact.
+
+**Layout invariant:** `parse.py:list_runs()` globs `agent_*/runs/run_*` and does not recurse into `_archive/` — so `analyze.py`, `extract_turns.py`, and `convert_to_qwen.py` are physically unable to mix archived data into the live corpus. To inspect archived runs, parse the `_archive/<harness>/agent_N/run_*` paths directly. Docs synced: `dataset/DATA.md` (layout diagram + archive boundary block), `CLAUDE.md` (log-analysis section), `scripts/log_analysis/README.md` (active-corpus note).
+
+**Latest 6h Claude run:** `run_20260505_150033` (May 5, 3 PM EDT, 3-agent fresh restart). agent_1 (completionist) + agent_2 (explorer) finished all 3 Core 3; agent_0 (grinder) plateaued at Rick's Roll 1/4 again. 5,910 turns, $211 across the three agents.
+
+---
+
 ## 2026-05-04 — Core 3 benchmark refactor
 
 **Benchmark scope contracts to Core 3 (Foresting + Herbalist's Desperation + Rick's Roll).** Offline BFS over `Kaetram-Open/.../world.json` confirms two prior benchmark quests are structurally unreachable from a vanilla Mudwich state — the chain gates form circular dependencies / cross-region disjoints that can't be resolved by any in-game tool sequence. Empirical confirmation lined up: in the most recent 6h Claude run, all three agents finished Foresting + Herbalist's + Rick's Roll; the unreachable pair was never accepted by any agent.

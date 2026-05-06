@@ -301,8 +301,11 @@ tool surface in the high teens.
 Primary tool for "how are the agents doing" — parses session JSONL logs
 under `dataset/raw/agent_*/runs/run_*/` (with `logs/` symlink to the latest
 run) and reports per-agent status, quests, tool distribution, categorized
-errors, rule-adoption signals, and reasoning. **Prefer this over LLM subagents for
-live status / behavioral audit** — it parses fields directly (`active_quests`,
+errors, rule-adoption signals, and reasoning. The active corpus is **post-Core-3
+Claude only** — pre-Core-3 + non-Claude runs were moved to
+`dataset/raw/_archive/<harness>/agent_N/run_*` on 2026-05-06 and are invisible
+to `analyze.py` (the parser's `list_runs()` does not recurse into `_archive/`).
+**Prefer this over LLM subagents for live status / behavioral audit** — it parses fields directly (`active_quests`,
 `live_gate_status.gated`, `inventory_summary.full`, mob `level`, etc.), so the
 answer is ground truth not an inference, and it doesn't burn tokens.
 

@@ -33,21 +33,29 @@ dataset/
 ├── raw/
 │   ├── agent_0/
 │   │   ├── runs/
-│   │   │   ├── run_20260427_113807/  ← each restart-agent.sh creates a new run dir (EST timestamp)
+│   │   │   ├── run_20260504_140418/  ← each restart-agent.sh creates a new run dir (EST timestamp)
 │   │   │   │   ├── run.meta.json     ← run-level metadata (personality, harness, model, etc.)
-│   │   │   │   ├── session_1_20260427_153807.log
-│   │   │   │   ├── session_1_20260427_153807.meta.json
+│   │   │   │   ├── session_1_20260504_180418.log
+│   │   │   │   ├── session_1_20260504_180418.meta.json
 │   │   │   │   └── ...
-│   │   │   ├── run_20260426_031526/
+│   │   │   ├── run_20260504_172157/
 │   │   │   └── ...
-│   │   └── logs -> runs/run_20260427_113807  ← symlink to latest run (backward compat)
+│   │   └── logs -> runs/run_20260505_150033  ← symlink to latest run (backward compat)
 │   ├── agent_1/  (same structure)
-│   └── agent_2/  (same structure)
+│   ├── agent_2/  (same structure)
+│   └── _archive/             ← frozen out-of-corpus runs; analyze.py / extract_turns.py SKIP this tree
+│       ├── claude/agent_{0,1,2}/run_*    ← pre-Core-3-refactor Claude runs (May 4 cutoff, 2026-05-06 archive)
+│       ├── opencode/agent_{0,1,2}/run_*  ← experimental harness, never in training
+│       ├── codex/agent_{0,1,2}/run_*
+│       ├── gemini/agent_{0,1,2}/run_*
+│       └── _legacy_state/                ← stray runs/state/ relics from pre-symlink layout
 ├── extracted/                ← OODA turns extracted from raw logs (generated, not committed)
 ├── qwen_sft/                 ← Final SFT training records (generated, not committed)
 ├── qwen_kto/                 ← KTO preference records (generated, gitignored)
 └── world_model/              ← Forward dynamics model data
 ```
+
+**Archive boundary (2026-05-06).** Anything older than the Core 3 refactor (May 4, 2026) — and every non-Claude harness run — was moved into `dataset/raw/_archive/<harness>/agent_N/run_*`. The active corpus under `agent_*/runs/` is the **r10 candidate set**: post-Core-3 Claude only. `parse.py:list_runs()` globs `runs/run_*` and never recurses into `_archive/`, so archived runs are invisible to `analyze.py` and the SFT extractors by default. To inspect archived data, parse the `_archive/<harness>/agent_N/run_*` paths directly.
 
 Raw logs and generated data live on the GCP VM only (`34.28.111.6`). Not committed to git. Agent_3's legacy EFFICIENT logs and the pre-personality backlog were deleted after the personality system was finalized on April 3.
 
