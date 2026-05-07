@@ -38,12 +38,17 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 TIER1_METRICS = [
+    ("core3_stages_advanced", "Core 3 Stages (out of 10)", "higher"),
     ("tool_parse_rate", "Tool Parse Rate", "higher"),
     ("quest_completion_rate", "Quest Completion Rate", "higher"),
     ("xp_per_turn", "XP per Turn (est)", "higher"),
     ("survival_rate", "Survival Rate", "higher"),
     ("deaths_per_session", "Deaths per Session", "lower"),
 ]
+
+# Family-wise α for Bonferroni-corrected significance over Tier 1.
+# Per-test threshold = FWER_ALPHA / (len(TIER1_METRICS) * n_model_pairs).
+FWER_ALPHA = 0.05
 
 # Tier 2 metrics (diagnostic/appendix — no Bonferroni)
 TIER2_METRICS = [
@@ -278,8 +283,18 @@ def compare_metric(
     }
 
 
-def compare_models(base_data: dict, treatment_data: dict) -> dict:
-    """Full statistical comparison between two models."""
+def compare_models(
+    base_data: dict,
+    treatment_data: dict,
+    n_model_pairs: int = 1,
+) -> dict:
+    """Full statistical comparison between two models.
+
+    `n_model_pairs` controls the Bonferroni family size: when this comparison
+    is one of K pairwise comparisons across N models (K = N*(N-1)/2), pass
+    n_model_pairs=K so the corrected p-values share family-wise α across
+    metrics × pairs. Default 1 keeps backward-compat for two-model invocations.
+    """
     base_metrics = base_data["metrics"]
     treat_metrics = treatment_data["metrics"]
 
@@ -297,11 +312,20 @@ def compare_models(base_data: dict, treatment_data: dict) -> dict:
         tier1_results.append(result)
         tier1_p_values.append(result["p_value"])
 
-    # Apply Bonferroni correction to Tier 1
-    corrected_p = bonferroni_correct(tier1_p_values, n_comparisons=len(TIER1_METRICS))
+    # Apply Bonferroni correction to Tier 1 across (metrics × model pairs).
+    # FWER target is FWER_ALPHA across the full family — single-test threshold
+    # follows from corrected_p = p * (n_metrics * n_model_pairs).
+    family_size = max(1, len(TIER1_METRICS) * n_model_pairs)
+    corrected_p = bonferroni_correct(tier1_p_values, n_comparisons=family_size)
     for i, result in enumerate(tier1_results):
         result["p_corrected"] = round(corrected_p[i], 6)
-        result["significant"] = corrected_p[i] < 0.01  # alpha = 0.01 after correction
+        result["significant"] = corrected_p[i] < FWER_ALPHA
+    family_meta = {
+        "n_metrics": len(TIER1_METRICS),
+        "n_model_pairs": n_model_pairs,
+        "family_size": family_size,
+        "fwer_alpha": FWER_ALPHA,
+    }
 
     # Tier 2 comparisons (no Bonferroni)
     tier2_results = []
@@ -325,7 +349,42 @@ def compare_models(base_data: dict, treatment_data: dict) -> dict:
         "scenario": base_data["meta"].get("scenario", "?"),
         "tier1": tier1_results,
         "tier2": tier2_results,
+        "bonferroni": family_meta,
     }
+
+
+def compare_n_models(models: dict[str, dict]) -> dict:
+    """Run all pairwise comparisons across N models and share Bonferroni FWER.
+
+    `models` is `{model_name: results_dict}` (each results_dict is the JSON
+    written by eval_harness.py). Returns a flat dict with one entry per
+    ordered pair `"<base>_vs_<treatment>"` plus a `_pairs` index list.
+
+    With 3 models there are 3 pairs (e.g. base vs r9, base vs r10, r9 vs r10);
+    each compare_models() call gets n_model_pairs=3 so the per-test α is
+    FWER_ALPHA / (n_metrics × 3) — the correct family-wise threshold.
+    """
+    names = list(models.keys())
+    n = len(names)
+    if n < 2:
+        raise ValueError(f"need >=2 models, got {n}")
+
+    pairs: list[tuple[str, str]] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            pairs.append((names[i], names[j]))
+
+    out: dict[str, object] = {
+        "_pairs": [f"{a}_vs_{b}" for a, b in pairs],
+        "_n_models": n,
+        "_n_pairs": len(pairs),
+        "_fwer_alpha": FWER_ALPHA,
+    }
+    for a, b in pairs:
+        out[f"{a}_vs_{b}"] = compare_models(
+            models[a], models[b], n_model_pairs=len(pairs)
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -427,9 +486,14 @@ def main():
 The first results file is treated as the BASE (control) model.
 All subsequent files are compared against the base.
 
+Bonferroni correction is applied across (n_metrics × n_model_pairs):
+  - Default mode: n_model_pairs = (n_results - 1)  [base vs each treatment]
+  - --all-pairs: n_model_pairs = C(n_results, 2)   [every pair, both directions excluded]
+
 Examples:
   python3 eval_compare.py dataset/eval/base/results.json dataset/eval/r9-sft/results.json
   python3 eval_compare.py base.json sft.json kto.json --output comparison.md
+  python3 eval_compare.py base.json r9-sft.json r10-sft.json --all-pairs
         """,
     )
     parser.add_argument(
@@ -444,30 +508,56 @@ Examples:
         "--json", action="store_true",
         help="Output raw JSON instead of markdown",
     )
+    parser.add_argument(
+        "--all-pairs", action="store_true",
+        help="Compare every model pair (not just base-vs-each). "
+             "Bonferroni FWER shared across C(N,2) comparisons.",
+    )
     args = parser.parse_args()
 
     if len(args.results) < 2:
         print("Error: need at least 2 results files (base + treatment)")
         sys.exit(1)
 
-    # Load all results
-    base_data = load_results(args.results[0])
-    print(f"Base model: {base_data['meta']['model']} ({base_data['meta']['ok_episodes']} episodes)")
+    # Load all results once
+    loaded = {}
+    for path in args.results:
+        data = load_results(path)
+        name = data["meta"]["model"]
+        loaded[name] = data
+        print(f"Loaded: {name} ({data['meta']['ok_episodes']} episodes)")
 
-    all_comparisons = []
     all_output = []
 
-    for treat_path in args.results[1:]:
-        treat_data = load_results(treat_path)
-        print(f"Treatment:  {treat_data['meta']['model']} ({treat_data['meta']['ok_episodes']} episodes)")
-
-        comparison = compare_models(base_data, treat_data)
-        all_comparisons.append(comparison)
-
-        if args.json:
-            all_output.append(format_json(comparison))
-        else:
-            all_output.append(format_markdown_table(comparison))
+    if args.all_pairs:
+        # Symmetric all-vs-all: use the dedicated wrapper so FWER is shared.
+        n_pairs = len(loaded) * (len(loaded) - 1) // 2
+        print(f"\nMode: --all-pairs ({n_pairs} comparisons, "
+              f"Bonferroni family = {len(TIER1_METRICS)} metrics × {n_pairs} pairs "
+              f"= {len(TIER1_METRICS) * n_pairs} tests)")
+        n_model = compare_n_models(loaded)
+        for pair_key in n_model["_pairs"]:
+            comparison = n_model[pair_key]
+            if args.json:
+                all_output.append(format_json(comparison))
+            else:
+                all_output.append(format_markdown_table(comparison))
+    else:
+        # Base-vs-each: Bonferroni family = metrics × (n_results - 1).
+        base_name = list(loaded.keys())[0]
+        base_data = loaded[base_name]
+        treatments = [name for name in loaded if name != base_name]
+        n_pairs = max(1, len(treatments))
+        print(f"\nMode: base-vs-each ({n_pairs} comparisons, "
+              f"Bonferroni family = {len(TIER1_METRICS)} metrics × {n_pairs} pairs "
+              f"= {len(TIER1_METRICS) * n_pairs} tests)")
+        for treat_name in treatments:
+            treat_data = loaded[treat_name]
+            comparison = compare_models(base_data, treat_data, n_model_pairs=n_pairs)
+            if args.json:
+                all_output.append(format_json(comparison))
+            else:
+                all_output.append(format_markdown_table(comparison))
 
     output = "\n\n---\n\n".join(all_output)
 

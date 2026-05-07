@@ -10,7 +10,9 @@ Working notes for the ICLR 2027 submission (Paper 1 of the AgentScape two-paper 
 
 ## One-Sentence Framing
 
-Structured game-agent distillation: we distill a frontier LLM's gameplay reasoning into a 9B model using a typed MCP-style tool API, personality-diverse teacher data, and outcome-based preference refinement.
+Structured **plan-execution distillation** for game agents: given prompt scaffolding (typed MCP tool API + procedural quest knowledge), we distill a frontier LLM's tool-use trajectories into a 9B model using capability-archetype-diverse teacher data and outcome-based preference refinement.
+
+**Note on framing.** The paper isolates the SFT distillation effect *given* the procedural scaffolding the agent receives at inference (`prompts/system.md` + `prompts/game_knowledge.md`). It does NOT claim the model "learned to play Kaetram" — game-knowledge baked into the prompt (NPC coords, quest walkthroughs, gate calculus) means the agent is executing an annotated runbook. The student-vs-teacher comparison is therefore a *plan-execution-fidelity* claim, not a *world-model-acquisition* claim. The no-knowledge ablation (see Limitations) is the future-work step that would tighten this to the stronger framing.
 
 ---
 
@@ -103,6 +105,18 @@ Planned (KAE-16) but not implemented. If it works, it's a strong contribution: s
 6. **Conclusion** — Structured tool APIs appear to make game-agent distillation practical. Outcome-based preference learning is the main post-SFT refinement lever; capability-archetype diversity (completionist / grinder / explorer_tinkerer) is promising but still partially unverified.
 
 ---
+
+## Limitations & Future Work
+
+**Knowledge-leakage in the prompt.** `prompts/game_knowledge.md` contains NPC coordinates, quest walkthroughs, station-finding rules, gate calculus (e.g. exact blueberry counts for Foraging gates), and the Rick's Roll multi-room puzzle pin chain. The agent does not learn this from gameplay — it is given. The Core-3 result therefore measures *plan-execution fidelity given a procedural plan*, not *world-model acquisition*. A no-knowledge ablation arm — running base + r10-sft against `prompts/system.md` only, with `__GAME_KNOWLEDGE_BLOCK__` and `quest_resume.json` injection stripped — would isolate the SFT effect from the scaffolding effect. This is scoped as future work (requires a `--no-knowledge` flag in `eval_harness.py:resolve_system_prompt()`; not implemented in v1).
+
+**Train/eval scaffolding asymmetry.** Training-time data collection runs through `orchestrate.py`, which injects a `quest_resume.json` block into the system prompt at session start (cross-session memory). Eval episodes run through `play_qwen.py`, which does NOT inject `quest_resume.json` — eval is fresh-Mongo with no carryover memory. Training and eval are therefore non-equivalent on cross-session memory; this is a confound the paper should name explicitly. Either match the conditions (inject resume in eval too) or report both with-/without-resume eval cells.
+
+**Harness × model conflation.** All training trajectories are Claude Sonnet via the Claude Code CLI. The base comparator is unfinetuned Qwen3.5-9B served via vLLM. A reviewer can argue we have not separated "distillation works" from "Sonnet > base Qwen on this task." Mitigation requires either same-model-different-harness or same-harness-different-model runs. Cross-harness infrastructure is in place (Codex/Gemini/OpenCode fully integrated, 6 OpenCode models), but cross-model SFT corpora have not been collected. Tracked in `VARIABLES.md` §"Three most dangerous unisolated variables."
+
+**Statistical power.** The published paper claim requires N ≥ 50 per arm to detect Glass's δ ≈ 0.5 (10% Core-3-stage delta) with 80% power post-Bonferroni over (n_metrics × n_model_pairs). `eval_harness.py:--episodes` default is now 50; smaller exploratory runs should not be quoted as paper claims.
+
+**Archetype-diversity claim is provisional.** The n=731 automated audit found that "task pressure dominates personality" — under quest deadlines, archetype-flavored agents converge to similar action distributions. We retain capability-archetype labels because they appear to produce different *decision boundaries*, but the 1-archetype-vs-3 ablation is not yet run. If the ablation ties, the claim should be downgraded to "data-augmentation strategy" rather than a research contribution.
 
 ## Related design docs
 

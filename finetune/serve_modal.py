@@ -22,6 +22,8 @@ Usage:
     client = OpenAI(base_url="https://<your-modal-url>/v1", api_key="not-needed")
 """
 
+import os
+
 import modal
 
 # ---------------------------------------------------------------------------
@@ -56,9 +58,11 @@ serve_image = (
 # ---------------------------------------------------------------------------
 
 BASE_MODEL_ID = "Qwen/Qwen3.5-9B"  # HF model ID (not Unsloth wrapper)
-SFT_EXPERIMENT = "kaetram-qwen3.5-9b-r9"
+# Override via env: SFT_EXPERIMENT=kaetram-qwen3.5-9b-r11 modal deploy finetune/serve_modal.py
+SFT_EXPERIMENT = os.environ.get("SFT_EXPERIMENT", "kaetram-qwen3.5-9b-r10")
 GRPO_EXPERIMENT = "kaetram-qwen3.5-9b-grpo"
-MERGED_MODEL_DIR = "/model_cache/kaetram-merged-r9"
+_RUN_TAG = SFT_EXPERIMENT.rsplit("-", 1)[-1]  # "r10" from "kaetram-qwen3.5-9b-r10"
+MERGED_MODEL_DIR = f"/model_cache/kaetram-merged-{_RUN_TAG}"
 
 # vLLM settings
 MAX_MODEL_LEN = 32768  # A100 40GB fits 9B bf16 (18GB) + 32k KV cache (~12GB)

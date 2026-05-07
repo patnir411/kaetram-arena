@@ -436,6 +436,19 @@ def _read_quest_achievement_snapshot_with_retry(username: str, retries: int = 5,
     return None
 
 
+# Core 3 quest set — paper headline benchmark. Mirrors
+# `scripts/log_analysis/parse.py:CORE_3_QUEST_NAMES`. Stage caps come from
+# `prompts/quest_walkthroughs.json` (Foresting=3, Herbalist's=3, Rick's Roll=4
+# → 10 total). Duplicated here to avoid coupling eval_harness to the
+# log_analysis package's import path.
+CORE_3_QUEST_NAMES: tuple[str, ...] = (
+    "Foresting",
+    "Herbalist's Desperation",
+    "Rick's Roll",
+)
+CORE_3_TOTAL_STAGES = 10
+
+
 def _diff_quest_achievement_metrics(before: dict | None, after: dict | None) -> dict:
     """Compute episode delta + cumulative metrics from quest/achievement snapshots."""
     before = before or {"quests": {}, "achievements": {}}
@@ -459,16 +472,24 @@ def _diff_quest_achievement_metrics(before: dict | None, after: dict | None) -> 
     q_done, q_started, q_done_delta, q_started_delta, q_stages = _summarize(before["quests"], after["quests"])
     a_done, a_started, a_done_delta, a_started_delta, a_stages = _summarize(before["achievements"], after["achievements"])
 
+    # Core 3 stage delta — paper headline metric, capped at 10.
+    core3_stages = 0
+    for name in CORE_3_QUEST_NAMES:
+        before_entry = before["quests"].get(name, {"stage": 0})
+        after_entry = after["quests"].get(name, {"stage": 0})
+        core3_stages += max(0, int(after_entry.get("stage", 0)) - int(before_entry.get("stage", 0)))
+    core3_stages = min(core3_stages, CORE_3_TOTAL_STAGES)
+
     return {
         "quests_completed_db": q_done,
         "quests_accepted_db": q_started,
         "quests_completed_delta": q_done_delta,
         "quests_accepted_delta": q_started_delta,
         "quest_stages_advanced": q_stages,
+        "core3_stages_advanced": core3_stages,
         "achievements_completed_db": a_done,
         "achievements_started_db": a_started,
         "achievements_completed_delta": a_done_delta,
-        "achievements_started_delta": a_started_delta,
         "achievement_stages_advanced": a_stages,
     }
 
@@ -903,6 +924,7 @@ def _save_results(path: Path, model_name: str, endpoint: str, scenario: str,
             "quests_completed_delta": [e.get("quests_completed_delta", 0) for e in ok_episodes],
             "quests_accepted_delta": [e.get("quests_accepted_delta", 0) for e in ok_episodes],
             "quest_stages_advanced": [e.get("quest_stages_advanced", 0) for e in ok_episodes],
+            "core3_stages_advanced": [e.get("core3_stages_advanced", 0) for e in ok_episodes],
             "achievements_completed_delta": [e.get("achievements_completed_delta", 0) for e in ok_episodes],
             "achievements_started_delta": [e.get("achievements_started_delta", 0) for e in ok_episodes],
             "achievement_stages_advanced": [e.get("achievement_stages_advanced", 0) for e in ok_episodes],
@@ -965,8 +987,8 @@ Examples:
              "Default: base + r9-sft with standard Modal endpoints",
     )
     parser.add_argument(
-        "--episodes", type=int, default=30,
-        help="Episodes per model (default: 30, paper minimum: 50 for scenario D)",
+        "--episodes", type=int, default=50,
+        help="Episodes per model (default: 50 — paper minimum for Bonferroni-corrected stat-sig over 3 models × 5 metrics)",
     )
     parser.add_argument(
         "--scenario", default="D", choices=list(SCENARIOS.keys()),
@@ -1175,6 +1197,7 @@ Examples:
         print(f"    Tool Parse Rate:      {_mean(metrics.get('tool_parse_rate', [])):.3f}")
         print(f"    Quest Completion Rate: {_mean(metrics.get('quest_completion_rate', [])):.3f}")
         print(f"    Quest Stages Advanced: {_mean(metrics.get('quest_stages_advanced', [])):.1f}")
+        print(f"    Core 3 Stages (paper): {_mean(metrics.get('core3_stages_advanced', [])):.1f} / {CORE_3_TOTAL_STAGES}")
         print(f"    Achievements Done:     {_mean(metrics.get('achievements_completed_delta', [])):.2f}")
         print(f"    Ach. Stages Advanced:  {_mean(metrics.get('achievement_stages_advanced', [])):.1f}")
         print(f"    Kills (mean):         {_mean(metrics.get('kills', [])):.1f}")

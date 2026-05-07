@@ -139,6 +139,13 @@ same-model-different-harness or same-harness-different-model runs.
 
 - [ ] Decide unit-of-analysis (session vs run vs trajectory) and back-fill it in `extract_turns.py` metadata.
 - [ ] Add `harness` + `model` + `archetype` + `resume_used` flags to per-record metadata so any subset is filterable at training time.
-- [ ] Add at least one no-knowledge / no-resume ablation slot to the eval matrix.
+- [ ] **Add no-knowledge ablation flag to `eval_harness.py:resolve_system_prompt()`** — strip `__GAME_KNOWLEDGE_BLOCK__` and skip `quest_resume.json` injection on `--no-knowledge`. Until shipped, the paper cannot make a "learned to play" claim, only a "plan-execution distillation" claim. See `contribution.md` §Limitations.
 - [ ] Decide r9-only vs r1-r10 progression framing for the paper.
 - [ ] Write up the rsLoRA r7 divergence as a methodological lesson.
+
+## Eval-pipeline notes (post-r10-readiness PR)
+
+- `eval_harness.compute_episode_metrics` now emits `core3_stages_advanced` (capped at 10). `eval_compare.TIER1_METRICS` includes it as the paper headline metric.
+- `eval_compare.compare_models()` accepts `n_model_pairs` for proper Bonferroni FWER over (metrics × pairs). `compare_n_models()` runs all C(N,2) pairs sharing the family. `--all-pairs` CLI flag exposes the symmetric mode.
+- `eval_harness.py:--episodes` default raised 30 → 50 to match paper-minimum N.
+- `serve_modal.py` `SFT_EXPERIMENT` is now env-overridable; default is `kaetram-qwen3.5-9b-r10`. Bumping to r11+ no longer requires a code edit.
