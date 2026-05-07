@@ -1,11 +1,10 @@
 # Dataset Regeneration Plan (r7 → r8)
 
 > **Status: HISTORICAL (2026-04-28).** This is the r7→r8 regeneration runbook from
-> 2026-04-09. r8 shipped, r9 followed, r10 was prepared (see `docs/r10_launch_gate.md` —
-> also superseded). The current focus is Sonnet → 100% Core 3 completion, not dataset
-> regeneration. All actionable steps below are completed and the open questions (§10)
-> are all resolved. Preserved for reference on how dataset rebuilds are sequenced when
-> needed again.
+> 2026-04-09. r8 shipped, r9 followed. r10 was rebuilt 2026-05-06 from the post-Core-3
+> Claude corpus (see `dataset/qwen_sft/README.md` and `research/experiments/training-runs.md`).
+> All actionable steps below are completed and the open questions (§10) are all resolved.
+> Preserved for reference on how dataset rebuilds are sequenced when needed again.
 
 ---
 

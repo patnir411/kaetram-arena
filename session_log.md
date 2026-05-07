@@ -3,7 +3,21 @@ _Keep under 30 lines. Update at end of every session. Most recent first._
 
 ---
 
-## 2026-05-06 — r10 corpus boundary: archive everything pre-Core-3 + non-Claude
+## 2026-05-06 — r10 SFT dataset rebased on post-Core-3 Claude corpus
+
+`dataset/qwen_sft/` rebuilt from the active corpus only: 5 Claude Sonnet runs × 3 agents = 135 sessions, 9,766 raw OODA turns → **9,352 train + 934 val = 10,286 SFT records**. All on the Core 3 prompt (commit `c4dcf8b` or later) under the current grinder/completionist/explorer_tinkerer archetypes.
+
+**Provenance baked in.** `convert_to_qwen.py` now stamps `metadata.json` with `version`, `built_at`, `prompt_commit`, `source_runs[]`, `session_count`, `raw_turns`, `record_counts`, `core3_only`, `harness`, `personality_labels` on every build. Closes the gap that made "what's in r10?" require grepping research docs.
+
+**Archived.** Old r10 (Apr 18, 25,972 records, pre-Core-3, AGGRESSIVE/METHODICAL/CURIOUS labels, includes Sea/A&C trajectories) + 7 sibling backup builds + the pre-Core-3 `extracted/` tree + `qwen_kto_backup_*` + the `archive/` legacy-agents dir all moved to `dataset/_archive/`. `dataset/` top level shrinks to `raw/`, `qwen_sft/`, `qwen_kto/`, `eval/`, `world_model/`, `DATA.md`, `_archive/`. `parse.py` and `convert_to_qwen.py` don't recurse into `_archive/`, so the live pipeline can't mix archived data into r10.
+
+**Launch-gate concept retired.** `docs/r10_launch_gate.md` deleted — the benchmark is live Core 3 completion in `tests/e2e/quests/`, not an SFT-artifact gate. Auto-tests (`test_dataset_filters`, `test_observe_supervision`, `test_truncation`, `test_loop_noise`, `test_think_roundtrip`) remain as the rebuild guard. 20/20 pass on the new build.
+
+**Docs synced.** `dataset/DATA.md` (layout + stats table), `research/INDEX.md` (Recent Major Changes + Action Items), `research/experiments/training-runs.md` (r10 row + r10 section rewritten), `research/experiments/data-quality.md` (counts + corpus rationale), `research/related-work/{agent-sft-landscape,preference-learning}.md`, `research/paper/contribution.md`, `CLAUDE.md` (SFT pipeline section), `dataset/qwen_sft/README.md` (new file — provenance + rebuild instructions).
+
+---
+
+## 2026-05-06 — r10 raw-corpus boundary: archive everything pre-Core-3 + non-Claude
 
 Drew a hard line for the r10 SFT corpus: **post-Core-3 Claude only**. Moved 291 run dirs (198 pre-Core-3 Claude + 81 opencode + 12 gemini + 6 codex, ≈1.92 GB) into `dataset/raw/_archive/<harness>/agent_N/run_*`. Active corpus is now 12 run dirs (4 per agent × 3) totaling ~190 MB across 4 May-4-or-later Claude runs: `run_20260504_140418`, `run_20260504_172157`, `run_20260504_221206`, `run_20260505_150033`. Also archived 3 stray `runs/state/` Apr-27 relics into `_archive/_legacy_state/` and the `_deleted_browser_run_code_sessions.manifest` scrub artifact.
 

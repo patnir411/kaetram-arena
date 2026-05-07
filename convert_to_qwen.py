@@ -24,15 +24,78 @@ import argparse
 import json
 import random
 import re
+import subprocess
 import sys
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 from tool_surface import MODEL_VISIBLE_TOOL_DEFINITIONS as TOOL_DEFINITIONS
 
+REPO_ROOT = Path(__file__).resolve().parent
+
 # Warp location IDs and attack style IDs
 WARP_IDS = {"Mudwich": 0, "Aynor": 1, "Lakesworld": 2, "Crullfield": 3, "Patsow": 4, "Undersea": 5}
 STYLE_IDS = {"Hack": 6, "Chop": 7, "Defensive": 3, "Stab": 1, "Slash": 2}
+
+
+# ── Provenance helpers (stamped into metadata.json on every build) ──────────
+
+def _git_head_short() -> str:
+    try:
+        out = subprocess.check_output(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+        )
+        return out.decode().strip()
+    except Exception:
+        return "unknown"
+
+
+def _list_source_run_ids(input_dir: Path) -> list[str]:
+    """Walk dataset/raw/agent_*/runs/run_* to enumerate which raw runs feed this build.
+
+    The extracted dir doesn't carry run_id explicitly, but the active corpus
+    layout is invariant — every run dir under dataset/raw/agent_*/runs/ that
+    contributed sessions to this extracted dir is a source. We approximate by
+    listing the active runs at build time (the live corpus, post-_archive).
+    """
+    runs: set[str] = set()
+    raw_root = REPO_ROOT / "dataset" / "raw"
+    if not raw_root.is_dir():
+        return []
+    for agent_dir in sorted(raw_root.glob("agent_*")):
+        runs_dir = agent_dir / "runs"
+        if not runs_dir.is_dir():
+            continue
+        for rd in sorted(runs_dir.glob("run_*")):
+            if rd.is_dir():
+                runs.add(rd.name)
+    return sorted(runs)
+
+
+def _count_extracted_sessions(input_dir: Path) -> int:
+    """Count session_*/turns.jsonl directories under the extracted input dir."""
+    p = Path(input_dir)
+    if not p.is_dir():
+        return 0
+    return sum(1 for _ in p.rglob("session_*/turns.jsonl"))
+
+
+def _count_extracted_turns(input_dir: Path) -> int:
+    """Sum line counts across every session_*/turns.jsonl under the extracted input dir."""
+    p = Path(input_dir)
+    if not p.is_dir():
+        return 0
+    total = 0
+    for jl in p.rglob("session_*/turns.jsonl"):
+        try:
+            with jl.open() as f:
+                for _ in f:
+                    total += 1
+        except OSError:
+            pass
+    return total
 
 # System prompt: load the ACTUAL inference prompt (prompts/system.md + game_knowledge.md)
 # so that training and inference see the same instructions.
@@ -1659,9 +1722,19 @@ def main():
         val = all_records[:n_val]
         train = all_records[n_val:]
 
-    # Write metadata (system prompt + tools, injected at training time)
+    # Write metadata (provenance + system prompt + tools, injected at training time)
     metadata_path = args.output / "metadata.json"
     metadata = {
+        "version": "r10",
+        "built_at": datetime.now(timezone.utc).isoformat(),
+        "prompt_commit": _git_head_short(),
+        "core3_only": True,
+        "harness": "claude",
+        "source_runs": _list_source_run_ids(args.input),
+        "session_count": _count_extracted_sessions(args.input),
+        "raw_turns": _count_extracted_turns(args.input),
+        "record_counts": {"train": len(train), "val": len(val), "total": len(train) + len(val)},
+        "personality_labels": list(PERSONALITY_SUFFIXES.keys()),
         "system_prompt": SYSTEM_PROMPT,
         "tools": TOOL_DEFINITIONS,
         "personality_suffixes": PERSONALITY_SUFFIXES,

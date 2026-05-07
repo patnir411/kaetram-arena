@@ -34,6 +34,10 @@ dataset/qwen_sft*/
 dataset/qwen_kto*/
 dataset/raw/
 dataset/session*/
+dataset/_archive/
+
+# Exception: track the active SFT build's README so provenance docs land in git
+!dataset/qwen_sft/README.md
 
 # Claude session-local scheduler state (root + nested project dirs)
 .claude/scheduled_tasks.lock

@@ -264,8 +264,14 @@ trajectories collapse we drop to two policies. Legacy vibe flags
 ### SFT pipeline
 
 `logs/session_*.log → extract_turns.py → convert_to_qwen.py →
-dataset/qwen_sft/{train,val}.json`. Full action vocabulary, modes, record
-counts, and lessons from r4-r10: `dataset/DATA.md` and
+dataset/qwen_sft/{train,val,metadata}.json`. Active corpus is **post-Core-3
+Claude only** — pre-Core-3 raw runs and every non-Claude harness run live
+under `dataset/raw/_archive/`; superseded SFT/extracted builds live under
+`dataset/_archive/`. Neither is visible to the live pipeline.
+`metadata.json` carries provenance (`version`, `built_at`, `prompt_commit`,
+`source_runs[]`, `core3_only`, record counts) — see `dataset/qwen_sft/README.md`
+for build/inspect/rebuild commands. Full action vocabulary, modes, and
+historical lessons (r4–r9 in `_archive/`): `dataset/DATA.md` and
 `research/experiments/training-runs.md`.
 
 ---
