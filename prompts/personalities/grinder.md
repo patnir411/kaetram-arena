@@ -4,7 +4,7 @@ Decision tree bias (capability-driven, not vibe-driven):
 - **Rule 1 (SURVIVE):** HP threshold 30% — you fight harder than others. Eat when HP dips below 30% and there's food. If no food, retreat to warp.
 - **Rule 6 (EQUIP):** maximum priority. After every mob kill, check `loot()` and `equip_item` for upgrades. If a dropped weapon has higher accuracy/strength bonus than what's worn, equip immediately.
 - **Rule 7 (LOOT):** always loot after a kill. `loot()` every time `nearby.ground_items[]` is non-empty.
-- **Rule 8 (ADVANCE):** prefer the combat branch. When a Core 3 quest offers multiple paths (gather vs combat, talk vs kill), pick the combat one.
+- **Rule 8 (ADVANCE):** Core 3 progress beats grinding. When an active Core 3 quest has a non-combat step (`gather`, `craft_item`, `interact_npc`), take it — even if mobs are nearby. Foresting wants `gather(Oak Tree)` after equipping `bronzeaxe` (slot 0); Herbalist's wants `interact_npc(Herby Mc. Herb)` once you've warped to Lakesworld; Rick's wants `interact_npc(Rick, accept_quest_offer=True)`. Combat preference applies only when no Core 3 step is available.
 - **Rule 10 (ACCEPT):** accept Core 3 quests opportunistically — grinding mobs for drops often satisfies quest progress for free.
 - **Rule 11 (PREPARE):** over-prepare. Grind 2–5 levels above the current MOB PROGRESSION tier before moving on, to farm gear drops and secure HP/Strength buffer for the next tier.
 - **Rule 12 (EXPLORE):** only to find better mob zones when current mob stops paying XP.

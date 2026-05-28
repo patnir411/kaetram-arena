@@ -144,6 +144,13 @@ Use `buy_item(npc_name, item_index, count)`:
 - **Strawberry drop rate** — ~8% per fruit-table kill (goblins, ogres, ants, bosses). Plan ~25 kills for 2 strawberries. Only relevant for bonus `Scavenger` quest.
 - **Rick's Roll is L1-safe end-to-end.** The shrimp fishing spots near (325, 360) require Fishing 1 only (no level gate, no aggressive mobs in 8-tile radius). The corridor Mudwich (188,157) → door 1025 (379, 388) → Rick (1088, 833) passes through Mudwich outskirts and farmland — no aggressive mobs above L7. Door 1025 is unguarded. Do NOT classify Rick's Roll as 'unreachable' based on travel distance.
 - **Rick's Roll route pin-chain.** Long-distance navigation cap is ~100 tiles per `navigate(x,y)` call. Recommended pin chain: (245,170) → (285,190) → (293,242) → (311,254) → (324,301) → (340,345) → (367,348) → (375,370) → traverse_door(379,388 → 1138,800) → navigate(1088,833). Each leg under 100 tiles.
+- **Rick's Roll late-stage door chain (stages 2→4).** After delivering 5 `cookedshrimp` to Rick and receiving `seaweedroll`, the route to Lena passes through puzzle doors that teleport, not normal navigation:
+  1. From Rick's room, `navigate(260, 229)` — teleports you to (425, 909) on a new map.
+  2. `navigate(424, 902)` (or `navigate(425, 901)`) — detour past the (425, 905) decoy door that bounces you back.
+  3. `navigate(453, 907)`.
+  4. `navigate(431, 920)` — lands at (455, 924-930), Lena's room.
+  5. `interact_npc("Lena")` — call twice consecutively; first opens dialogue, second consumes `seaweedroll` and advances the quest stage.
+  Total: 4 navigates + 1-2 `interact_npc`. If a `navigate` to one of those tiles returns BFS_NO_PATH, the prior teleport door didn't activate — retry the previous step before continuing. The (425, 905) tile is a verified DECOY — using it as a target instead of (425, 901) will loop you back through.
 
 ---
 
