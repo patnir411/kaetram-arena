@@ -1,0 +1,26 @@
+heldout states: 574  (new student: https://patnir411--kaetram-qwen-2b-opd-inference-serve.modal.run/v1)
+scored 574 states (0 skipped)
+
+mean |rKL| to 4B teacher (token-weighted, held-out):
+  base-2B   : 0.4904
+  2b-opd-r1 : 0.4369
+  reduction : +10.9%   (gate: >= 30%)
+
+by verb (mean per-state rKL, base -> new):
+  observe        0.5586 -> 0.5441   (n=173)
+  gather         0.3537 -> 0.3255   (n=113)
+  navigate       0.2273 -> 0.2023   (n=88)
+  attack         0.3264 -> 0.2713   (n=65)
+  query_quest    0.4665 -> 0.5615   (n=37)
+  interact_npc   0.4447 -> 0.4260   (n=30)
+  drop_item      0.3359 -> 0.2933   (n=17)
+  warp           0.5470 -> 0.4774   (n=15)
+  stuck_reset    0.3201 -> 0.2467   (n=9)
+  respawn        0.5893 -> 0.5115   (n=8)
+
+degeneration spot check:
+  spot[ok] rep3max=1 char_loop=False  'Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Role: Kaetram game agent.\n    *   '
+  spot[ok] rep3max=1 char_loop=False  'Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Inventory: 5 oak logs.\n    *   Req'
+  spot[ok] rep3max=1 char_loop=False  'Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Action: The user claims I killed a'
+
+=== GATE: FAIL ===  (rKL reduction +10.9%, degenerate 0/3)

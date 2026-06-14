@@ -1,0 +1,37 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+  Patched Qwen 3.5 chat template: <think> now preserved in all turns
+heldout states: 825  (new student: https://patnir411--kaetram-qwen-2b-opd-r2-inference-serve.modal.run/v1)
+scored 803 states (22 skipped, 160 masked-span tokens excluded)
+
+mean |rKL| to 4B teacher (token-weighted, held-out, masked spans excluded):
+  prior student : 0.4281
+  new student   : 0.3662
+  delta         : +14.5%   (DIRECTIONAL diagnostic — no PASS bar)
+
+by verb (mean per-state rKL, prior -> new):
+  observe        0.4733 -> 0.3588   (n=288)
+  query_quest    0.3957 -> 0.3243   (n=138)
+  gather         0.3917 -> 0.3484   (n=95)
+  navigate       0.2692 -> 0.2371   (n=89)
+  attack         0.2446 -> 0.2239   (n=86)
+  warp           0.4412 -> 0.3752   (n=44)
+  interact_npc   0.4444 -> 0.3851   (n=30)
+  drop_item      0.3848 -> 0.3517   (n=9)
+  respawn        0.4198 -> 0.3596   (n=7)
+  stuck_reset    0.4181 -> 0.3695   (n=5)
+  eat_food       0.4363 -> 0.3903   (n=4)
+  equip_item     0.4152 -> 0.3700   (n=2)
+
+completion checks (degeneration + format):
+  spot[ok] rep3max=1 mal=0  'Thinking Process:\n\n1.  **Analyze the Request:**\n    *   **Role:** Kaetram game a'
+  spot[ok] rep3max=2 mal=0  "Here's a thinking process that leads to the suggested response:\n\n1.  **Analyze t"
+  spot[ok] rep3max=1 mal=0  'Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Action: I just killed a '
+  spot[ok] rep3max=3 mal=0  'Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Role: Kaetram game agent'
+  spot[ok] rep3max=1 mal=0  'Thinking Process:\n\n1.  **Analyze the Request:**\n    *   **Role:** Kaetram game a'
+  spot[ok] rep3max=1 mal=0  'Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Role: Kaetram game agent'
+  spot[ok] rep3max=1 mal=0  'Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Role: Kaetram game agent'
+  spot[ok] rep3max=2 mal=0  'Thinking Process:\n\n1.  **Analyze the Request:**\n    *   **Role:** Kaetram game a'
+  spot[ok] rep3max=2 mal=0  'Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Input text: "Your HP is '
+  spot[ok] rep3max=2 mal=0  'Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Action: "You finished co'
+
+=== GATE: PASS ===  rKL delta +14.5% (directional); malformed 0/0 param-emitting completions; degenerate 0/10

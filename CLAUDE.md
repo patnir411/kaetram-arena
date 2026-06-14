@@ -9,7 +9,7 @@ This is an autonomous AI agent that plays Kaetram (a 2D pixel MMORPG) using a
 custom MCP server (`mcp_server/` package, entry point `mcp_game_server.py`)
 that exposes typed game tools (observe, attack, navigate, etc.). The agent
 calls structured tools — never writes JavaScript. Gameplay sessions are
-collected as SFT/KTO training data for Qwen3.5 9B.
+collected as SFT training data for Qwen3.5 9B.
 
 For current run state, training results, and what's in flight: read
 `session_log.md`. This file is the stable reference that doesn't change weekly.
@@ -149,7 +149,7 @@ A harness CLI (Claude / Codex / Gemini / OpenCode) talks stdio to the
 at the Kaetram client (:9000). `state_extractor.js` exposes JS helpers
 (`window.__extractGameState`, `__attackMob`, etc.) consumed by MCP tools via
 `page.evaluate()`. Session logs flow `extract_turns.py` → `convert_to_qwen.py`
-→ Qwen SFT/KTO records. `orchestrate.py` runs N agents in parallel, each
+→ Qwen SFT records. `orchestrate.py` runs N agents in parallel, each
 with its own game server, sandbox, MCP process, browser, and Xvfb display
 (stride `+10` on the game-server WS port to leave room for `apiPort = P+1`,
 dormant unless `API_ENABLED=true`).
@@ -166,8 +166,8 @@ Full reference: `dashboard/DASHBOARD.md`.
 
 | Path | Purpose |
 |------|---------|
-| `mcp_server/` | Modular MCP package (6 root + 10 `tools/` Python files, 17 model-visible tools). See `mcp_server/README.md`. |
-| `mcp_game_server.py` | 19-line stub — entry point that imports `mcp_server.tools` and runs the FastMCP loop. |
+| `mcp_server/` | Modular MCP package (7 root + 10 `tools/` Python files excl. `__init__`, 17 model-visible tools). See `mcp_server/README.md`. |
+| `mcp_game_server.py` | 30-line stub — entry point that imports `mcp_server.tools` and runs the FastMCP loop. |
 | `.mcp.template.json` | Template with placeholders (`__VENV_PYTHON__`, `__PROJECT_DIR__`, …). Resolved per-sandbox to `.mcp.json` by `cli_adapter.py` / `play.sh`. |
 | `cli_adapter.py` | Harness abstraction: `ClaudeAdapter`, `CodexAdapter`, `GeminiAdapter`, `OpenCodeAdapter`, `QwenAdapter`. |
 | `bootstrap.py` | Single source of truth for the user bootstrap message Claude saw at training. Used by orchestrate (collection), convert_to_qwen (SFT records), play_qwen (runtime), play.sh. |
@@ -178,7 +178,7 @@ Full reference: `dashboard/DASHBOARD.md`.
 | `mcp_server/mob_stats.py` | Same pattern for mobs.json. `observe()` enriches each `nearby.mobs[]` entry with `level` + `aggressive` so the agent doesn't have to recall the MOB PROGRESSION table by name. |
 | `extract_turns.py` | JSONL log → OODA turn extraction. |
 | `convert_to_qwen.py` | Turns → Qwen3.5 9B SFT/GRPO format. |
-| `prompts/system.md` | Agent system prompt (~100 lines, XML-tagged). |
+| `prompts/system.md` | Agent system prompt (~75 lines, XML-tagged). |
 | `prompts/game_knowledge.md` | Quest guides, NPC coords, mob stats. |
 | `prompts/personalities/*.md` | Archetype overrides (`grinder.md`, `completionist.md`, `explorer_tinkerer.md`). |
 | `dashboard/server.py` | Dashboard entry point (HTTP :8080 + WS :8081). Full reference: `dashboard/DASHBOARD.md`. |
@@ -230,7 +230,7 @@ prevent drift.
 
 `--claude` is the primary data-collection harness — fully integrated and the
 only one whose turns flow into Qwen SFT training. `--codex` (GPT-5.4),
-`--gemini` (Gemini 2.5 Flash), and `--opencode` run the same
+`--gemini` (Gemini 3 Flash), and `--opencode` run the same
 orchestrator/dashboard/log paths but their turns are excluded from training
 until validated. Use them for cross-harness comparisons, not training data.
 
@@ -282,19 +282,22 @@ lessons: `dataset/DATA.md` and `research/experiments/training-runs.md`.
 - **`.mcp.template.json` vs `.mcp.json`.** The template is checked in; `.mcp.json` is the per-sandbox resolved copy. Claude reads the resolved copy via `--mcp-config --strict-mcp-config`.
 - **OpenCode reasoning needs an SSE-rewriting proxy.** OpenCode 1.14.29's `@ai-sdk/openai-compatible` provider reads `delta.content` only — providers that stream reasoning via `delta.reasoning_content` (NVIDIA NIM Qwen, DeepSeek V4) lose CoT without `scripts/nim_proxy.py` in front. Two daemons: NIM (`scripts/start-nim-proxy.sh`, :8889) and DeepSeek (`scripts/start-deepseek-proxy.sh`, :8890). Both reuse `nim_proxy.py` and are idempotent; `restart-agent.sh` / `orchestrate.py` start whichever the harness mix needs. The proxy also strips wrapped `<think>...</think>` from assistant message history before forwarding — DeepSeek otherwise echoes prior reasoning and emits malformed `<that>` close tags on subsequent turns.
 - **Tool API auto-actions (since 2026-04-29).** `attack` auto-loots on kill (response includes `auto_loot: {looted, target}`), `buy_item` auto-walks to NPC + opens shop (do NOT call `interact_npc` first — races the shop flow), `craft_item` auto-walks to the nearest station on the current map (do NOT manually `navigate` first; if no station on this map it errors and you `warp` elsewhere). `interact_npc` returns four disambiguated quest fields: `quest_opened` (panel appeared), `quest_accepted` (we passed `accept_quest_offer=True` and clicked through), `quest_offered` (offer name), `quest_state_changed` (any quest-list delta — covers turn-ins/stage advances). The old `quest_opened or quest_changed` conflation is gone. Live tool description is in `prompts/system.md`; older agent training data may still reference manual nav-to-station / manual-loot patterns.
-- **rsLoRA + `alpha=r` is an 8x LR trap.** rsLoRA scales `1/sqrt(r)` not `1/r`. With `r=alpha=64`, effective LR is 8x. r7 diverged. Keep `use_rslora=False` (the comment on `train_modal.py:359` is load-bearing).
+- **Base-Qwen state-aware scaffold.** `query_quest` leads with a `current_step` block (`mcp_server/tools/quest.py` `_build_current_step`): canonical FACTS (`accepted`/`stage`/`needed`/`have`/`remaining`) plus an ADVISORY `recommended_action` + `preconditions`. It is advisory, not an oracle — the agent verifies preconditions against `observe`. `current_step` and `live_gate_status` derive the active/finished split from the raw `quests` array via `utils.normalize_quest_lists` (the same split `observe.js` produces); reading raw `__latestGameState` without it makes accepted quests look un-accepted. `observe` tags each active quest with `items_progress:{have,remaining}` (`observe._enrich_active_quests`).
+- **`KAETRAM_OBSERVE_COMPACT`.** When set, `observe` drops the ASCII-map grid (redundant with the structured `nearby` block) but keeps STUCK_CHECK — roughly halves the per-turn payload for more turns/session. OFF by default (preserves train/eval observe-shape parity); `restart-agent.sh --qwen-base` sets it and `play_qwen` forwards it to the MCP subprocess. `scripts/log_analysis/parse.py` handles both the full and compacted observe shapes.
+- **Base-Qwen cross-session note.** `play_qwen._build_session_note` writes a small PROGRAMMATIC (not model-authored) advisory note from the last observed state at session rollover ("working 'X' stage N, still need {…}") and injects it into the next bootstrap to cut the re-derivation tax. The next session still `observe`s first, which confirms or invalidates it.
+- **rsLoRA + `alpha=r` is an 8x LR trap.** rsLoRA scales `1/sqrt(r)` not `1/r`. With `r=alpha=64`, effective LR is 8x. r7 diverged. Keep `use_rslora=False` (the comment on `train_modal.py:293` is load-bearing).
 - **Counting running agents.** `pgrep -fa "claude -p"` self-matches the shell that ran it (the pattern appears in its own cmdline). Count unique bot IDs from the output (`ClaudeBot[0-9]+`, `CodexBot[0-9]+`, `GeminiBot[0-9]+`, `QwenGrinder` / `QwenCompletionist` / `QwenExplorer`, or for opencode: `BigQwenBot[0-9]+` / `GrokBot[0-9]+` / `DeepSeekBot[0-9]+` / `OpenCodeBot[0-9]+` depending on `--opencode-model`), or cross-check against listening game-server ports (`9001 + N×10`) — those are authoritative.
 - **OpenCode bot username depends on the model.** The opencode harness splits its in-game username + Mongo player row by model family so dashboard / log analysis can distinguish runs: `*qwen*` → `BigQwenBot` (separate from the in-house Qwen harness), `*grok*` → `GrokBot`, `*deepseek*` → `DeepSeekBot`, otherwise `OpenCodeBot`. Logic lives in `cli_adapter.opencode_bot_prefix()` and is mirrored in `restart-single-agent.sh` + `play.sh`.
 - **Qwen bot username depends on the personality, not agent ID.** The in-house Qwen harness (`orchestrate.py --qwen-sft` / `--qwen-base`) names agents by personality so the in-game bot maps 1:1 to the personality variant being evaluated: `grinder` → `QwenGrinder`, `completionist` → `QwenCompletionist`, `explorer_tinkerer` → `QwenExplorer`. SFT vs base is reflected in `metadata.json::model` (`r10-sft` / `kaetram-base`), not the username, so a 3-agent SFT run and a 3-agent base run share the same Mongo player rows. Logic lives in `orchestrate.Orchestrator.setup` (qwen_username_map) and is mirrored in `restart-single-agent.sh` + `restart-agent.sh` Mongo seeding.
-- **Qwen3.5 chat template drops `<think>` on intermediate turns** (QwenLM/Qwen3 #1831, still open against Qwen3.5 as of May 2026). `patch_qwen_chat_template` in `finetune/render.py` is the single source of truth — imported by `convert_to_qwen.py` (truncation gate), `train_modal.py`, `serve_modal.py`, `serve_modal_base.py`, `train_kto_modal.py`. If you touch the tokenizer, re-run `tests/unit/test_think_roundtrip.py` to verify CoT survives `apply_chat_template` on every assistant turn.
-- **`world/` is paused.** The forward-dynamics model (`world/extract_transitions.py`, `world/schema.py`, `world/mcts.py`, `world/train_modal.py`) targets the older `browser_run_code` log shape and is not maintained against the current MCP harness. `world/extract_transitions.classify_action` greps for `__attackmob` / `__interactnpc` JS calls that current logs no longer contain; running it on the live corpus would emit zero transitions. Don't update these files when refactoring the SFT pipeline — leave them as-is until the world model is reactivated against the native MCP log shape.
+- **Qwen3.5 chat template drops `<think>` on intermediate turns** (QwenLM/Qwen3 #1831, still open against Qwen3.5 as of May 2026). `patch_qwen_chat_template` in `finetune/render.py` is the single source of truth — imported by `convert_to_qwen.py` (truncation gate), `train_modal.py`, `serve_modal.py`, `serve_modal_base.py` (`train_kto_modal.py` is a deferred planning stub and will re-import it when implemented). If you touch the tokenizer, re-run `tests/unit/test_think_roundtrip.py` to verify CoT survives `apply_chat_template` on every assistant turn.
+- **`world/` is deprecated — not in use.** The forward-dynamics model (`world/extract_transitions.py`, `world/schema.py`, `world/mcts.py`, `world/train_modal.py`) targets the older `browser_run_code` log shape and is not maintained against the current MCP harness. `world/extract_transitions.classify_action` greps for `__attackmob` / `__interactnpc` JS calls that current logs no longer contain; running it on the live corpus would emit zero transitions. Don't update these files when refactoring the SFT pipeline — leave them as-is.
 
 ---
 
 ## Agent prompt design principles
 
 Editing `prompts/system.md`, `prompts/game_knowledge.md`, or
-`prompts/personalities/*.md`? Full research basis: `reference/SOTA_PROMPTING.md`.
+`prompts/personalities/*.md`? Full research basis: `reference/SOTA_PROMPTING_CC_DR_4122026.md` and `reference/SOTA_PROMPTING_OpenAI_DR_4282026.md`.
 Operating rules: total prompt under ~3K tokens; XML tags for structure
 (Claude is trained on them); calm directives (Claude 4.6 over-triggers on
 "CRITICAL/MUST"); explain WHY not just WHAT; reference data at top,

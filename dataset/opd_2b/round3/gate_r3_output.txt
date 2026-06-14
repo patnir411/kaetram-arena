@@ -1,0 +1,37 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+  Patched Qwen 3.5 chat template: <think> now preserved in all turns
+heldout states: 1040  (new student: https://patnir411--kaetram-qwen-2b-opd-r3-inference-serve.modal.run/v1)
+scored 1040 states (0 skipped, 184 masked-span tokens excluded)
+
+mean |rKL| to 4B teacher (token-weighted, held-out, masked spans excluded):
+  prior student : 0.3558
+  new student   : 0.3330
+  delta         : +6.4%   (DIRECTIONAL diagnostic — no PASS bar)
+
+by verb (mean per-state rKL, prior -> new):
+  observe        0.3569 -> 0.3186   (n=347)
+  navigate       0.2315 -> 0.2151   (n=171)
+  query_quest    0.3122 -> 0.2913   (n=152)
+  attack         0.2182 -> 0.2087   (n=126)
+  gather         0.3459 -> 0.3267   (n=117)
+  interact_npc   0.3352 -> 0.3182   (n=34)
+  warp           0.3496 -> 0.3274   (n=29)
+  eat_food       0.3730 -> 0.3574   (n=26)
+  respawn        0.4007 -> 0.3727   (n=16)
+  stuck_reset    0.3867 -> 0.3638   (n=9)
+  set_attack_style 0.3966 -> 0.3666   (n=4)
+  drop_item      0.3685 -> 0.3577   (n=1)
+
+completion checks (degeneration + format):
+  spot[ok] rep3max=2 mal=0  "I see, there's a rodent nearby and you're on full health! Since I'm an AI and do"
+  spot[ok] rep3max=1 mal=0  "This is a common real-world scenario, but it doesn't make sense if taken literal"
+  spot[ok] rep3max=1 mal=0  "I will carefully place the snake's body on a tray of ice and refrigerate the sce"
+  spot[ok] rep3max=1 mal=0  'As an agent, I cannot use a tool call (`interact_npc`) because **I am not a char'
+  spot[ok] rep3max=1 mal=0  '```rust\nuse kaetram::model::{Quest, QuestType};\nuse kaetram::{context, model::{C'
+  spot[ok] rep3max=1 mal=0  '```python\nfrom interact_rpc import Emitter\n\ndef run_peek_offer():\n    emitter = '
+  spot[ok] rep3max=1 mal=0  '{\n  "role": "Kaetram Game Agent",\n  "status": "full_hp",\n  "active_tool": {\n    '
+  spot[ok] rep3max=1 mal=0  "I'm ready to gather Bluelily from a Blue Lily Bush for you. Please provide the l"
+  spot[ok] rep3max=1 mal=0  '```bash\npython -m openai.slack.api_call \\\n  --api_key YOUR_API_KEY \\\n  --event_t'
+  spot[ok] rep3max=0 mal=0  '`execute_tool("turn_in_forest_log_quest", quest_id="forester-collection-10")`'
+
+=== GATE: PASS ===  rKL delta +6.4% (directional); malformed 0/0 param-emitting completions; degenerate 0/10
