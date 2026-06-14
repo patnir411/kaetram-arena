@@ -1,20 +1,19 @@
 """
-Modal serving endpoint for the non-SFT Qwen3.5-9B.
+Modal serving endpoint for the non-SFT Qwen3.5-4B (the small-model distillation lane).
 
-The BASE lane: the Qwen3.5-9B *instruct* model with none of our SFT applied —
-the baseline that the finetuned model (serve_modal.py) is compared against.
-"base" here means non-SFT, NOT Qwen's raw pretrained `-Base` weights (the bare
-`Qwen/Qwen3.5-9B` repo IS the instruct model). Same serving stack as
-serve_modal.py, just no SFT adapter.
+Serves `Qwen/Qwen3.5-4B` instruct (non-SFT) — the student for the 4B OPD experiment
+(distill base-9B+scaffold → 4B). Same serving stack as serve_modal_base.py (/v1/chat
+for rollouts + /v1/score for the OPD data-build); kept as a SEPARATE app so the 9B base
+endpoint stays available as the OPD teacher.
 
 Usage:
-    modal deploy finetune/serve_modal_base.py
-    # Endpoint: https://workspace--kaetram-qwen-base-inference-serve.modal.run/v1
+    modal deploy finetune/serve_modal_4b.py
+    # Endpoint: https://workspace--kaetram-qwen-4b-inference-serve.modal.run/v1
 """
 
 import modal
 
-app = modal.App("kaetram-qwen-base")
+app = modal.App("kaetram-qwen-4b")
 
 model_cache_vol = modal.Volume.from_name("kaetram-model-cache", create_if_missing=True)
 
@@ -35,9 +34,9 @@ serve_image = (
     .add_local_python_source("render")
 )
 
-BASE_MODEL_ID = "Qwen/Qwen3.5-9B"
+BASE_MODEL_ID = "Qwen/Qwen3.5-4B"
 MAX_MODEL_LEN = 32768
-GPU_MEMORY_UTILIZATION = 0.92
+GPU_MEMORY_UTILIZATION = 0.85  # headroom for concurrent prefill spikes (0.92 OOMd under load)
 DTYPE = "bfloat16"
 
 # Qwen3.5-9B thinking mode general defaults (per official model card).
@@ -65,6 +64,10 @@ from render import patch_qwen_chat_template
     scaledown_window=600,
     timeout=300,
 )
+@modal.concurrent(max_inputs=16)  # serve concurrent requests; SGLang batches them.
+# Without this Modal serializes inputs per container, so a multi-slot scoring
+# client stacks a queue that outlives its own timeouts and wedges the endpoint
+# (every retry re-enqueues while the original is still being processed).
 class Inference:
     @modal.enter()
     def load_model(self):
@@ -79,6 +82,8 @@ class Inference:
             dtype=DTYPE,
             context_length=MAX_MODEL_LEN,
             mem_fraction_static=GPU_MEMORY_UTILIZATION,
+            chunked_prefill_size=8192,   # bound prefill batch tokens — 10x16K concurrent prefills OOMd the L4
+            max_running_requests=8,
             trust_remote_code=True,
             disable_cuda_graph=True,
         )
@@ -293,9 +298,11 @@ class Inference:
         async def score(request: Request):
             """Teacher-forcing logprob computation for a fixed (context, target).
 
-            Request: {"messages": [...], "system_prefix": "..." (optional)}.
-            The LAST message must be role=assistant — the scoring target. All
-            earlier messages form the context.
+            Request: {"messages": [...], "system_prefix": "..." (optional)},
+            OR {"context_text": "...", "full_text": "..."} with pre-rendered
+            chat-template strings (raw-text path). With messages, the LAST one
+            must be role=assistant — the scoring target; all earlier messages
+            form the context.
 
             CRITICAL: this endpoint does NOT pass tools= to apply_chat_template.
             Offline scoring needs the prompt structure to match the r10
@@ -306,24 +313,32 @@ class Inference:
             Response: per-token logprobs for the target tokens. Index 0 is None.
             """
             body = await request.json()
-            messages = body.get("messages", [])
-            if not messages or messages[-1].get("role") != "assistant":
-                from fastapi import HTTPException
-                raise HTTPException(400, "last message must be role=assistant (the scoring target)")
+            context_text = body.get("context_text")
+            full_text = body.get("full_text")
+            if context_text is None or full_text is None:
+                messages = body.get("messages", [])
+                if not messages or messages[-1].get("role") != "assistant":
+                    from fastapi import HTTPException
+                    raise HTTPException(400, "last message must be role=assistant (the scoring target)")
 
-            system_prefix = body.get("system_prefix")
-            messages_adapted = _apply_system_prefix(messages, system_prefix)
-            # tools=True here only gates the arg-coercion path (tool_calls.arguments
-            # string -> dict); no tools= list is ever passed to apply_chat_template for
-            # scoring, so the Qwen chat template doesn't crash on the score request.
-            messages_adapted = self._adapt_messages_for_qwen_template(messages_adapted, tools=True)
-            context_text = self.tokenizer.apply_chat_template(
-                messages_adapted[:-1], tokenize=False, add_generation_prompt=True,
-            )
+                system_prefix = body.get("system_prefix")
+                messages_adapted = _apply_system_prefix(messages, system_prefix)
+                # tools=True here only gates the arg-coercion path (tool_calls.arguments
+                # string -> dict); no tools= list is ever passed to apply_chat_template for
+                # scoring, so the Qwen chat template doesn't crash on the score request.
+                messages_adapted = self._adapt_messages_for_qwen_template(messages_adapted, tools=True)
+                context_text = self.tokenizer.apply_chat_template(
+                    messages_adapted[:-1], tokenize=False, add_generation_prompt=True,
+                )
+                full_text = self.tokenizer.apply_chat_template(
+                    messages_adapted, tokenize=False, add_generation_prompt=False,
+                )
+            # Raw-text path: the caller rendered the chat template itself. The OPD
+            # data build uses this so the student and teacher endpoints score
+            # IDENTICAL token ids even though the Qwen3.5 repos ship different
+            # chat-template revisions — the sizes share one vocab, so tokenizing
+            # the same string yields the same ids on every endpoint.
             context_ids = self.tokenizer(context_text, add_special_tokens=False).input_ids
-            full_text = self.tokenizer.apply_chat_template(
-                messages_adapted, tokenize=False, add_generation_prompt=False,
-            )
             full_ids = self.tokenizer(full_text, add_special_tokens=False).input_ids
             if len(full_ids) <= len(context_ids):
                 from fastapi import HTTPException

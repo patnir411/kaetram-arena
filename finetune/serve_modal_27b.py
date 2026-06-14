@@ -1,20 +1,26 @@
 """
-Modal serving endpoint for the non-SFT Qwen3.5-9B.
+Modal serving endpoint for the non-SFT Qwen3.5-27B.
 
-The BASE lane: the Qwen3.5-9B *instruct* model with none of our SFT applied —
-the baseline that the finetuned model (serve_modal.py) is compared against.
-"base" here means non-SFT, NOT Qwen's raw pretrained `-Base` weights (the bare
-`Qwen/Qwen3.5-9B` repo IS the instruct model). Same serving stack as
-serve_modal.py, just no SFT adapter.
+The 27B analog of serve_modal_base.py (Qwen3.5-9B): the Qwen3.5-27B *instruct*
+model with none of our SFT applied. "base" here means non-SFT, NOT Qwen's raw
+pretrained `-Base` weights (the bare `Qwen/Qwen3.5-27B` repo IS the instruct
+model). Runs the in-house `play_qwen` harness against a larger same-family model
+with the identical serving stack — same SGLang engine, chat-template patch, XML
+tool-call parser, and non-streaming OpenAI shape — so the only variable vs the
+9B base lane is model size. The harness points at this endpoint via
+KAETRAM_QWEN_BASE_ENDPOINT and is otherwise unchanged.
+
+Context length is pinned to 16,384 to match the harness's session-budget gate
+(play_qwen.MAX_SEQ_LEN), keeping the run apples-to-apples with the 9B base.
 
 Usage:
-    modal deploy finetune/serve_modal_base.py
-    # Endpoint: https://workspace--kaetram-qwen-base-inference-serve.modal.run/v1
+    modal deploy finetune/serve_modal_27b.py
+    # Endpoint: https://<workspace>--kaetram-qwen-27b-inference-serve.modal.run/v1
 """
 
 import modal
 
-app = modal.App("kaetram-qwen-base")
+app = modal.App("kaetram-qwen-27b")
 
 model_cache_vol = modal.Volume.from_name("kaetram-model-cache", create_if_missing=True)
 
@@ -35,13 +41,15 @@ serve_image = (
     .add_local_python_source("render")
 )
 
-BASE_MODEL_ID = "Qwen/Qwen3.5-9B"
-MAX_MODEL_LEN = 32768
+BASE_MODEL_ID = "Qwen/Qwen3.5-27B"
+# Pinned to the harness session-budget gate (play_qwen.MAX_SEQ_LEN = 16,384) so
+# the server never accepts a context the harness wouldn't send.
+MAX_MODEL_LEN = 16384
 GPU_MEMORY_UTILIZATION = 0.92
 DTYPE = "bfloat16"
 
-# Qwen3.5-9B thinking mode general defaults (per official model card).
-# Matched to serve_modal.py so base vs finetuned comparison uses identical decode config.
+# Qwen3.5 thinking mode general defaults (per official model card).
+# Matched to serve_modal_base.py so 9B vs 27B comparison uses identical decode config.
 # Do NOT enable repetition_penalty / frequency_penalty / DRY — they hurt tool-call JSON.
 QWEN_THINK_TEMP = 1.0
 QWEN_THINK_TOP_P = 0.95
@@ -58,17 +66,17 @@ from render import patch_qwen_chat_template
 
 @app.cls(
     image=serve_image,
-    gpu="A100",
+    gpu="H100",
     volumes={"/model_cache": model_cache_vol},
-    min_containers=0,  # scale to zero when idle — matches serve_modal.py
+    min_containers=0,  # scale to zero when idle — matches serve_modal_base.py
     max_containers=1,
     scaledown_window=600,
-    timeout=300,
+    timeout=600,
 )
 class Inference:
     @modal.enter()
     def load_model(self):
-        """Load the non-SFT Qwen3.5-9B instruct model (no SFT adapter)."""
+        """Load the non-SFT Qwen3.5-27B instruct model (no SFT adapter)."""
         print(f"Loading BASE model {BASE_MODEL_ID}...")
         self.loaded_model_path = BASE_MODEL_ID
         import sglang as sgl
@@ -85,7 +93,7 @@ class Inference:
         from transformers import AutoTokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_ID, trust_remote_code=True)
         patch_qwen_chat_template(self.tokenizer)
-        print("SGLang engine ready (BASE model).")
+        print("SGLang engine ready (27B base model).")
 
     @staticmethod
     def _adapt_messages_for_qwen_template(messages, tools):
@@ -145,8 +153,9 @@ class Inference:
             return {
                 "status": "ok",
                 "model": BASE_MODEL_ID,
-                "variant": "base",
+                "variant": "base-27b",
                 "loaded_model_path": getattr(self, "loaded_model_path", None),
+                "max_model_len": MAX_MODEL_LEN,
                 "decode_mode": QWEN_DECODE_MODE,
                 "decode_defaults": {
                     "temperature": QWEN_THINK_TEMP,
@@ -182,7 +191,7 @@ class Inference:
             import re as _re
             body = await request.json()
             messages = body.get("messages", [])
-            # Qwen3.5-9B thinking-general defaults per model card; caller may override.
+            # Qwen3.5 thinking-general defaults per model card; caller may override.
             temperature = body.get("temperature", QWEN_THINK_TEMP)
             max_tokens = body.get("max_tokens", 512)
             top_p = body.get("top_p", QWEN_THINK_TOP_P)
@@ -196,10 +205,6 @@ class Inference:
             # empty. The native template reminds the model to emit
             # `<tool_call><function=NAME><parameter=...>...</parameter></function></tool_call>`,
             # which is exactly what the regex parser below already matches.
-            #
-            # SFT (serve_modal.py) intentionally drops tools= to preserve
-            # training/serve parity — it learned the format from training,
-            # not from the chat template.
             tools = body.get("tools") or None
             # Teacher-prompt prefix: prepended to the first system message
             # so the same deployed container can serve Teacher A (no prefix)
@@ -240,7 +245,7 @@ class Inference:
             prompt_tokens = output.get("meta_info", {}).get("prompt_tokens", 0)
             completion_tokens = output.get("meta_info", {}).get("completion_tokens", 0)
 
-            # Parse tool calls (same as finetuned endpoint)
+            # Parse tool calls (same as the 9B base endpoint)
             parsed_tool_calls = []
             for m in _re.finditer(
                 r"<tool_call>\s*<function=(\w+)>(.*?)</function>\s*</tool_call>",
@@ -298,10 +303,10 @@ class Inference:
             earlier messages form the context.
 
             CRITICAL: this endpoint does NOT pass tools= to apply_chat_template.
-            Offline scoring needs the prompt structure to match the r10
-            training/inference path byte-for-byte; if we let the base template
-            inject the <tools>...</tools> JSON prefix, the token boundary would
-            shift and the score would not be comparable across endpoints.
+            Offline scoring needs the prompt structure to match the training/
+            inference path byte-for-byte; if we let the base template inject the
+            <tools>...</tools> JSON prefix, the token boundary would shift and
+            the score would not be comparable across endpoints.
 
             Response: per-token logprobs for the target tokens. Index 0 is None.
             """

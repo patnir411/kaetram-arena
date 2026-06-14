@@ -1,22 +1,23 @@
 """
-Modal serving endpoint for the non-SFT Qwen3.5-9B.
+Modal serving endpoint for the OPD round-2 Qwen3.5-2B (`2b-opd-r2`).
 
-The BASE lane: the Qwen3.5-9B *instruct* model with none of our SFT applied —
-the baseline that the finetuned model (serve_modal.py) is compared against.
-"base" here means non-SFT, NOT Qwen's raw pretrained `-Base` weights (the bare
-`Qwen/Qwen3.5-9B` repo IS the instruct model). Same serving stack as
-serve_modal.py, just no SFT adapter.
+Serves the merged `kaetram-qwen3.5-2b-opd-r2` checkpoint (reverse-KL on-policy
+distillation of base-2B toward the 4B teacher) for the KL gate and the eval run.
+Same serving stack and decode config as serve_modal_2b.py so 2b-opd-r2 vs base-2B
+is an apples-to-apples comparison; kept as a SEPARATE app so the base-2B/4B/9B
+endpoints stay available.
 
 Usage:
-    modal deploy finetune/serve_modal_base.py
-    # Endpoint: https://workspace--kaetram-qwen-base-inference-serve.modal.run/v1
+    modal deploy finetune/serve_modal_2b_opd.py
+    # Endpoint: https://workspace--kaetram-qwen-2b-opd-r2-inference-serve.modal.run/v1
 """
 
 import modal
 
-app = modal.App("kaetram-qwen-base")
+app = modal.App("kaetram-qwen-2b-opd-r2")
 
 model_cache_vol = modal.Volume.from_name("kaetram-model-cache", create_if_missing=True)
+checkpoint_vol = modal.Volume.from_name("kaetram-model-vol", create_if_missing=True)
 
 serve_image = (
     modal.Image.from_registry("nvidia/cuda:12.8.0-devel-ubuntu22.04", add_python="3.11")
@@ -35,9 +36,17 @@ serve_image = (
     .add_local_python_source("render")
 )
 
-BASE_MODEL_ID = "Qwen/Qwen3.5-9B"
+MERGED_PATH = "/checkpoints/kaetram-qwen3.5-2b-opd-r2/merged"
+# Tokenizer + chat template come from the canonical base repo (unpatched), matching
+# serve_modal.py: the merged checkpoint's saved template is already patched, so
+# patch_qwen_chat_template would not find its target there. Encoding is identical to
+# the merged tokenizer (OPD adds no tokens), and we apply the chat template
+# ourselves — SGLang's tokenizer_path is encoding-only. Student-native template ==
+# what generated the rollouts and what the OPD records were rendered with.
+BASE_TOKENIZER_ID = "Qwen/Qwen3.5-2B"
+MODEL_LABEL = "2b-opd-r2"
 MAX_MODEL_LEN = 32768
-GPU_MEMORY_UTILIZATION = 0.92
+GPU_MEMORY_UTILIZATION = 0.85  # headroom for concurrent prefill spikes (0.92 OOMd under load)
 DTYPE = "bfloat16"
 
 # Qwen3.5-9B thinking mode general defaults (per official model card).
@@ -58,34 +67,37 @@ from render import patch_qwen_chat_template
 
 @app.cls(
     image=serve_image,
-    gpu="A100",
-    volumes={"/model_cache": model_cache_vol},
+    gpu="L4",  # light eval serving; flip to A100 for any batch /v1/score build
+    volumes={"/model_cache": model_cache_vol, "/checkpoints": checkpoint_vol},
     min_containers=0,  # scale to zero when idle — matches serve_modal.py
     max_containers=1,
     scaledown_window=600,
     timeout=300,
 )
+@modal.concurrent(max_inputs=16)  # serve concurrent requests; SGLang batches them
 class Inference:
     @modal.enter()
     def load_model(self):
-        """Load the non-SFT Qwen3.5-9B instruct model (no SFT adapter)."""
-        print(f"Loading BASE model {BASE_MODEL_ID}...")
-        self.loaded_model_path = BASE_MODEL_ID
+        """Load the merged 2b-opd-r2 checkpoint from the model volume."""
+        print(f"Loading 2b-opd-r2 merged checkpoint from {MERGED_PATH}...")
+        self.loaded_model_path = MERGED_PATH
         import sglang as sgl
 
         self.engine = sgl.Engine(
-            model_path=BASE_MODEL_ID,
-            tokenizer_path=BASE_MODEL_ID,
+            model_path=MERGED_PATH,
+            tokenizer_path=BASE_TOKENIZER_ID,
             dtype=DTYPE,
             context_length=MAX_MODEL_LEN,
             mem_fraction_static=GPU_MEMORY_UTILIZATION,
+            chunked_prefill_size=8192,
+            max_running_requests=8,
             trust_remote_code=True,
             disable_cuda_graph=True,
         )
         from transformers import AutoTokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_ID, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(BASE_TOKENIZER_ID, trust_remote_code=True)
         patch_qwen_chat_template(self.tokenizer)
-        print("SGLang engine ready (BASE model).")
+        print("SGLang engine ready (2b-opd-r2).")
 
     @staticmethod
     def _adapt_messages_for_qwen_template(messages, tools):
@@ -144,8 +156,8 @@ class Inference:
         async def health():
             return {
                 "status": "ok",
-                "model": BASE_MODEL_ID,
-                "variant": "base",
+                "model": MODEL_LABEL,
+                "variant": "2b-opd-r2",
                 "loaded_model_path": getattr(self, "loaded_model_path", None),
                 "decode_mode": QWEN_DECODE_MODE,
                 "decode_defaults": {
@@ -174,7 +186,7 @@ class Inference:
 
         @web_app.get("/v1/models")
         async def list_models():
-            return {"data": [{"id": "kaetram-base", "object": "model"}]}
+            return {"data": [{"id": "2b-opd-r2", "object": "model"}]}
 
         @web_app.post("/v1/chat/completions")
         async def chat_completions(request: Request):
@@ -219,11 +231,17 @@ class Inference:
             #      the XML inline would double-emit it. Strip the XML from
             #      content, keep only the reasoning prefix.
             messages = self._adapt_messages_for_qwen_template(messages, tools)
+            # enable_thinking=True primes an OPEN `<think>\n` generation prompt,
+            # matching the training distribution (every assistant turn began with
+            # `<think>` reasoning). Qwen3.5's template defaults to non-thinking,
+            # which injects a CLOSED empty `<think>\n\n</think>\n\n` — structurally
+            # suppressing the reasoning the finetuned checkpoint was trained to produce.
             prompt = self.tokenizer.apply_chat_template(
                 messages,
                 tools=tools,
                 tokenize=False,
                 add_generation_prompt=True,
+                enable_thinking=True,
             )
 
             output = await self.engine.async_generate(
@@ -280,7 +298,7 @@ class Inference:
                 "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
                 "object": "chat.completion",
                 "created": int(time.time()),
-                "model": body.get("model", "kaetram-base"),
+                "model": body.get("model", "2b-opd-r2"),
                 "choices": [{"index": 0, "message": msg, "finish_reason": finish_reason}],
                 "usage": {
                     "prompt_tokens": prompt_tokens,
@@ -293,9 +311,11 @@ class Inference:
         async def score(request: Request):
             """Teacher-forcing logprob computation for a fixed (context, target).
 
-            Request: {"messages": [...], "system_prefix": "..." (optional)}.
-            The LAST message must be role=assistant — the scoring target. All
-            earlier messages form the context.
+            Request: {"messages": [...], "system_prefix": "..." (optional)},
+            OR {"context_text": "...", "full_text": "..."} with pre-rendered
+            chat-template strings (raw-text path). With messages, the LAST one
+            must be role=assistant — the scoring target; all earlier messages
+            form the context.
 
             CRITICAL: this endpoint does NOT pass tools= to apply_chat_template.
             Offline scoring needs the prompt structure to match the r10
@@ -306,24 +326,30 @@ class Inference:
             Response: per-token logprobs for the target tokens. Index 0 is None.
             """
             body = await request.json()
-            messages = body.get("messages", [])
-            if not messages or messages[-1].get("role") != "assistant":
-                from fastapi import HTTPException
-                raise HTTPException(400, "last message must be role=assistant (the scoring target)")
+            context_text = body.get("context_text")
+            full_text = body.get("full_text")
+            if context_text is None or full_text is None:
+                messages = body.get("messages", [])
+                if not messages or messages[-1].get("role") != "assistant":
+                    from fastapi import HTTPException
+                    raise HTTPException(400, "last message must be role=assistant (the scoring target)")
 
-            system_prefix = body.get("system_prefix")
-            messages_adapted = _apply_system_prefix(messages, system_prefix)
-            # tools=True here only gates the arg-coercion path (tool_calls.arguments
-            # string -> dict); no tools= list is ever passed to apply_chat_template for
-            # scoring, so the Qwen chat template doesn't crash on the score request.
-            messages_adapted = self._adapt_messages_for_qwen_template(messages_adapted, tools=True)
-            context_text = self.tokenizer.apply_chat_template(
-                messages_adapted[:-1], tokenize=False, add_generation_prompt=True,
-            )
+                system_prefix = body.get("system_prefix")
+                messages_adapted = _apply_system_prefix(messages, system_prefix)
+                # tools=True here only gates the arg-coercion path (tool_calls.arguments
+                # string -> dict); no tools= list is ever passed to apply_chat_template for
+                # scoring, so the Qwen chat template doesn't crash on the score request.
+                messages_adapted = self._adapt_messages_for_qwen_template(messages_adapted, tools=True)
+                context_text = self.tokenizer.apply_chat_template(
+                    messages_adapted[:-1], tokenize=False, add_generation_prompt=True,
+                )
+                full_text = self.tokenizer.apply_chat_template(
+                    messages_adapted, tokenize=False, add_generation_prompt=False,
+                )
+            # Raw-text path: the caller rendered the chat template itself (the OPD
+            # data build and KL gate use this so every endpoint scores IDENTICAL
+            # token ids regardless of repo chat-template revision).
             context_ids = self.tokenizer(context_text, add_special_tokens=False).input_ids
-            full_text = self.tokenizer.apply_chat_template(
-                messages_adapted, tokenize=False, add_generation_prompt=False,
-            )
             full_ids = self.tokenizer(full_text, add_special_tokens=False).input_ids
             if len(full_ids) <= len(context_ids):
                 from fastapi import HTTPException
@@ -357,7 +383,7 @@ class Inference:
                 "target_logprobs": logprobs,
                 "n_context_tokens": len(context_ids),
                 "n_target_tokens": len(target_ids),
-                "model": body.get("model", "kaetram-base"),
+                "model": body.get("model", "2b-opd-r2"),
             }
 
         return web_app
