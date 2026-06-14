@@ -1,8 +1,7 @@
 """Shared async helpers for MCP tool implementations.
 
-All functions take a Playwright page as first argument.  These deduplicate
-common patterns (inventory snapshot/diff, adjacency polling) that were
-previously copy-pasted across 6+ tools.
+All functions take a Playwright page as first argument. They centralize the
+common patterns (inventory snapshot/diff, adjacency polling) shared across tools.
 """
 
 from mcp_server.js import INVENTORY_SNAPSHOT

@@ -6,7 +6,14 @@ import re
 from mcp.server.fastmcp import Context
 
 from mcp_server.core import get_page, mcp
-from mcp_server.utils import build_quest_query_response, load_quest_walkthroughs, resolve_quest_name
+from mcp_server.utils import (
+    build_quest_query_response,
+    load_quest_walkthroughs,
+    normalize_quest_lists,
+    normalize_quest_name,
+    quest_stage_item_progress,
+    resolve_quest_name,
+)
 
 
 _SKILL_REQ_RE = re.compile(r"([A-Za-z]+)\s+(\d+)")
@@ -41,8 +48,9 @@ def _detect_production_skills(quest: dict) -> list[str]:
 def _compute_live_gate_status(requirements: dict, live: dict) -> dict:
     """Compare static `requirements` against the live `__extractGameState()`
     snapshot. Returns `{gated, blockers}` so the agent can decide-by-data:
-      - gated=true  → skip this quest, pick another
-      - gated=false → safe to accept
+      - gated=true, skill blocker     → clearable: accept + grind that skill
+      - gated=true, quest/achievement → hard dependency: pick another quest
+      - gated=false                   → safe to accept
 
     `requirements` shape (from quest_walkthroughs.json):
       {
@@ -116,15 +124,84 @@ def _compute_live_gate_status(requirements: dict, live: dict) -> dict:
     return {"gated": len(blockers) > 0, "blockers": blockers}
 
 
+def _npc_hint(quest: dict) -> str:
+    """Display name `interact_npc` expects — strip a trailing parenthetical
+    such as coords or the internal key (e.g. 'Herby Mc. Herb (`herbalist`)')."""
+    npc = quest.get("npc")
+    if not isinstance(npc, str) or not npc.strip():
+        return "the quest giver"
+    return npc.split(" (", 1)[0].strip() or "the quest giver"
+
+
+def _build_current_step(quest: dict, matched_name: str, live: dict) -> dict:
+    """Compute the agent's CURRENT step from its live quest stage + inventory.
+
+    Returns canonical FACTS (accepted / stage / needed / have / remaining) plus an
+    ADVISORY `recommended_action` + `preconditions`. The recommendation is a hint,
+    not an order: the agent verifies the preconditions against its latest `observe`
+    and ignores the recommendation if they don't hold.
+    """
+    target = normalize_quest_name(quest.get("name") or matched_name)
+    npc = _npc_hint(quest)
+
+    for q in (live.get("finished_quests") or []):
+        if isinstance(q, dict) and normalize_quest_name(q.get("name") or "") == target:
+            return {"accepted": True, "finished": True,
+                    "recommended_action": "Quest finished — move to the next Core 3.",
+                    "preconditions": "observe lists this quest in finished_quests"}
+
+    for q in (live.get("active_quests") or []):
+        if not isinstance(q, dict) or normalize_quest_name(q.get("name") or "") != target:
+            continue
+        stage = q.get("stage", 0)
+        prog = quest_stage_item_progress(quest, stage, live.get("inventory"))
+        step = {"accepted": True, "stage": stage, "turn_in_npc": npc,
+                "preconditions": "observe lists this quest active at this stage"}
+        if not prog:
+            step["recommended_action"] = (
+                f"Take this stage's step from walkthrough_steps, then interact_npc('{npc}').")
+            return step
+        if prog.get("finished"):
+            return {"accepted": True, "finished": True,
+                    "recommended_action": "Quest finished — move to the next Core 3.",
+                    "preconditions": "observe shows this quest finished"}
+        step.update({
+            "stage_label": prog["stage_label"],
+            "needed": prog["needed"],
+            "have": prog["have"],
+            "remaining": prog["remaining"],
+            "all_satisfied": prog["all_satisfied"],
+        })
+        if prog["all_satisfied"]:
+            step["recommended_action"] = (
+                f"You hold every item for this stage — interact_npc('{npc}') to turn in "
+                "(often needs two consecutive calls).")
+            step["preconditions"] = f"observe shows you adjacent to {npc} and holding {prog['needed']}"
+        else:
+            short = ", ".join(f"{n} {k}" for k, n in prog["remaining"].items() if n > 0)
+            step["recommended_action"] = (
+                f"Already accepted, holding {prog['have']} — gather/obtain the remaining {short}, "
+                f"then interact_npc('{npc}') to turn in. Don't re-accept.")
+        return step
+
+    return {"accepted": False,
+            "recommended_action": f"Not accepted yet — interact_npc('{npc}', accept_quest_offer=True).",
+            "preconditions": "observe does NOT list this quest in active_quests"}
+
+
 @mcp.tool()
 async def query_quest(ctx: Context, quest_name: str) -> str:
-    """Look up detailed walkthrough + live gate status for a specific quest.
+    """Look up detailed walkthrough + live state for a specific quest.
 
-    Returns quest status, requirements, unlocks, reward caveats, walkthrough,
-    boss/recipe notes, AND a `live_gate_status` block computed against your
-    current player state. **Call this BEFORE `interact_npc(accept_quest_offer=
-    true)` for any Core-5 candidate** — if `live_gate_status.gated` is true,
-    pick a different quest instead of accepting an unfinishable one.
+    Leads with `current_step` (canonical facts — accepted/stage/needed/have/
+    remaining — plus an advisory `recommended_action` + `preconditions`) computed
+    against your current player state, then requirements, unlocks, reward caveats,
+    walkthrough, boss/recipe notes, `station_locations`, and a `live_gate_status`
+    block. **Call this BEFORE `interact_npc(accept_quest_offer=true)` for any
+    Core-3 candidate.** If `live_gate_status.gated` is true, check
+    `blockers`: a `skill` blocker is clearable — accept the quest and grind that
+    skill to proceed; a `quest`/`achievement` blocker is a hard dependency — pick
+    a different quest.
 
     Args:
         quest_name: Exact or near-exact quest name (e.g. 'Sorcery and Stuff',
@@ -158,9 +235,19 @@ async def query_quest(ctx: Context, quest_name: str) -> str:
             "() => (window.__latestGameState || (window.__extractGameState && window.__extractGameState()) || null)"
         )
         if isinstance(live, dict):
+            # __latestGameState carries a FLAT `quests` array; derive the same
+            # active/finished split observe uses so current_step + gate status
+            # never read an accepted quest as un-accepted.
+            if "active_quests" not in live:
+                active_q, finished_q = normalize_quest_lists(live)
+                live = {**live, "active_quests": active_q, "finished_quests": finished_q}
             response["live_gate_status"] = _compute_live_gate_status(
                 response.get("requirements") or {}, live
             )
+            # Lead with the agent's CURRENT step (stage + what it already holds)
+            # so it continues from where it is instead of re-planning the
+            # walkthrough from stage 0.
+            response = {"current_step": _build_current_step(quest, matched_name, live), **response}
 
         # Surface nearby crafting-station tiles for every production skill
         # the quest mentions. This unblocks the "I have raw shrimp but

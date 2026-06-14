@@ -5,7 +5,6 @@ import json
 from mcp.server.fastmcp import Context
 
 from mcp_server.core import get_page, log, log_tool, mcp
-from mcp_server.helpers import inventory_snapshot
 from mcp_server.utils import PRODUCTION_SKILL_ALIASES, normalize_production_skill
 
 

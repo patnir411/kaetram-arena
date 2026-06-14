@@ -67,11 +67,10 @@ async def login_impl(ctx: Context, page) -> str:
     await page.locator("#login-password-input").fill(password)
     await page.locator("#login").click()
 
-    # Login retry + fallback-register loop. Auto-register only on explicit
-    # "account not found" style errors — silence and "already logged in" both
-    # used to trigger a speculative register that collided with seeded rows
-    # ("userexists"), so retry idle states patiently and let documented errors
-    # drive the next action.
+    # Login retry + fallback-register loop. Auto-register ONLY on explicit
+    # "account not found" errors; treat silence and "already logged in" as idle
+    # states to retry patiently. A speculative register on those states collides
+    # with seeded rows ("userexists"), so let documented errors drive the action.
     game_ready = False
     login_error: str | None = None
     tried_register = False
@@ -139,9 +138,7 @@ async def login_impl(ctx: Context, page) -> str:
 
         # Login form is still up but there's no error yet. Keep retrying —
         # the game server may just be slow to hydrate regions after a restart.
-        # We no longer fire a speculative register after 6 idle seconds; that
-        # path caused the "userexists" collision whenever Mongo wasn't truly
-        # empty.
+        # Don't register on idle; only an explicit "not found" triggers it.
 
     if not game_ready:
         detail = f" ({login_error})" if login_error else ""

@@ -132,13 +132,130 @@ def resolve_quest_name(query: str, data: dict) -> tuple[str | None, dict | None]
     return top_matches[0], None
 
 
+_STAGE_ITEM_RE = re.compile(r"([a-z][a-z0-9]*)\s*x\s*(\d+)", re.IGNORECASE)
+
+
+def _inventory_counts(inventory) -> dict:
+    """Normalize an inventory payload to {item_key_lower: total_count}.
+
+    Accepts either the observe list-of-dicts shape ([{key,name,count,...}]) or a
+    flat {key: count} dict. Unknown shapes yield an empty mapping.
+    """
+    counts: dict[str, int] = {}
+    if isinstance(inventory, dict):
+        for k, v in inventory.items():
+            try:
+                counts[str(k).lower()] = counts.get(str(k).lower(), 0) + int(v)
+            except (TypeError, ValueError):
+                continue
+    elif isinstance(inventory, list):
+        for it in inventory:
+            if not isinstance(it, dict):
+                continue
+            key = it.get("key") or it.get("name")
+            if not key:
+                continue
+            try:
+                cnt = int(it.get("count", 1) or 1)
+            except (TypeError, ValueError):
+                cnt = 1
+            counts[str(key).lower()] = counts.get(str(key).lower(), 0) + cnt
+    return counts
+
+
+def normalize_quest_lists(raw_state) -> tuple[list, list]:
+    """Derive (active_quests, finished_quests) from a raw game-state dict.
+
+    `window.__latestGameState` (what `query_quest` reads) carries a FLAT
+    `quests` array — `[{name, stage, stageCount, started, finished}]` — while
+    the `observe` output exposes the split `active_quests`/`finished_quests`.
+    Tools that read the raw cache must derive the split themselves or they see
+    every accepted quest as not-accepted. This mirrors the filter in
+    `mcp_server/js/observe.js` (started && !finished → active; finished →
+    finished) so the two tools agree. If the state is already split (observe
+    shape), pass it through unchanged.
+    """
+    if not isinstance(raw_state, dict):
+        return [], []
+    quests = raw_state.get("quests")
+    if not isinstance(quests, list):
+        return (raw_state.get("active_quests") or [], raw_state.get("finished_quests") or [])
+    active, finished = [], []
+    for q in quests:
+        if not isinstance(q, dict):
+            continue
+        entry = {"name": q.get("name"), "stage": q.get("stage"),
+                 "stage_count": q.get("stageCount")}
+        if q.get("finished"):
+            finished.append({"name": q.get("name")})
+        elif q.get("started"):
+            active.append(entry)
+    return active, finished
+
+
+def quest_stage_item_progress(quest_data: dict, stage, inventory) -> dict | None:
+    """Compare the current quest stage's item requirement against inventory.
+
+    The live `stage` (from observe's `active_quests[].stage`) indexes directly
+    into `stage_summary` — e.g. Herbalist's stage 1 is `stage_summary[1]` =
+    "Turn in `bluelily x3`", the current objective. Item requirements are parsed
+    from that summary string (`key xN` tokens), cross-referenced against the
+    player's inventory, and returned as needed/have/remaining so the agent can
+    continue from where it is instead of re-planning from stage 0.
+
+    Returns None when the current stage names no items (e.g. a talk-only step) or
+    the data is unusable, so callers omit the block rather than fail.
+    """
+    if not isinstance(quest_data, dict):
+        return None
+    summaries = quest_data.get("stage_summary")
+    if not isinstance(summaries, list) or not summaries:
+        return None
+    try:
+        stage = int(stage)
+    except (TypeError, ValueError):
+        return None
+    if stage < 0:
+        return None
+    if stage >= len(summaries):
+        return {
+            "stage": stage,
+            "stage_label": "finished",
+            "finished": True,
+            "needed": {},
+            "have": {},
+            "remaining": {},
+            "all_satisfied": True,
+        }
+    label = str(summaries[stage])
+    needed: dict[str, int] = {}
+    for m in _STAGE_ITEM_RE.finditer(label):
+        key = m.group(1).lower()
+        try:
+            needed[key] = needed.get(key, 0) + int(m.group(2))
+        except ValueError:
+            continue
+    if not needed:
+        return None
+    held = _inventory_counts(inventory)
+    have = {k: held.get(k, 0) for k in needed}
+    remaining = {k: max(0, needed[k] - have[k]) for k in needed}
+    return {
+        "stage": stage,
+        "stage_label": label,
+        "needed": needed,
+        "have": have,
+        "remaining": remaining,
+        "all_satisfied": all(v == 0 for v in remaining.values()),
+    }
+
+
 def build_quest_query_response(matched_name: str, quest: dict) -> dict:
     ordered = {
         "name": quest.get("name", matched_name),
         "matched_name": matched_name,
-        "status": quest.get("status", "unknown"),
-        "phase": quest.get("phase"),
         "order": quest.get("order"),
+        "off_limits": quest.get("status") == "off-limits",
         "blocked_reason": quest.get("blocked_reason"),
         "requirements": quest.get("requirements", {}),
         "unlocks": quest.get("unlocks", {}),
@@ -161,8 +278,6 @@ def build_quest_query_response(matched_name: str, quest: dict) -> dict:
     ):
         if key in quest:
             ordered[key] = quest[key]
-    if ordered["status"] == "blocked":
-        ordered["skip_recommended"] = True
     return ordered
 
 
