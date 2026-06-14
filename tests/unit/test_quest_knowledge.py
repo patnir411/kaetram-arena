@@ -43,12 +43,15 @@ def _load_walkthroughs() -> dict:
     return json.loads(QUEST_WALKTHROUGHS.read_text())
 
 
-def test_game_knowledge_lists_all_completable_and_blocked_quests():
+def test_game_knowledge_lists_core3_and_blocked_quests():
+    # Post-shrink (r11 teacher prompt): game_knowledge.md carries only the
+    # Core-3 quick-reference + the off-limits list. The full completable
+    # catalog now lives in quest_walkthroughs.json (served on demand via
+    # query_quest) and is covered by
+    # test_quest_walkthroughs_use_canonical_names_and_cover_all_quests.
     text = GAME_KNOWLEDGE.read_text()
-    # Catalog inventory line — current truth lives in CURRENT TREE TRUTHS.
-    assert "3 CORE + 5 EXTRA + 5 bonus = 13 completable quests" in text
-    for quest in COMPLETABLE_QUESTS:
-        assert quest in text, f"{quest} missing from game_knowledge.md"
+    for quest in ("Foresting", "Rick's Roll", "Herbalist's Desperation"):
+        assert quest in text, f"{quest} (Core 3) missing from game_knowledge.md"
     # game_knowledge.md abbreviates the Coder chain on a single line
     # ("The Coder's Glitch / Glitch II / Coder's Fallacy"), so check only
     # the leading prefixes that are guaranteed unique.
@@ -62,13 +65,18 @@ def test_game_knowledge_lists_all_completable_and_blocked_quests():
 
 
 def test_game_knowledge_includes_key_runtime_truths():
+    # Post-shrink: per-quest runtime truths (Scientist's→Alchemy, Ice Knight
+    # coords, Fletching knife, etc.) moved into quest_walkthroughs.json and are
+    # covered by test_high_impact_quest_fields_are_grounded. game_knowledge.md
+    # now keeps only the always-true, quest-agnostic facts the agent needs in
+    # the always-on window.
     text = GAME_KNOWLEDGE.read_text()
     required_snippets = (
-        "Tutorial is auto-finished at spawn",
-        "Start **Scientist's Potion** to unlock Alchemy",
-        "Fletching requires a `knife`",
-        "Ancient Lands",
-        "Ice Knight** at **(808, 813)",
+        "Starter kit",            # starter inventory enumerated
+        "Reward strings lie",     # liar-quest caveat → trust query_quest
+        "Foraging 1→5",           # the single grind that unlocks Herbalist ingredients
+        "Inventory = 25 slots",   # inventory cap
+        "OFF-LIMITS",             # broken-quest section present
     )
     for snippet in required_snippets:
         assert snippet in text, f"Missing runtime truth: {snippet}"
@@ -139,15 +147,18 @@ def test_high_impact_quest_fields_are_grounded():
 
 def test_system_prompt_routes_off_catalog_and_uses_query_quest_proactively():
     text = SYSTEM_PROMPT.read_text()
-    # Current system.md routes via `game_knowledge` → PRIMARY OBJECTIVE rather
-    # than the older "complete every completable quest" wording.
+    # system.md routes via `game_knowledge` → PRIMARY OBJECTIVE: the 3-quest
+    # benchmark first, other non-off-limits quests after, off-limits ones never.
     assert "3-quest Kaetram benchmark" in text
-    assert "EXTRA" in text
-    assert "Off-limits" in text
+    assert "non-off-limits" in text
+    assert "OFF-LIMITS" in text
     assert "accept_quest_offer=True" in text
     # query_quest is the canonical pre-acceptance gate check.
     assert "query_quest" in text
     assert "live_gate_status" in text
-    # Tool surface anchors (used as smoke-checks elsewhere).
-    assert '"chop"' in text
-    assert "buy_item(npc_name" in text
+    # Tool-surface anchors present in the compact tool notes. (buy_item's full
+    # schema arrives via the native tools= spec rather than the prompt table, so
+    # it is not asserted here — it is not on the Core-3 critical path.)
+    assert "chop" in text            # set_attack_style options
+    assert "craft_item" in text
+    assert "interact_npc" in text

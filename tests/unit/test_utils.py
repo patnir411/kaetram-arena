@@ -110,21 +110,23 @@ class TestResolveQuestName:
 
 class TestBuildQuestQueryResponse:
     def test_basic_structure(self):
-        quest = {"name": "Test Quest", "status": "ready", "npc": "TestNPC"}
+        quest = {"name": "Test Quest", "npc": "TestNPC"}
         result = build_quest_query_response("testquest", quest)
         assert result["name"] == "Test Quest"
         assert result["matched_name"] == "testquest"
-        assert result["status"] == "ready"
         assert result["npc"] == "TestNPC"
+        assert result["off_limits"] is False
 
-    def test_blocked_adds_skip(self):
-        quest = {"name": "Blocked Quest", "status": "blocked"}
-        result = build_quest_query_response("blocked", quest)
-        assert result.get("skip_recommended") is True
+    def test_off_limits(self):
+        quest = {"name": "Broken Quest", "status": "off-limits",
+                 "blocked_reason": "circular item chain"}
+        result = build_quest_query_response("broken", quest)
+        assert result["off_limits"] is True
+        assert result["blocked_reason"] == "circular item chain"
 
     def test_defaults(self):
         result = build_quest_query_response("empty", {})
-        assert result["status"] == "unknown"
+        assert result["off_limits"] is False
         assert result["requirements"] == {}
 
 

@@ -144,7 +144,7 @@ async def test_layerB_query_quest_exact_match(isolated_lane, unique_username):
         payload = result.json()
         assert payload.get("name") == "Anvil's Echoes", payload
         assert payload.get("matched_name") == "Anvil's Echoes", payload
-        assert payload.get("status"), payload
+        assert payload.get("off_limits") is False, payload
         assert payload.get("walkthrough"), payload
     finally:
         cleanup_player(unique_username)
