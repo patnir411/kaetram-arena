@@ -19,6 +19,9 @@ state/.session_counter
 recordings/
 highlights/
 
+# Generated architecture/explainer diagrams (never tracked)
+.codeviz/
+
 # Model checkpoints (large weights)
 world/checkpoints/
 
@@ -37,9 +40,14 @@ dataset/qwen_kto*/
 dataset/raw/
 dataset/session*/
 dataset/_archive/
+dataset/opd_probe/
+dataset/opd_2b/round*/*
+dataset/opd_r11/
 
 # Exception: track the active SFT build's README so provenance docs land in git
 !dataset/qwen_sft/README.md
+# Exception: gate outputs are small provenance artifacts — keep them in git
+!dataset/opd_2b/round*/gate_*.txt
 
 # Claude session-local scheduler state (root + nested project dirs)
 .claude/scheduled_tasks.lock
