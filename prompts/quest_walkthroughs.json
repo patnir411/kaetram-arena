@@ -304,23 +304,23 @@
     "blocked_reason": null,
     "stage_summary": [
       "Talk to Rick.",
-      "Bring 5 cooked shrimp.",
+      "Turn in `cookedshrimp x5` to Rick.",
       "Take Rick's `seaweedroll` through the stage-2 door.",
-      "Deliver the roll to Lena."
+      "Deliver `seaweedroll x1` to Lena."
     ],
-    "walkthrough": "Talk to Rick, fish and cook 5 shrimp, turn them in to receive `seaweedroll`, then traverse the stage-2 door chain to Lena. The stage-2 door at (260, 229) does NOT land you next to Lena \u2014 it drops you in a multi-room puzzle of teleporters where most ladders loop back and only one per room advances.",
+    "walkthrough": "Fish + cook 5 shrimp on the main landmass FIRST (Fishing/Cooking L1, no gate; pre-fished shrimp count at turn-in), then cross the door at (379, 388) ONCE to reach Rick (1088, 833) on the L76+ seaside and accept + turn in back-to-back. Then traverse the stage-2 door chain to Lena. The stage-2 door at (260, 229) does NOT land you next to Lena \u2014 it drops you in a multi-room puzzle of teleporters where most ladders loop back and only one per room advances.",
     "items_needed": "5 cookedshrimp",
     "item_sources": {
-      "Raw Shrimp": "Fish shrimp spots.",
-      "Cooked Shrimp": "Cook `rawshrimp` at a cooking station."
+      "Raw Shrimp": "gather('Shrimp Fishing Spot') with the fishingpole equipped \u2014 spots cluster at x269-383, y328-397 (e.g. (325,360), (336,328)); Fishing L1, no gate.",
+      "Cooked Shrimp": "craft_item('cooking','cookedshrimp',5) at the cooking station (323,892); Cooking L1."
     },
     "tips": "Stage-2 puzzle: each room has 3-4 ladder/door tiles where most loop back. Decoy tiles by room \u2014 first room (entry 425,909): {(421,903), (425,905), (429,903)}; upper room (entry 453,904): {(449,904), (453,901), (457,904)}; lower-left room (entry 426,927): {(422,920)}. Real exits in order: (425,901) \u2192 (453,907) \u2192 (431,920) \u2192 walk to Lena. Inside the first room, the straight-north path from (425, 909) to (425, 901) crosses a decoy at (425, 905), so detour off the center column via (424, 902). Stage-1 turn-in to Rick and stage-2 turn-in to Lena both often need TWO interact_npc calls \u2014 first opens dialogue, second consumes items / advances stage.",
     "walkthrough_steps": [
-      "Rick at (1088, 833) is in a region disjoint from Mudwich. Use the warp+door route: warp(location='mudwich') (or just stay there at start), navigate from Mudwich southeast through the corridor, step on door 1025 at (379, 388) which teleports you to (1138, 800), then walk west to Rick.",
-      "Once adjacent to Rick: interact_npc(name='Rick', accept_quest_offer=True).",
-      "Equip the starter fishingpole (slot 2 of starter kit). gather('Shrimp Fishing Spot') from a shore tile \u2014 e.g. seed-friendly approach is (324, 360) standing west of spot (325, 360). Repeat until you have 5 rawshrimp.",
-      "Walk to a cooking station \u2014 call query_quest('Rick\\'s Roll') and read station_locations.cooking for the nearest reachable cooking tile to your current position (the runtime lookup is the source of truth). Then craft_item(skill='cooking', recipe_key='cookedshrimp', count=5).",
-      "Return to Rick and interact_npc(npc_name='Rick') TWICE \u2014 first call opens dialogue ('I\\'m so touched'), second call consumes the 5 cookedshrimp, gives you a `seaweedroll`, and advances stage 1 \u2192 2. If after one call your inventory still has the cookedshrimp and quest_state_changed=false, do NOT assume failure; call again.",
+      "FISH FIRST \u2014 do NOT travel to Rick yet. Equip the starter fishingpole (slot 2), then gather('Shrimp Fishing Spot') until you hold 5 rawshrimp. Spots cluster on the main landmass at x269-383, y328-397 (stand near (325,360) or (336,328)); Fishing L1, no gate. These shrimp count at turn-in even though the quest isn't accepted yet.",
+      "Cook: craft_item(skill='cooking', recipe_key='cookedshrimp', count=5) at the cooking station (323,892) \u2014 Cooking L1. (query_quest's station_locations.cooking ranks the nearest loaded cooking tiles by distance once you're near a station; it's empty while you're still at the fishing coast, so the (323,892) coord is your cue to head there.) You now hold 5 cookedshrimp.",
+      "Prepare to cross: the route to Rick passes an L76-L118 aggressive seaside that kills under-leveled characters. Level combat enough to survive it and carry food. Do NOT cross until you hold 5 cookedshrimp.",
+      "Cross ONCE: navigate(379, 388) \u2014 door 1025 teleports you to (1138, 800); then walk west to Rick at (1088, 833).",
+      "At Rick: interact_npc(name='Rick', accept_quest_offer=True) to accept (stage 0 -> 1), then interact_npc(name='Rick') again to turn in your 5 cookedshrimp -> stage 1 -> 2, receiving `seaweedroll`. The turn-in usually needs TWO consecutive calls (first opens dialogue, second consumes items); if quest_state_changed=false after one, call again \u2014 don't assume failure.",
       "Stage-2 door 1 of 4: step on (260, 229) \u2014 teleports to (425, 909) inside an enclosed puzzle room. Decoys at (421, 903), (425, 905), (429, 903) all loop back here.",
       "Stage-2 door 2 of 4: walk to (424, 902) FIRST (off-column waypoint \u2014 the straight-north path would cross the (425, 905) decoy and bounce you back). Then walk to (425, 901) and step on it \u2014 teleports to (453, 904) inside Lena's upper room.",
       "Stage-2 door 3 of 4: walk south to (453, 907) and step on it \u2014 teleports to (426, 927) in the lower-left room. Decoys (449, 904), (453, 901), (457, 904) in the upper room loop back to the start; avoid them.",
@@ -420,16 +420,16 @@
     "item_sources": {
       "Blue Lily": "Forage Blue Lily Bush at Foraging 5. First placement (278, 250). Cluster spans (278\u2013441, 250\u2013363).",
       "Tomato": "Forage Tomato Plant Thingy at Foraging 5. Cluster near Mudwich at (113\u2013386, 107\u2013326), e.g. (220, 107). 25 XP/pull.",
-      "Paprika": "Forage Paprika Bush at Foraging 5. Cluster (286\u2013390, 240\u2013484), e.g. (298, 300). 50 XP/pull \u2014 best XP of the three."
+      "Paprika": "Forage Paprika Bush at Foraging 5. Reachable on foot from Herby: (358, 325) [closest], then (305, 360) and (286, 326). Each node depletes ~25s, so rotate between them to get 2. AVOID (298, 300) \u2014 it is walled off and cannot be reached on foot."
     },
-    "tips": "All three required nodes share a single Foraging 5 gate \u2014 grind once (~25 blueberry gathers), harvest in any order.",
+    "tips": "All three required nodes share a single Foraging 5 gate \u2014 grind once (~52 blueberry gathers), harvest in any order.",
     "walkthrough_steps": [
-      "From Mudwich: warp(location='lakesworld') lands at (319, 281). Walk ~14 tiles east to Herby Mc. Herb at (333, 281). (Overland is reachable too via the pin chain (245,170)\u2192(285,190)\u2192(293,242)\u2192(311,254)\u2192(327,268), but the warp is faster after Desert Quest is finished.)",
+      "Reach Herby Mc. Herb at (333, 281). The lakesworld warp is LOCKED until Desert Quest is finished and fails silently before then \u2014 You CANNOT navigate(333,281) directly from Mudwich \u2014 the map streams in regions, so a far target reads as 'walled off / different region'. Walk the pin chain IN ORDER, re-issuing navigate(wx,wy) until you arrive at each waypoint before moving to the next (each hop loads the next region): from Mudwich,(245,170)\u2192(285,190)\u2192(293,242)\u2192(311,254)\u2192(327,268).) Only if Desert Quest is already finished, warp(location='lakesworld') lands at (319,281), then walk ~14 tiles east to Herby.",
       "Once adjacent: interact_npc(npc_name='Herby Mc. Herb', accept_quest_offer=True).",
       "Grind Foraging on Blueberry Bush at Mudwich (155, 103). ~52 gathers to Lv5 unlocks Blue Lily, Tomato, and Paprika together.",
       "Walk to Blue Lily Bush (278, 250). Gather 3x bluelily.",
       "Return to Herby Mc. Herb and interact_npc to turn in the lilies. (May need TWO calls \u2014 first opens dialogue, second consumes items.)",
-      "Walk to Paprika Bush (298, 300). Gather 2 paprika.",
+      "Walk from Herby to a Paprika Bush at (358, 325); gather paprika, and if a node gives nothing it just depleted \u2014 rotate to (305, 360) or (286, 326) until you have 2. Do NOT use (298, 300): it is walled off and navigate cannot reach it.",
       "Walk to Tomato Plant Thingy (220, 107). Gather 2 tomato.",
       "Return to Herby Mc. Herb for final turn-in (interact_npc \u2014 again, may need 2 calls)."
     ]
