@@ -63,8 +63,7 @@ def parse_session_log(filepath):
     Incremental: only new bytes since the last call are parsed; the prior
     accumulator (events list, turn counter, tokens, etc.) is preserved across
     calls. On rotation/truncation we reset and re-parse from offset 0.
-    Returns the same {events, turn, cost_usd, tokens, model, duration_ms,
-    num_turns} dict shape as before.
+    Returns a {events, turn, cost_usd, tokens, model, duration_ms, num_turns} dict.
     """
     fmt = detect_log_format(Path(filepath))
     if fmt == "codex":
@@ -812,10 +811,9 @@ def _finalize_stats_acc(state: dict) -> dict:
 def live_session_stats(filepath):
     """Turn count, context tokens, cost, model — incremental.
 
-    Same semantics as before, but the per-line accumulator persists across
-    calls so re-parsing during play is O(new_bytes) instead of O(1 MB).
-    On first call we still scan from offset 0 to seed the accumulator
-    correctly; subsequent calls advance by exactly the bytes the harness wrote.
+    The per-line accumulator persists across calls so re-parsing during play is
+    O(new_bytes) instead of O(1 MB): the first call scans from offset 0 to seed
+    the accumulator; subsequent calls advance by exactly the bytes the harness wrote.
     """
     fmt = detect_log_format(Path(filepath))
     cache = _live_stats_cache_codex if fmt == "codex" else _live_stats_cache_claude

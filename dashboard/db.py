@@ -212,7 +212,7 @@ def summarize_achievement_doc(ach_doc: dict | None) -> tuple[list[dict], dict]:
 
 
 def _build_xp_table():
-    """Build the Kaetram XP→level table (RuneScape formula).
+    """Build the Kaetram XP→level table (classic cumulative MMO XP formula).
 
     From packages/server/src/info/loader.ts:
         LevelExp[0] = 0
