@@ -374,6 +374,15 @@ class AgentInstance:
     max_budget_usd: float | None = None
     auth_mode: str = "subscription"   # "api_key" or "subscription"
     pause_between: int = 10
+    # Crash-loop guard: track session uptime to apply escalating backoff when a
+    # session dies almost immediately (e.g. game server down, MCP init failure,
+    # auth error). Without this, maybe_restart_session() respawns the full
+    # CLI+MCP+Chromium stack every `pause_between` seconds indefinitely — the
+    # same uncapped-respawn load-cascade class that froze the VM on 2026-05-29.
+    _session_started_at: float = 0.0
+    _consecutive_fast_fails: int = 0
+    _MIN_HEALTHY_UPTIME: float = 60.0   # session must live this long to "count"
+    _MAX_RESTART_BACKOFF: float = 300.0  # cap escalating backoff at 5 min
     # Per-agent livestream pipeline (None when HLS_ENABLED is False or boot failed).
     xvfb: "XvfbProcess | None" = None
     ffmpeg: "FfmpegEncoder | None" = None
@@ -606,11 +615,30 @@ class AgentInstance:
             preexec_fn=os.setsid,
         )
         self._log_fh = log_fh
+        # Mark launch time for the crash-loop backoff in maybe_restart_session().
+        self._session_started_at = time.time()
 
     def _start_livestream_pipeline(self):
         """Best-effort Xvfb + ffmpeg bring-up. Sets self.xvfb / self.ffmpeg on success."""
         if not HLS_ENABLED:
             return
+        # Idempotency guard: tear down any pipeline left over from a prior
+        # session before spawning a new one. Without this, a crash-recovery
+        # restart that bypassed stop() (or a Qwen warm re-spawn) would leak the
+        # old Xvfb + ffmpeg encoder — orphaned ffmpeg is the heaviest load
+        # contributor in the cascade class we are hardening against.
+        if self.ffmpeg is not None:
+            try:
+                self.ffmpeg.stop()
+            except Exception:
+                pass
+            self.ffmpeg = None
+        if self.xvfb is not None:
+            try:
+                self.xvfb.stop()
+            except Exception:
+                pass
+            self.xvfb = None
         # Xvfb first; ffmpeg depends on the X socket existing.
         try:
             xv = XvfbProcess(agent_id=self.agent_id)
@@ -1053,7 +1081,33 @@ class AgentInstance:
             self._update_metadata_rate_limit(None)
         self._rate_limit_until = 0
         self.stop()  # clean up file handle
-        time.sleep(self.pause_between)
+
+        # Crash-loop guard: if the just-exited session never reached a healthy
+        # uptime, it almost certainly failed at launch (server down, MCP init
+        # failure, auth error). Respawning the full CLI+MCP+Chromium stack every
+        # `pause_between` seconds in that state is the uncapped-respawn load
+        # cascade we are hardening against — back off exponentially instead.
+        if self._session_started_at and (
+            time.time() - self._session_started_at < self._MIN_HEALTHY_UPTIME
+        ):
+            self._consecutive_fast_fails += 1
+        else:
+            self._consecutive_fast_fails = 0
+
+        if self._consecutive_fast_fails > 0:
+            # 10s, 20s, 40s, … capped at _MAX_RESTART_BACKOFF.
+            backoff = min(
+                self.pause_between * (2 ** (self._consecutive_fast_fails - 1)),
+                self._MAX_RESTART_BACKOFF,
+            )
+            print(
+                f"  [!] Agent {self.agent_id} ({self.username}): session failed "
+                f"fast ({self._consecutive_fast_fails}x) — backing off {int(backoff)}s "
+                "before respawn"
+            )
+            time.sleep(backoff)
+        else:
+            time.sleep(self.pause_between)
         self.start_session()
         return True
 
@@ -1310,7 +1364,7 @@ class Orchestrator:
             else:
                 assignments = base_pattern
         else:
-            # Default: round-robin across all 4 personalities
+            # Default: round-robin across all 3 personalities
             assignments = [VALID_PERSONALITIES[i % len(VALID_PERSONALITIES)]
                            for i in range(self.n_agents)]
 
@@ -1724,7 +1778,7 @@ class Orchestrator:
 def main():
     parser = argparse.ArgumentParser(description="Multi-agent Kaetram data collection orchestrator")
     parser.add_argument(
-        "--agents", type=int, default=4, help="Number of parallel agents (default: 4)"
+        "--agents", type=int, default=3, help="Number of parallel agents (default: 3)"
     )
     parser.add_argument(
         "--hours", type=float, default=None, help="Auto-stop after N hours (default: run forever)"

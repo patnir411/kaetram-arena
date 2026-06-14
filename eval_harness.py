@@ -34,9 +34,14 @@ from pathlib import Path
 
 # Default Modal endpoints with per-model config
 # Each model gets its own username (no hyphens — Kaetram rejects them) and game server port.
+# Workspace placeholder "workspace" is anonymized for publication; set
+# MODAL_WORKSPACE (or KAETRAM_QWEN_BASE_ENDPOINT) on a live machine — see
+# cli_adapter._MODAL_WORKSPACE for the rationale.
+_WS = os.environ.get("MODAL_WORKSPACE", "workspace")
 DEFAULT_MODELS = {
     "base": {
-        "endpoint": "https://workspace--kaetram-qwen-base-inference-serve.modal.run/v1",
+        "endpoint": os.environ.get("KAETRAM_QWEN_BASE_ENDPOINT")
+        or f"https://{_WS}--kaetram-qwen-base-inference-serve.modal.run/v1",
         "username": "evalbotBase",
         "server_port": "9071",
     },
@@ -328,9 +333,8 @@ def parse_log(log_path: Path) -> list[dict]:
                 # each) are collapsed by the extractor only via tool_calls
                 # presence. Emit one entry per record so per-block thinking/
                 # text records still count as turns; aggregate tool_use blocks.
-                # The extractor at line ~544 increments assistant_turns per
-                # record and reads tool_calls, which matches old behavior
-                # (one tool-call → one assistant record).
+                # The extractor increments assistant_turns per record and reads
+                # tool_calls (one tool-call → one assistant record).
                 entry = {"role": "assistant", "content": " ".join(texts)}
                 if tool_calls:
                     entry["tool_calls"] = tool_calls
