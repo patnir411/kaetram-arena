@@ -18,6 +18,14 @@ done
 
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Fail fast with a clear message if the venv interpreter is missing, rather
+# than emitting a cryptic "No such file or directory" from the pytest line.
+if [ ! -x "$PROJECT_DIR/.venv/bin/python3" ]; then
+  echo "ERROR: $PROJECT_DIR/.venv/bin/python3 not found — create the venv first" >&2
+  exit 1
+fi
+
 run_id="cli_$(date +%Y%m%d_%H%M%S)"
 run_dir="/tmp/test_runs/$run_id"
 mkdir -p "$run_dir"

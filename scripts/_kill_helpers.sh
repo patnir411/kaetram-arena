@@ -125,6 +125,16 @@ clear_sandbox_state_reset() {
         "$sandbox/state/.session_counter"
 }
 
+# Kaetram livestream displays: Xvfb :99 + agent_id (:99..:108); :198 is the test lane.
+KAETRAM_XVFB_PATTERN='Xvfb :(99|10[0-8])\b'
+KAETRAM_FFMPEG_PATTERN='ffmpeg.*x11grab.*-i :(99|10[0-8])\b'
+
+kill_kaetram_livestream() {
+  local sig="${1:-KILL}"
+  pkill "-$sig" -f "$KAETRAM_FFMPEG_PATTERN" 2>/dev/null || true
+  pkill "-$sig" -f "$KAETRAM_XVFB_PATTERN" 2>/dev/null || true
+}
+
 # Kill the process group for any data-collection chrome-headless-shell pid.
 # Chrome spawns in its own pgid, so this catches all renderers/zygotes too.
 kill_scoped_chrome_pgroup() {

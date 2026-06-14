@@ -141,6 +141,26 @@ if ! $HAS_PERSONALITY; then
   TOTAL_AGENTS="$N_AGENTS"
 fi
 
+# ── Agent-count validation (mirrors orchestrate.py's 1-8 cap) ──
+# The seed/cleanup loops below run BEFORE orchestrate.py launches, so an
+# out-of-range value would drive Mongo seeding / sandbox loops with garbage
+# before orchestrate's own guard could reject it. Validate up front.
+if ! [[ "$TOTAL_AGENTS" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: agent count must be a non-negative integer (got '$TOTAL_AGENTS')." >&2
+  exit 1
+fi
+if [ "$TOTAL_AGENTS" -lt 1 ] || [ "$TOTAL_AGENTS" -gt 8 ]; then
+  echo "ERROR: agent count must be 1-8 (got $TOTAL_AGENTS). The box has 8 vCPUs;" >&2
+  echo "       each agent runs a game server + Xvfb + ffmpeg + Chromium." >&2
+  exit 1
+fi
+# Oversubscription warning: 3 agents is the standard run on this 8-vCPU box.
+# Running >4 here risks the CPU/IO load cascade that froze the VM on 2026-05-29.
+if [ "$TOTAL_AGENTS" -gt 4 ]; then
+  echo "WARNING: $TOTAL_AGENTS agents oversubscribes the 8-vCPU box (each agent =" >&2
+  echo "         game server + Xvfb + ffmpeg + Chromium). Standard run is 3." >&2
+fi
+
 echo "=== Restarting Kaetram training run ==="
 if $HAS_PERSONALITY; then
   [ -n "$N_GRINDER" ] && [ "$N_GRINDER" -gt 0 ] && echo "  Grinder:            $N_GRINDER"
@@ -180,6 +200,9 @@ pkill -f "python3 orchestrate.py" 2>/dev/null || true
 sleep 1
 # Kill the datacol tmux session (holds shell wrappers)
 tmux kill-session -t datacol 2>/dev/null || true
+# Disable abort-on-error for the teardown — one non-zero kill must not skip
+# the SIGKILL rounds or livestream cleanup. Re-enabled after.
+set +e
 # SIGTERM round (scoped)
 kill_scoped "claude -p"            TERM
 kill_scoped "codex.*exec"          TERM
@@ -210,11 +233,9 @@ kill_scoped "playwright-mcp"         KILL
 kill_scoped_chrome_pgroup KILL
 
 # ── Livestream pipeline cleanup: Xvfb + ffmpeg + HLS segments ──
-# Per-agent Xvfb runs on display 99 + agent_id (so :99..:108 covers slots 0-9).
-pkill -9 -f "Xvfb :9[0-9]" 2>/dev/null || true
-pkill -9 -f "Xvfb :10[0-9]" 2>/dev/null || true
-pkill -9 -f "ffmpeg.*x11grab" 2>/dev/null || true
+kill_kaetram_livestream KILL
 rm -rf /tmp/hls/agent_* 2>/dev/null || true
+set -e  # teardown done; restore strict mode for setup below
 mkdir -p /tmp/hls 2>/dev/null || true
 for i in $(seq 0 $((TOTAL_AGENTS - 1))); do
   mkdir -p "/tmp/hls/agent_$i" 2>/dev/null || true
@@ -278,6 +299,22 @@ for name in QWEN_NAMES:
     seed_player(name); n += 1
 print(f"  Seeded {n} bot rows.")
 PYEOF
+
+  # Opt-in mid-quest seeding (OPD bucket-B collection): re-seed the Qwen rows
+  # at the Herbalist stage-1 wall instead of post-tutorial vanilla.
+  if [ -n "${KAETRAM_SEED_WALL:-}" ]; then
+    echo "Re-seeding Qwen agents at the Herbalist wall (KAETRAM_SEED_WALL=$KAETRAM_SEED_WALL)..."
+    PYTHONPATH="$PROJECT_DIR" "$PROJECT_DIR/.venv/bin/python3" \
+      "$PROJECT_DIR/scripts/opd/seed_herbalist_wall.py"
+  fi
+
+  # Opt-in milestone-ladder seeding (OPD round-3): per-personality milestones,
+  # lane set A or B — see scripts/opd/seed_milestones.py.
+  if [ -n "${KAETRAM_SEED_MILESTONES:-}" ]; then
+    echo "Re-seeding Qwen agents at round-3 milestones (lane set $KAETRAM_SEED_MILESTONES)..."
+    PYTHONPATH="$PROJECT_DIR" "$PROJECT_DIR/.venv/bin/python3" \
+      "$PROJECT_DIR/scripts/opd/seed_milestones.py" "$KAETRAM_SEED_MILESTONES"
+  fi
 else
   echo "WARNING: MongoDB container not running — skipping DB reset"
 fi
@@ -351,10 +388,37 @@ fi
 # ── Step 7: Launch orchestrator in datacol tmux session ──
 echo "Launching orchestrator ($TOTAL_AGENTS agents, $HOURS hours)..."
 
+# Base Qwen runs enable observe compaction (drops the ASCII map from observe →
+# more turns/session). Prefixed onto the python invocation so it survives the
+# tmux → orchestrate → play_qwen → MCP chain.
+ENV_PREFIX=""
+if [ -n "$N_QWEN_BASE" ]; then
+  ENV_PREFIX="KAETRAM_OBSERVE_COMPACT=1 "
+  # Forward a custom base-model endpoint (e.g. the self-hosted Qwen3.5-27B
+  # deploy) so it reaches orchestrate → play_qwen across the tmux boundary,
+  # where a plain exported env var wouldn't reliably survive.
+  [ -n "${KAETRAM_QWEN_BASE_ENDPOINT:-}" ] && \
+    ENV_PREFIX="${ENV_PREFIX}KAETRAM_QWEN_BASE_ENDPOINT=${KAETRAM_QWEN_BASE_ENDPOINT} "
+  # Variant label when the base endpoint serves a non-default model (e.g. 27B).
+  [ -n "${KAETRAM_QWEN_BASE_MODEL:-}" ] && \
+    ENV_PREFIX="${ENV_PREFIX}KAETRAM_QWEN_BASE_MODEL=${KAETRAM_QWEN_BASE_MODEL} "
+fi
+# Caller-forced observe compaction: --qwen-sft evals of 2B-family checkpoints must
+# match the compact-observe shape of their --qwen-base baseline runs.
+[ -z "$N_QWEN_BASE" ] && [ -n "${KAETRAM_OBSERVE_COMPACT:-}" ] && \
+  ENV_PREFIX="${ENV_PREFIX}KAETRAM_OBSERVE_COMPACT=${KAETRAM_OBSERVE_COMPACT} "
+[ -n "$N_QWEN_SFT" ] && [ -n "${KAETRAM_QWEN_SFT_ENDPOINT:-}" ] && \
+  ENV_PREFIX="${ENV_PREFIX}KAETRAM_QWEN_SFT_ENDPOINT=${KAETRAM_QWEN_SFT_ENDPOINT} "
+# Variant label when the SFT endpoint serves a non-default checkpoint (e.g. 2b-opd-r1).
+[ -n "$N_QWEN_SFT" ] && [ -n "${KAETRAM_QWEN_SFT_MODEL:-}" ] && \
+  ENV_PREFIX="${ENV_PREFIX}KAETRAM_QWEN_SFT_MODEL=${KAETRAM_QWEN_SFT_MODEL} "
+# Harness-side recovery of malformed tool calls (play_qwen _TOOL_RECOVERY).
+[ -n "${KAETRAM_TOOL_RECOVERY:-}" ] && \
+  ENV_PREFIX="${ENV_PREFIX}KAETRAM_TOOL_RECOVERY=${KAETRAM_TOOL_RECOVERY} "
 if $HAS_PERSONALITY; then
-  ORCH_CMD="cd $PROJECT_DIR && python3 orchestrate.py $PERSONALITY_ARGS"
+  ORCH_CMD="cd $PROJECT_DIR && ${ENV_PREFIX}python3 orchestrate.py $PERSONALITY_ARGS"
 else
-  ORCH_CMD="cd $PROJECT_DIR && python3 orchestrate.py --agents $N_AGENTS"
+  ORCH_CMD="cd $PROJECT_DIR && ${ENV_PREFIX}python3 orchestrate.py --agents $N_AGENTS"
 fi
 if [ "$HOURS" != "0" ]; then
   ORCH_CMD="$ORCH_CMD --hours $HOURS"

@@ -6,10 +6,10 @@
 # would re-save stale state to DB on next autosave/logout.
 #
 # Usage:
-#   ./scripts/reset-state.sh              # reset all 4 agents (default)
-#   ./scripts/reset-state.sh 4            # reset agents 0-3
+#   ./scripts/reset-state.sh              # reset all 3 agents (default)
+#   ./scripts/reset-state.sh 3            # reset agents 0-2
 #   ./scripts/reset-state.sh 2            # reset agents 0-1 only
-#   ./scripts/reset-state.sh 4 --force    # skip safety check (use with caution)
+#   ./scripts/reset-state.sh 3 --force    # skip safety check (use with caution)
 
 set -euo pipefail
 
@@ -28,9 +28,17 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/_kill_helpers.sh
 source "$SCRIPT_DIR/_kill_helpers.sh"
-N_AGENTS="${1:-4}"
+N_AGENTS="${1:-3}"
 FORCE=false
 [[ "${2:-}" == "--force" ]] && FORCE=true
+
+# Validate the agent count up front — every loop below uses seq 0..N-1, so a
+# non-integer or out-of-range value would build garbage username lists / port
+# scans. Cap at 8 to match orchestrate.py's slot limit.
+if ! [[ "$N_AGENTS" =~ ^[0-9]+$ ]] || [ "$N_AGENTS" -lt 1 ] || [ "$N_AGENTS" -gt 8 ]; then
+  echo "ERROR: agent count must be an integer 1-8 (got '$N_AGENTS')." >&2
+  exit 1
+fi
 
 MONGO_CONTAINER="kaetram-mongo"
 MONGO_DB="kaetram_devlopment"
@@ -54,11 +62,15 @@ echo ""
 
 # ── Safety check: refuse if agents or game servers are running ──
 if [ "$FORCE" != "true" ]; then
-  ORCH_COUNT=$(pgrep -c -f "python3 orchestrate.py" 2>/dev/null || echo 0)
-  CLAUDE_COUNT=$(pgrep -c -f "claude -p" 2>/dev/null || echo 0)
-  CODEX_COUNT=$(pgrep -c -f "codex.*exec" 2>/dev/null || echo 0)
+  # `pgrep -c` prints "0" AND exits 1 on no-match, so `$(pgrep -c … || echo 0)`
+  # captured "0\n0" → broke the later $(( )) arithmetic. _count() normalizes to
+  # a single integer regardless of match/no-match.
+  _count() { pgrep -c -f "$1" 2>/dev/null || true; }
+  ORCH_COUNT=$(_count "python3 orchestrate.py"); ORCH_COUNT=${ORCH_COUNT:-0}
+  CLAUDE_COUNT=$(_count "claude -p"); CLAUDE_COUNT=${CLAUDE_COUNT:-0}
+  CODEX_COUNT=$(_count "codex.*exec"); CODEX_COUNT=${CODEX_COUNT:-0}
   AGENT_COUNT=$((CLAUDE_COUNT + CODEX_COUNT))
-  PLAY_COUNT=$(pgrep -c -f "play.sh" 2>/dev/null || echo 0)
+  PLAY_COUNT=$(_count "play.sh"); PLAY_COUNT=${PLAY_COUNT:-0}
 
   # Check game server ports
   SERVERS_UP=0
