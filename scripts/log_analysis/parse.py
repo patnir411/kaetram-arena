@@ -30,6 +30,10 @@ from typing import Iterable
 REPO = Path(__file__).resolve().parents[2]
 RAW_DIR = REPO / "dataset" / "raw"
 
+# Malformed tool-call syntax emitted as plain text (server parser drops it):
+# `<function=name(args)>` Python-call form, or `<parameter=key=value>` kwarg-in-key.
+_MALFORMED_EMIT_RE = re.compile(r"<function=[A-Za-z_]\w*\(|<parameter=[^>\n]*=[^>\n]*>")
+
 # orchestrate.py writes timestamps in EDT (UTC-4) — keep that in sync.
 _EST = timezone(timedelta(hours=-4))
 
@@ -136,6 +140,21 @@ def fmt_duration(seconds: float | int | None) -> str:
 
 # ── Decoders ─────────────────────────────────────────────────────────────────
 
+_FORMAT_NOTE_PREFIX = "[format]"
+
+
+def _strip_format_note(raw: str) -> str:
+    """Drop a leading harness format-recovery note (KAETRAM_TOOL_RECOVERY:
+    `[format] ...one paragraph...\\n\\n<real result>`). The note precedes the
+    genuine MCP result on recovered tool calls; without stripping it the result
+    is opaque to every decoder (it fails json.loads / the ASCII partition)."""
+    if isinstance(raw, str) and raw.startswith(_FORMAT_NOTE_PREFIX):
+        _, sep, rest = raw.partition("\n\n")
+        if sep:
+            return rest
+    return raw
+
+
 def decode_tool_result_content(raw: str) -> tuple[dict | str, str | None]:
     """Decode a tool_result `.content` string.
 
@@ -144,9 +163,11 @@ def decode_tool_result_content(raw: str) -> tuple[dict | str, str | None]:
       * Qwen / direct MCP: '<inner>' (bare; play_qwen logs raw MCP output)
 
     `<inner>` is `<JSON>` for non-observe tools, or `<JSON>\\n\\nASCII_MAP:<grid>`
-    for observe. Returns (payload, ascii_map). Falls back to (raw, None) if
-    nothing decodes.
+    for observe. A leading `[format]` recovery note (if present) is stripped
+    first. Returns (payload, ascii_map). Falls back to (raw, None) if nothing
+    decodes.
     """
+    raw = _strip_format_note(raw)
     inner: str | None = None
     try:
         wrapper = json.loads(raw)
@@ -165,6 +186,10 @@ def decode_tool_result_content(raw: str) -> tuple[dict | str, str | None]:
         # that itself contains the game-state keys. Treat raw as inner.
         inner = raw
     body, sep, ascii_map = inner.partition("\n\nASCII_MAP:")
+    if not sep:
+        # Compacted observe (KAETRAM_OBSERVE_COMPACT): no ASCII_MAP, but the
+        # body still carries a trailing STUCK_CHECK — strip it for the JSON.
+        body = inner.partition("\n\nSTUCK_CHECK:")[0]
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
@@ -180,7 +205,11 @@ def decode_kaetram_tool_output(raw: str) -> tuple[dict | str, str | None]:
     """
     if not isinstance(raw, str):
         return raw, None
+    raw = _strip_format_note(raw)
     body, sep, ascii_map = raw.partition("\n\nASCII_MAP:")
+    if not sep:
+        # Compacted observe: no ASCII_MAP; strip the trailing STUCK_CHECK.
+        body = raw.partition("\n\nSTUCK_CHECK:")[0]
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
@@ -215,6 +244,12 @@ class ToolCall:
             return True
         if isinstance(self.result_payload, dict):
             return bool(self.result_payload.get("error"))
+        # MCP schema/validation failures come back as plain strings
+        # ("Error executing tool gather: 1 validation error ..."), not JSON —
+        # without this branch the largest qwen failure class is invisible.
+        if isinstance(self.result_payload, str) and self.result_payload.startswith(
+                "Error executing tool"):
+            return True
         return False
 
 
@@ -230,6 +265,11 @@ class SessionView:
     n_user: int = 0
     n_thinking: int = 0
     n_text: int = 0
+    # Assistant text blocks carrying malformed tool-call syntax the server's
+    # parser dropped (`<function=name(...)>` / `<parameter=k=v>`). These never
+    # become tool_use records, so without this counter they are invisible to
+    # every tool-call metric — the blind spot that hid the r3 spam paralysis.
+    n_malformed_emit: int = 0
     # Cost + token aggregation. Populated for both harnesses (claude reads
     # from the final `result` event; opencode aggregates per-step
     # `step_finish` parts since it never emits a final summary). None when
@@ -325,6 +365,8 @@ def parse_session(log_path: Path) -> SessionView:
                 elif btype == "text":
                     sv.n_text += 1
                     pending_text = blk.get("text")
+                    if pending_text and _MALFORMED_EMIT_RE.search(pending_text):
+                        sv.n_malformed_emit += 1
                 elif btype == "tool_use":
                     name = blk.get("name", "")
                     short = name.split("__")[-1] if "__" in name else name
@@ -819,6 +861,13 @@ class RunSessionsView:
     @property
     def n_text(self) -> int:
         return sum(sv.n_text for sv in self.sessions)
+
+    @property
+    def n_malformed_emit(self) -> int:
+        """Malformed tool calls emitted as text (dropped by the server parser).
+        Nonzero => the agent spent turns on calls that never executed unless
+        KAETRAM_TOOL_RECOVERY caught them (cross-check `[format]` results)."""
+        return sum(sv.n_malformed_emit for sv in self.sessions)
 
     @property
     def terminal_reason(self) -> str:
