@@ -20,13 +20,16 @@ def test_qwen_chat_template_patch_present_in_render_module():
 
 
 def test_modal_entry_points_import_patch_from_render():
-    """All Modal entry points must import `patch_qwen_chat_template` from
-    `finetune.render` rather than defining it inline (drift hazard)."""
+    """All *implemented* Modal entry points must import `patch_qwen_chat_template`
+    from `finetune.render` rather than defining it inline (drift hazard).
+
+    `train_kto_modal.py` / `train_grpo_modal.py` are deferred planning stubs that
+    don't load a tokenizer yet — excluded until implemented (they must re-import
+    the patch when revived; see the patch's docstring in finetune/render.py)."""
     callers = [
         REPO_ROOT / "finetune" / "train_modal.py",
         REPO_ROOT / "finetune" / "serve_modal.py",
         REPO_ROOT / "finetune" / "serve_modal_base.py",
-        REPO_ROOT / "finetune" / "train_kto_modal.py",
     ]
     for path in callers:
         source = path.read_text()

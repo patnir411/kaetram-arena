@@ -18,20 +18,9 @@ SYSTEM_PROMPT = REPO_ROOT / "prompts" / "system.md"
 MCP_TOOLS_DIR = REPO_ROOT / "mcp_server" / "tools"
 
 
-def _system_prompt_tool_names() -> tuple[str, ...]:
+def _system_prompt_tools_block() -> str:
     text = SYSTEM_PROMPT.read_text()
-    block = text.split("<tools>", 1)[1].split("</tools>", 1)[0]
-    names = []
-    for line in block.splitlines():
-        line = line.strip()
-        if not line.startswith("| `"):
-            continue
-        match = re.search(r"`([^`]+)`", line)
-        if not match:
-            continue
-        raw = match.group(1)
-        names.append(raw.split("(", 1)[0])
-    return tuple(names)
+    return text.split("<tools>", 1)[1].split("</tools>", 1)[0]
 
 
 def _exported_mcp_tool_names() -> tuple[str, ...]:
@@ -54,7 +43,16 @@ def _exported_mcp_tool_names() -> tuple[str, ...]:
 
 
 def test_system_prompt_matches_curated_model_visible_surface():
-    assert _system_prompt_tool_names() == MODEL_VISIBLE_TOOL_NAMES
+    # Post-shrink (r11 teacher prompt) the <tools> block is compact prose
+    # notes, not an exhaustive ordered markdown table — the full call schemas
+    # reach the model via the native tools= spec. Invariant kept: every curated
+    # model-visible tool is documented (as `name`) in the <tools> block, so a
+    # removed/renamed tool still trips this test. Exact surface parity (no
+    # extras, right order) is enforced against the live MCP server and the
+    # convert_to_qwen metadata by the other tests in this file.
+    block = _system_prompt_tools_block()
+    missing = [name for name in MODEL_VISIBLE_TOOL_NAMES if f"`{name}" not in block]
+    assert not missing, f"tools missing from system.md <tools> block: {missing}"
 
 
 def test_convert_to_qwen_metadata_matches_curated_surface():

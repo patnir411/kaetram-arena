@@ -79,11 +79,53 @@ esac
 
 mkdir -p "$LOG_DIR" "$PROJECT_DIR/state"
 
+# ── Cleanup trap ──────────────────────────────────────────────────────────
+# Without this, a Ctrl-C (or kill) mid-session leaked the per-session sandbox
+# AND its spawned children (the harness CLI's process group: MCP server +
+# Playwright + Chromium, plus the opencode watchdog). Orphaned Chromium/MCP
+# are the heaviest contributors to the load-cascade class we're hardening
+# against. CUR_SANDBOX is updated each iteration; CHILD_PIDS collects any
+# backgrounded children (opencode + watchdog) so we can reap them too.
+CUR_SANDBOX=""
+CHILD_PIDS=()
+cleanup() {
+  trap - INT TERM EXIT
+  # Kill backgrounded children's process groups (opencode run + ctx watchdog).
+  for _pid in "${CHILD_PIDS[@]:-}"; do
+    [ -n "$_pid" ] || continue
+    _pgid=$(ps -o pgid= -p "$_pid" 2>/dev/null | tr -d ' ' || true)
+    if [ -n "$_pgid" ] && [ "$_pgid" != "0" ]; then
+      kill -- -"$_pgid" 2>/dev/null || true
+    else
+      kill "$_pid" 2>/dev/null || true
+    fi
+  done
+  # Remove the in-flight session sandbox (resolved + bounded to /tmp prefix).
+  if [ -n "$CUR_SANDBOX" ] && [ -d "$CUR_SANDBOX" ]; then
+    case "$CUR_SANDBOX" in
+      /tmp/kaetram_session_*) rm -rf "$CUR_SANDBOX" 2>/dev/null || true;;
+    esac
+  fi
+}
+trap cleanup INT TERM EXIT
+
+# Fast-fail backoff state for the outer respawn loop. A session that exits
+# almost immediately (auth failure, MCP can't reach the game server, etc.)
+# must NOT be respawned every PAUSE_BETWEEN seconds — that's the uncapped
+# respawn loop that storms MCP+Chromium. opencode has its own 429 backoff
+# below; this guards the claude/codex/gemini paths.
+CONSECUTIVE_FAST_FAILS=0
+MIN_HEALTHY_SECS=60   # matches orchestrate.py _MIN_HEALTHY_UPTIME
+MAX_BACKOFF=300
+
 SESSION=0
 while true; do
   SESSION=$((SESSION + 1))
   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
   LOG_FILE="$LOG_DIR/session_${SESSION}_${TIMESTAMP}.log"
+  SESSION_STARTED_AT=$(date +%s)
+  CHILD_PIDS=()
+  INNER_BACKOFF_DONE=0   # set when a harness path already slept (e.g. opencode 429)
 
   echo "=== Session $SESSION starting at $(date) ==="
 
@@ -137,6 +179,7 @@ You must keep playing continuously — call tools in a loop for the ENTIRE sessi
 
   # Run from isolated dir to prevent the CLI from reading this project's CLAUDE.md / AGENTS.md
   SANDBOX="/tmp/kaetram_session_${SESSION}_$$"
+  CUR_SANDBOX="$SANDBOX"   # expose to cleanup trap
   mkdir -p "$SANDBOX"
 
   case "$HARNESS" in
@@ -267,6 +310,7 @@ GEMINIJSON
           "$PROMPT") \
         2>&1 | tee "$LOG_FILE" &
       OPENCODE_BG_PID=$!
+      CHILD_PIDS+=("$OPENCODE_BG_PID")   # reap on trap
 
       # Context watchdog: opencode rotates the same conversation across many
       # tool turns; if cumulative input tokens approach the model's window we
@@ -292,15 +336,16 @@ GEMINIJSON
         done
       ) &
       WATCHDOG_PID=$!
+      CHILD_PIDS+=("$WATCHDOG_PID")   # reap on trap
 
       wait "$OPENCODE_BG_PID" 2>/dev/null || true
       kill "$WATCHDOG_PID" 2>/dev/null || true
       wait "$WATCHDOG_PID" 2>/dev/null || true
 
       # Rate-limit backoff: a session that produced no step_finish events is
-      # almost certainly an opencode 429 (or upstream auth failure). Without a
-      # sleep, the outer `while true` immediately respawns and hammers the
-      # endpoint. Detect short/empty sessions and back off before retrying.
+      # almost certainly an opencode 429 (or upstream auth failure). Size the
+      # backoff by the 429 signal and sleep here, then mark INNER_BACKOFF_DONE
+      # so the generic outer crash-loop guard doesn't sleep a second time.
       step_count=$(grep -c '"type":"step_finish"' "$LOG_FILE" 2>/dev/null || echo 0)
       if [ "${step_count:-0}" -lt 2 ]; then
         # Check opencode internal log for a 429 to size the backoff
@@ -325,6 +370,7 @@ GEMINIJSON
           "$ts_ms" "$(printf '%s' "$err_msg" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')" \
           "$backoff" >> "$LOG_FILE"
         sleep "$backoff"
+        INNER_BACKOFF_DONE=1
       fi
       ;;
 
@@ -351,8 +397,29 @@ GEMINIJSON
   esac
 
   rm -rf "$SANDBOX"
+  CUR_SANDBOX=""
 
   echo "=== Session $SESSION ended at $(date) ==="
-  echo "Pausing ${PAUSE_BETWEEN}s before next session..."
-  sleep "$PAUSE_BETWEEN"
+
+  # Crash-loop guard for the outer respawn loop. If this session died almost
+  # immediately it almost certainly failed at launch (auth/MCP/server) — keep
+  # respawning at PAUSE_BETWEEN and we storm MCP+Chromium (the 2026-05-29
+  # cascade class). Back off exponentially on consecutive fast failures.
+  SESSION_ELAPSED=$(( $(date +%s) - SESSION_STARTED_AT ))
+  if [ "$SESSION_ELAPSED" -lt "$MIN_HEALTHY_SECS" ]; then
+    CONSECUTIVE_FAST_FAILS=$((CONSECUTIVE_FAST_FAILS + 1))
+  else
+    CONSECUTIVE_FAST_FAILS=0
+  fi
+  if [ "$INNER_BACKOFF_DONE" -eq 1 ]; then
+    echo "Respawning (harness already backed off this session)..."
+  elif [ "$CONSECUTIVE_FAST_FAILS" -gt 0 ]; then
+    BACKOFF=$(( PAUSE_BETWEEN * (1 << (CONSECUTIVE_FAST_FAILS - 1)) ))
+    [ "$BACKOFF" -gt "$MAX_BACKOFF" ] && BACKOFF="$MAX_BACKOFF"
+    echo "Session failed fast (${SESSION_ELAPSED}s, ${CONSECUTIVE_FAST_FAILS}x) — backing off ${BACKOFF}s before respawn..."
+    sleep "$BACKOFF"
+  else
+    echo "Pausing ${PAUSE_BETWEEN}s before next session..."
+    sleep "$PAUSE_BETWEEN"
+  fi
 done

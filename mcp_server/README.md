@@ -13,12 +13,14 @@ this directory now.
 
 | File | What it owns |
 |------|--------------|
-| `core.py` | The `FastMCP` instance, the `state` dict (page handle, state dir, agent metadata), the lifespan that launches Chromium + injects `state_extractor.js`, and spawns the state/activity heartbeats. |
+| `core.py` | The `FastMCP` instance, the `state` dict (page handle, state dir, agent metadata), and the lifespan — which **yields immediately** so the MCP handshake completes fast. The Chromium launch, `state_extractor.js` injection, and the state/activity heartbeats start **lazily in `_ensure_browser()` on the first tool call**, not at startup. |
 | `helpers.py` | Wrappers around `page.evaluate(window.__helperFn)` — the bridge between Python tools and the JS helpers exposed by `state_extractor.js`. |
-| `login.py` | One-time login flow: spawn page, fill credentials, dismiss tutorial, warp to Mudwich. Called from `core.py` lifespan, not a tool. |
+| `login.py` | One-time login flow: spawn page, fill credentials, dismiss tutorial, warp to Mudwich. Called from `core.py`'s lazy browser init (`_ensure_browser`), not a tool. |
 | `state_heartbeat.py` | 300 ms loop that POSTs `window.__latestGameState` to `dashboard:8080/ingest/state`, plus a 1 s tail-the-session-log → `/ingest/activity` loop. Best-effort; silent on failure. |
 | `tools/observe.py` (side-effect) | On every `observe()` call, also writes `state/game_state.json` — the latest observe payload, consumed by the dashboard for live state display. |
-| `utils.py` | Pure helpers (coord math, name normalization, JSON formatting). No Playwright. |
+| `utils.py` | Pure helpers (coord math, name normalization, JSON formatting). No Playwright. `normalize_quest_lists()` derives `active_quests`/`finished_quests` from the raw flat `quests` array — the shared split `query_quest` and `observe` both rely on; `quest_stage_item_progress()` computes needed/have/remaining for a stage. |
+| `tools/quest.py` (current_step) | `query_quest` leads its response with `_build_current_step`: canonical facts (`accepted`/`stage`/`needed`/`have`/`remaining`) + an advisory `recommended_action` + `preconditions`, computed against live state (normalized via `utils.normalize_quest_lists`). Advisory, not an oracle — the agent verifies preconditions against `observe`. |
+| `tools/observe.py` (items_progress) | `_enrich_active_quests` tags each active quest in the observe payload with `items_progress:{have,remaining}` (parallels `_enrich_mobs`). `KAETRAM_OBSERVE_COMPACT` drops the ASCII map (keeps STUCK_CHECK). |
 | `resource_gates.py` | Loads `trees.json` / `rocks.json` / `foraging.json` / `fishing.json` from the Kaetram-Open install (overridable via `KAETRAM_DATA_DIR`) into a `name → {skill, level, item}` lookup. Used by `gather()` to translate "no items collected" into a structured `gate` block so the agent doesn't grind a resource it's not levelled for. |
 | `mob_stats.py` | Same pattern, for `mobs.json` → `name → {level, max_hp, aggressive}`. `observe()` enriches each `nearby.mobs[]` entry with `level` + `aggressive` so the agent can compare mob level against `stats.level` directly without recalling the MOB PROGRESSION table from prompt context. |
 | `js/*.js` | JavaScript snippets injected via `page.evaluate()` for complex flows (observe, shop UI state, buy packet, inventory snapshot, store nudges). |
@@ -40,6 +42,11 @@ Decorators register tools when `tools/__init__.py` is imported. Search for
 | `tools/gathering.py` | `gather`, `loot` |
 | `tools/crafting.py` | `craft_item` |
 | `tools/quest.py` | `query_quest` |
+
+`tools/test_lane.py` additionally registers two **test-only** tools —
+`__test_login` and `__test_close_session` — conditionally behind
+`KAETRAM_TEST_LANE=1` (set only by the e2e test lane). They are not part of the
+17 model-visible tools and never reach a production / eval / data-collection agent.
 
 If you add a tool, decorate with `@mcp.tool()` and update `prompts/system.md`
 + the action vocabulary in `dataset/DATA.md` so extraction and training stay
@@ -63,6 +70,7 @@ in sync.
   `core.py`.
 - The MCP server runs as a stdio subprocess of the harness. Do not print to
   stdout — use `log()` from `core.py` (writes to stderr).
-- The browser is launched once on lifespan startup and reused across all
-  tool calls. A new `Page` per tool would burn 1–2 s per invocation and
-  break `window.__latestGameState` continuity.
+- The browser is launched once on the first tool call (lazy init in
+  `_ensure_browser`) and reused across all subsequent calls. A new `Page`
+  per tool would burn 1–2 s per invocation and break
+  `window.__latestGameState` continuity.

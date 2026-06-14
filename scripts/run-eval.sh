@@ -45,14 +45,45 @@ RUN_DIR="$PROJECT_DIR/dataset/eval/runs/${RUN_TAG}"
 mkdir -p "$RUN_DIR"
 
 # ── Cleanup ──
+# Scope every kill to the eval lane — never a bare pkill on the generic names
+# mcp_game_server.py / chrome-headless-shell / playwright/driver:
+#   - eval_harness.py is kaetram-unique → safe to match by name.
+#   - play_qwen.py is kaetram-unique AND carries `--sandbox /tmp/kaetram_eval_*`
+#     in its cmdline → match the eval sandbox specifically (not a bare match,
+#     which would also hit data-collection play_qwen agents).
+#   - mcp_game_server / chrome / playwright orphans are reaped ONLY when their
+#     process env (KAETRAM_STATE_DIR=.../kaetram_eval...) marks them as eval
+#     children — see reap_eval_orphans(). cmdline has no sandbox marker, so env
+#     is the only safe discriminator.
+#   - eval game servers are killed by their dedicated ports (9061/9071).
 echo "Cleaning up previous eval runs..."
 pkill -9 -f "eval_harness" 2>/dev/null || true
-pkill -9 -f "play_qwen" 2>/dev/null || true
-pkill -9 -f "mcp_game_server" 2>/dev/null || true
-pkill -9 -f "chrome-headless-shell" 2>/dev/null || true
-pkill -9 -f "playwright/driver" 2>/dev/null || true
-BASE_GS_PID=$(ss -tlnp 2>/dev/null | grep ":9071" | grep -oP 'pid=\K[0-9]+' | head -1 || true)
-[ -n "$BASE_GS_PID" ] && kill -9 "$BASE_GS_PID" 2>/dev/null || true
+# procps pkill -f uses ERE; scope to the eval sandbox so data-collection
+# play_qwen agents (--sandbox /tmp/kaetram_agent_*) are NOT matched.
+pkill -9 -f "play_qwen.py.*--sandbox /tmp/kaetram_eval" 2>/dev/null || true
+
+# Reap mcp_game_server / chrome / playwright orphans that belong to a kaetram
+# EVAL sandbox, identified via /proc/<pid>/environ (KAETRAM_STATE_DIR pointing
+# at /tmp/kaetram_eval_*). The live data-collection lane carries a different
+# KAETRAM_STATE_DIR, so it is untouched.
+reap_eval_orphans() {
+  local pid environ
+  for pid in $(pgrep -f 'mcp_game_server|chrome-headless-shell|playwright/driver' 2>/dev/null || true); do
+    [ -r "/proc/$pid/environ" ] || continue
+    # NUL-delimited env; match our eval sandbox marker only.
+    if tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null \
+         | grep -q '^KAETRAM_STATE_DIR=/tmp/kaetram_eval_'; then
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  done
+}
+reap_eval_orphans
+
+# Kill BOTH eval game servers by their dedicated ports (9061 r10-sft, 9071 base).
+for EVAL_PORT in 9061 9071; do
+  GS_PID=$(ss -tlnp 2>/dev/null | grep ":${EVAL_PORT} " | grep -oP 'pid=\K[0-9]+' | head -1 || true)
+  [ -n "$GS_PID" ] && kill -9 "$GS_PID" 2>/dev/null || true
+done
 sleep 2
 
 # Clean eval sandboxes (temp data only — results are preserved in runs/)
@@ -97,18 +128,25 @@ if ! ss -tlnp 2>/dev/null | grep -q ":9071 "; then
 fi
 
 # ── Ensure dashboard ──
-if ! pgrep -f "python3 dashboard.py" > /dev/null 2>&1; then
+# Probe by port (8080), not by process name.
+if ! ss -tlnp 2>/dev/null | grep -q ":${DASHBOARD_HTTP_PORT:-8080} "; then
   "$SCRIPT_DIR/start-dashboard.sh"
 fi
+
+# ── Resolve Modal endpoints from env (like cli_adapter / eval_harness) ──
+MODAL_WS="${MODAL_WORKSPACE:-workspace}"
+SFT_ENDPOINT="${KAETRAM_QWEN_SFT_ENDPOINT:-https://${MODAL_WS}--kaetram-qwen-serve-inference-serve.modal.run/v1}"
+BASE_ENDPOINT="${KAETRAM_QWEN_BASE_ENDPOINT:-https://${MODAL_WS}--kaetram-qwen-base-inference-serve.modal.run/v1}"
 
 # ── Launch evals in parallel ──
 echo ""
 echo "Starting eval: $EPISODES episodes × 2 models, scenario $SCENARIO"
 echo "  Run dir: $RUN_DIR"
+echo "  Endpoints: r10-sft=$SFT_ENDPOINT  base=$BASE_ENDPOINT"
 echo ""
 
 PYTHONUNBUFFERED=1 python3 "$PROJECT_DIR/eval_harness.py" \
-  --models "r10-sft=https://workspace--kaetram-qwen-serve-inference-serve.modal.run/v1" \
+  --models "r10-sft=$SFT_ENDPOINT" \
   --episodes "$EPISODES" --scenario "$SCENARIO" \
   --username evalbotSFT --server-port 9061 --output-dir "$RUN_DIR" $PERS_FLAG \
   > /tmp/eval_r10sft.log 2>&1 &
@@ -116,7 +154,7 @@ SFT_PID=$!
 echo "  r10-SFT eval started (PID $SFT_PID, log: /tmp/eval_r10sft.log, personality: ${PERSONALITY:-none})"
 
 PYTHONUNBUFFERED=1 python3 "$PROJECT_DIR/eval_harness.py" \
-  --models "base=https://workspace--kaetram-qwen-base-inference-serve.modal.run/v1" \
+  --models "base=$BASE_ENDPOINT" \
   --episodes "$EPISODES" --scenario "$SCENARIO" \
   --username evalbotBase --server-port 9071 --output-dir "$RUN_DIR" $PERS_FLAG \
   > /tmp/eval_base.log 2>&1 &
@@ -128,8 +166,9 @@ PYTHONUNBUFFERED=1 python3 "$PROJECT_DIR/scripts/eval_watchdog.py" \
   --run-dir "$RUN_DIR" \
   --episodes "$EPISODES" \
   --kill-on-failure \
-  --model "r10-sft=https://workspace--kaetram-qwen-serve-inference-serve.modal.run/v1,/tmp/kaetram_eval_r10-sft,9061" \
-  --model "base=https://workspace--kaetram-qwen-base-inference-serve.modal.run/v1,/tmp/kaetram_eval_base,9071" \
+  --health-timeout 90 --health-fail-threshold 3 \
+  --model "r10-sft=$SFT_ENDPOINT,/tmp/kaetram_eval_r10-sft,9061" \
+  --model "base=$BASE_ENDPOINT,/tmp/kaetram_eval_base,9071" \
   > "/tmp/eval_watchdog_${RUN_TAG}.log" 2>&1 &
 WATCHDOG_PID=$!
 echo "  Watchdog started (PID $WATCHDOG_PID, log: /tmp/eval_watchdog_${RUN_TAG}.log)"
@@ -162,8 +201,9 @@ while kill -0 $SFT_PID 2>/dev/null || kill -0 $BASE_PID 2>/dev/null; do
 done
 
 # ── Cleanup eval game servers ──
+# Trailing space on the port match so ":9061 " can't substring-match ":90610".
 for EVAL_PORT in 9071 9061; do
-  GS_PID=$(ss -tlnp 2>/dev/null | grep ":${EVAL_PORT}" | grep -oP 'pid=\K[0-9]+' | head -1 || true)
+  GS_PID=$(ss -tlnp 2>/dev/null | grep ":${EVAL_PORT} " | grep -oP 'pid=\K[0-9]+' | head -1 || true)
   [ -n "$GS_PID" ] && kill "$GS_PID" 2>/dev/null || true
 done
 

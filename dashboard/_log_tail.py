@@ -1,9 +1,9 @@
 """Offset-tracking JSONL tail helper.
 
-Session logs grow into the hundreds of MB during long runs. The dashboard's
-parsers used to re-read the whole file (or its last 1 MB) every time mtime
-changed — and mtime changes every few seconds during play. With 5 tabs hitting
-the agents endpoint every 8 s, that's tens of full reparses per minute.
+Session logs grow into the hundreds of MB during long runs, and mtime changes
+every few seconds during play. With 5 tabs hitting the agents endpoint every
+8 s, re-reading the whole file (or its last 1 MB) on each mtime change would be
+tens of full reparses per minute.
 
 This module gives every parser an O(new_bytes) path: persist (offset, accumulator)
 per file, on each call seek past the offset, parse only complete new lines, and

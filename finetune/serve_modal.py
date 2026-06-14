@@ -50,6 +50,9 @@ serve_image = (
         "TOKENIZERS_PARALLELISM": "false",
         "HF_HUB_ENABLE_HF_TRANSFER": "1",
         "SGLANG_DISABLE_CUDNN_CHECK": "1",
+        # Bake the deploy-time SFT_EXPERIMENT into the image so the container (which
+        # re-imports this module) sees it — local env alone doesn't reach the container.
+        "SFT_EXPERIMENT": os.environ.get("SFT_EXPERIMENT", "kaetram-qwen3.5-9b-r10"),
     })
     .add_local_python_source("render")
 )
@@ -222,11 +225,114 @@ class Inference:
                     "top_k": QWEN_THINK_TOP_K,
                     "presence_penalty": QWEN_THINK_PRESENCE_PENALTY,
                 },
+                "capabilities": ["chat", "score"],
             }
 
         @web_app.get("/v1/models")
         async def list_models():
             return {"data": [{"id": "kaetram", "object": "model"}]}
+
+        def _adapt_for_template(messages):
+            """Coerce assistant tool_calls.arguments from JSON strings to dicts
+            so the Qwen chat template's `.items()` call doesn't crash. Applied
+            unconditionally on /v1/score: reconstructed messages from session
+            logs always carry tool_calls with string-encoded arguments."""
+            import json as _json
+            import re as _re_local
+            out = []
+            for m in messages:
+                if m.get("role") != "assistant":
+                    out.append(m)
+                    continue
+                new_m = dict(m)
+                tcs = new_m.get("tool_calls") or []
+                if tcs:
+                    fixed = []
+                    for tc in tcs:
+                        fn = (tc.get("function") or {})
+                        args = fn.get("arguments")
+                        if isinstance(args, str):
+                            try:
+                                args_obj = _json.loads(args) if args.strip() else {}
+                            except _json.JSONDecodeError:
+                                args_obj = {}
+                        else:
+                            args_obj = args or {}
+                        fixed.append({**tc, "function": {**fn, "arguments": args_obj}})
+                    new_m["tool_calls"] = fixed
+                    content = new_m.get("content") or ""
+                    if isinstance(content, str) and "<tool_call>" in content:
+                        new_m["content"] = _re_local.split(r"<tool_call>", content, maxsplit=1)[0].rstrip()
+                out.append(new_m)
+            return out
+
+        @web_app.post("/v1/score")
+        async def score(request: Request):
+            """Teacher-forcing logprob computation for a fixed (context, target).
+
+            Request: {"messages": [...]}; the LAST message must be role=assistant
+            and is the scoring target. All earlier messages form the context.
+
+            Response: per-token logprobs for the target tokens. Index 0 is None
+            (SGLang's standard convention — no preceding token to condition on at
+            logprob_start_len). Caller drops index 0 and sums/means the rest.
+            """
+            body = await request.json()
+            messages = body.get("messages", [])
+            if not messages or messages[-1].get("role") != "assistant":
+                from fastapi import HTTPException
+                raise HTTPException(400, "last message must be role=assistant (the scoring target)")
+
+            # Same template path as /v1/chat/completions: no tools= (SFT
+            # training/serve parity — system prompt embeds the markdown tool
+            # table). Pass through _adapt_for_template so tool_calls.arguments
+            # are dict-shaped (Qwen template requires `.items()`).
+            messages_adapted = _adapt_for_template(messages)
+            context_text = self.tokenizer.apply_chat_template(
+                messages_adapted[:-1], tokenize=False, add_generation_prompt=True,
+            )
+            context_ids = self.tokenizer(context_text, add_special_tokens=False).input_ids
+            full_text = self.tokenizer.apply_chat_template(
+                messages_adapted, tokenize=False, add_generation_prompt=False,
+            )
+            full_ids = self.tokenizer(full_text, add_special_tokens=False).input_ids
+            if len(full_ids) <= len(context_ids):
+                from fastapi import HTTPException
+                raise HTTPException(400, f"target empty after tokenization (full={len(full_ids)}, ctx={len(context_ids)})")
+            target_ids = full_ids[len(context_ids):]
+
+            # One dummy generation step (cheapest scoring mode). top_k=1 + temp=1
+            # picks greedy; we only need the prompt-side logprobs.
+            output = await self.engine.async_generate(
+                input_ids=full_ids,
+                sampling_params={"max_new_tokens": 1, "temperature": 1.0, "top_k": 1},
+                return_logprob=True,
+                logprob_start_len=len(context_ids),
+                top_logprobs_num=0,
+            )
+            raw = output.get("meta_info", {}).get("input_token_logprobs") or []
+            # SGLang shape: list of (logp, token_id, token_str|None)
+            logprobs = [None if (t is None or t[0] is None) else float(t[0]) for t in raw]
+            # The per-token logprobs must line up 1:1 with target_ids — callers
+            # index them together. A mismatch means SGLang returned a different
+            # input_token_logprobs span than logprob_start_len implies (e.g. a
+            # tokenization re-split); fail loudly rather than silently return a
+            # misaligned score.
+            if len(logprobs) != len(target_ids):
+                from fastapi import HTTPException
+                raise HTTPException(
+                    500,
+                    f"logprob/target length mismatch (logprobs={len(logprobs)}, "
+                    f"target={len(target_ids)})",
+                )
+            return {
+                "target_token_ids": target_ids,
+                "target_token_strs": [self.tokenizer.decode([t]) for t in target_ids],
+                "target_logprobs": logprobs,
+                "n_context_tokens": len(context_ids),
+                "n_target_tokens": len(target_ids),
+                "model": body.get("model", "kaetram"),
+            }
 
         @web_app.post("/v1/chat/completions")
         async def chat_completions(request: Request):

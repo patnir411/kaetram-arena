@@ -109,13 +109,16 @@ echo ""
 
 # ── Step 1: Kill the agent's CLI process + its MCP server ──
 echo "Killing agent $AGENT_ID process..."
-# Kill CLI processes scoped to this agent's sandbox or username
-pkill -f "claude.*-p.*$SANDBOX\|claude.*-p.*$CUR_USERNAME" 2>/dev/null || true
+# Kill CLI processes scoped to this agent's sandbox or username.
+# pkill/pgrep -f use ERE, so alternation must be "(a|b)" (not BRE "a\|b", which
+# matches a literal pipe). Both branches are kaetram-specific (sandbox path
+# /tmp/kaetram_agent_N or a kaetram bot username like ClaudeBot2).
+pkill -f "(claude.*-p.*$SANDBOX|claude.*-p.*$CUR_USERNAME)" 2>/dev/null || true
 pkill -f "codex.*$CUR_USERNAME" 2>/dev/null || true
 # Kill MCP server + Playwright + Chromium for this agent
 # The agent CLI is the process group leader (spawned with setsid by orchestrator),
 # so find its children to identify the right MCP server
-CLI_PID=$(pgrep -f "claude.*-p.*$CUR_USERNAME\|codex.*$CUR_USERNAME\|gemini.*$CUR_USERNAME\|opencode.*$CUR_USERNAME" 2>/dev/null | head -1 || true)
+CLI_PID=$(pgrep -f "(claude.*-p.*$CUR_USERNAME|codex.*$CUR_USERNAME|gemini.*$CUR_USERNAME|opencode.*$CUR_USERNAME)" 2>/dev/null | head -1 || true)
 if [ -n "$CLI_PID" ]; then
   # Kill the entire process group (CLI + MCP + Playwright + Chromium)
   PGID=$(ps -o pgid= -p "$CLI_PID" 2>/dev/null | tr -d ' ')

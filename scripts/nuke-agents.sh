@@ -31,6 +31,11 @@ echo "=== NUKING data-collection agent processes (eval/test lanes spared) ==="
 pkill -TERM -f "python3 orchestrate.py" 2>/dev/null || true
 tmux kill-session -t datacol 2>/dev/null || true
 
+# Disable abort-on-error for the teardown itself — a single non-zero kill must
+# never skip the remaining phases (esp. Phase 2 SIGKILL). Stays off through the
+# cosmetic report below; the script exits 0 explicitly at the end.
+set +e
+
 # ── Phase 1: SIGTERM (graceful) ──
 kill_scoped "claude -p"           TERM
 kill_scoped "codex.*exec"         TERM
@@ -76,12 +81,11 @@ for port in "${KAETRAM_DATA_PORTS[@]}"; do
   [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null || true
 done
 
-# Livestream pipeline — Xvfb/ffmpeg don't have meaningful state to flush,
-# go straight to KILL. Scope by display range (99..108 = agent slots 0..9).
-pkill -9 -f "Xvfb :9[0-9]" 2>/dev/null || true
-pkill -9 -f "Xvfb :10[0-9]" 2>/dev/null || true
-pkill -9 -f "ffmpeg.*x11grab" 2>/dev/null || true
+# Livestream pipeline — Xvfb/ffmpeg have no state to flush, go straight to KILL.
+kill_kaetram_livestream KILL
 rm -rf /tmp/hls/agent_* 2>/dev/null || true
+# Stay non-strict through the report below — it's cosmetic, and a stray
+# non-zero there must not mask a successful teardown with a failing exit code.
 
 sleep 0.5
 
@@ -102,7 +106,8 @@ echo "  codex exec:      $(remaining 'codex.*exec')"
 echo "  MCP servers:     $(remaining 'mcp_game_server')"
 echo "  Playwright:      $(remaining 'playwright/driver')"
 echo "  Chrome:          $(remaining 'chrome-headless-shell')"
-echo "  Xvfb:            $(pgrep -c -f 'Xvfb :' 2>/dev/null || echo 0)"
-echo "  ffmpeg x11grab:  $(pgrep -c -f 'ffmpeg.*x11grab' 2>/dev/null || echo 0)"
+echo "  Xvfb:            $(pgrep -c -f \"$KAETRAM_XVFB_PATTERN\" 2>/dev/null || echo 0)"
+echo "  ffmpeg x11grab:  $(pgrep -c -f \"$KAETRAM_FFMPEG_PATTERN\" 2>/dev/null || echo 0)"
 echo ""
 echo "State preserved. Use ./scripts/resume-agent.sh to restart."
+exit 0

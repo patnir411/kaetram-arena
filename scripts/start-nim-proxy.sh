@@ -3,10 +3,8 @@
 #
 # Idempotent and concurrency-safe:
 #   - If a proxy is already listening on the port, exit 0 (do nothing).
-#     This means a sibling orchestrator's proxy is left untouched.
 #   - If the PID file points at a dead pid, clean it up and start fresh.
-#   - We never `pkill -f scripts/nim_proxy.py` blindly — that footgun used
-#     to kill a sibling orchestrator's proxy mid-stream.
+#   - Never `pkill -f scripts/nim_proxy.py` blindly.
 set -euo pipefail
 
 # ── --help / -h guard (auto-injected) ────────────────────────────────────────

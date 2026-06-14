@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<title>Kaetram AI Agent — Live Dashboard</title>
+<title>Kaetram Arena — Live Dashboard</title>
 <link rel="icon" type="image/png" href="/favicon.ico">
 <link rel="apple-touch-icon" href="/favicon.ico">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -506,6 +506,21 @@
 
   /* ── Quests ── */
   #mission-stats { max-height: 420px; overflow-y: auto; padding-right: 6px; }
+
+  /* ── Core-3 benchmark breakout ── */
+  .core3-box { margin-bottom: 12px; padding: 9px 11px; background: rgba(255,255,255,0.025); border: 1px solid var(--rule-2); border-radius: 5px; }
+  .core3-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 7px; }
+  .core3-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; color: var(--dim); font-weight: 700; }
+  .core3-score { font-size: 17px; font-weight: 700; color: var(--green); font-variant-numeric: tabular-nums; }
+  .core3-max { font-size: 10px; color: var(--dim); font-weight: 400; }
+  .core3-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; font-size: 11px; }
+  .core3-name { width: 82px; flex-shrink: 0; color: var(--slate); }
+  .core3-bar { flex: 1; height: 6px; background: var(--rule-2); border-radius: 3px; overflow: hidden; }
+  .core3-fill { height: 100%; width: 0; background: var(--rule-2); transition: width 0.3s ease; }
+  .core3-fill.active { background: var(--cyan); }
+  .core3-fill.done { background: var(--green); }
+  .core3-stage { width: 34px; text-align: right; flex-shrink: 0; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .core3-stage.done { color: var(--green); font-weight: 700; }
   .quest-meta {
     display: flex; flex-wrap: wrap; gap: 8px 14px;
     padding: 4px 0 8px; margin-bottom: 6px;
@@ -2271,7 +2286,7 @@ function buildEventHTML(ev, idx, prefix, withDetails, isNew) {
 }
 
 // === Quest walkthrough tooltip ===
-// Kaetram XP table — same RuneScape-style cumulative formula the server uses
+// Kaetram XP table — same cumulative XP formula the server uses
 // (Formulas.LevelExp, see Kaetram-Open: server/src/info/loader.ts:44-50). We
 // mirror it here once so the Skills panel can show "X / Y xp (NN%)" without
 // an extra API call.
@@ -2855,6 +2870,27 @@ async function refreshFast() {
       if (bi === -1) return -1;
       return ai - bi;
     });
+    // Core-3 benchmark breakout — always shown, even before any quest starts.
+    const CORE3 = [
+      { label: 'Foresting', keys: ['foresting'], max: 3 },
+      { label: "Herbalist's", keys: ['herbalistsdesperation'], max: 3 },
+      { label: "Rick's Roll", keys: ['ricksroll'], max: 4 },
+    ];
+    const c3norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    let c3score = 0, c3rows = '';
+    for (const c of CORE3) {
+      const cq = quests.find(x => typeof x === 'object' && x && (c.keys.includes(c3norm(x.key)) || c.keys.includes(c3norm(x.name))));
+      const cstage = cq ? (cq.finished ? c.max : Math.min(cq.stage || 0, c.max)) : 0;
+      const cdone = cstage >= c.max;
+      c3score += cstage;
+      const cpct = Math.round(cstage / c.max * 100);
+      const cfill = cdone ? ' done' : (cstage > 0 ? ' active' : '');
+      c3rows += '<div class="core3-row"><span class="core3-name">' + c.label + '</span>'
+        + '<div class="core3-bar"><div class="core3-fill' + cfill + '" style="width:' + cpct + '%"></div></div>'
+        + '<span class="core3-stage' + (cdone ? ' done' : '') + '">' + (cdone ? '✓' : cstage + '/' + c.max) + '</span></div>';
+    }
+    const core3Html = '<div class="core3-box"><div class="core3-head"><span class="core3-title">CORE 3</span>'
+      + '<span class="core3-score">' + c3score + '<span class="core3-max">/10</span></span></div>' + c3rows + '</div>';
     if (quests.length > 0) {
       let done = 0, active = 0, notStarted = 0;
       let stagesDone = 0, stagesTotal = 0;
@@ -2895,9 +2931,9 @@ async function refreshFast() {
       if (notStarted) meta += '<span class="qm-sep">·</span><span class="qm-pill"><b>' + notStarted + '</b><span class="qm-label">new</span></span>';
       if (stagesTotal > 0) meta += '<span class="qm-sep">·</span><span class="qm-pill"><b>' + stagesDone + '/' + stagesTotal + '</b><span class="qm-label">stages</span></span>';
       meta += '</div>';
-      document.getElementById('mission-stats').innerHTML = meta + qhtml;
+      document.getElementById('mission-stats').innerHTML = core3Html + meta + qhtml;
     } else if (fresh >= 0) {
-      document.getElementById('mission-stats').innerHTML = '<div class="empty">No active quests</div>';
+      document.getElementById('mission-stats').innerHTML = core3Html + '<div class="empty">No active quests</div>';
     }
 
     // Skills — render with gated-first ordering + XP bar to next level.

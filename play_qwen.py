@@ -43,6 +43,21 @@ from openai import OpenAI
 
 from tool_surface import MODEL_VISIBLE_TOOL_NAMES
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts" / "opd"))
+from canonicalize import recover_tool_calls  # noqa: E402
+
+# Harness-side recovery of malformed tool calls the server's parser dropped
+# (KAETRAM_TOOL_RECOVERY). Off by default to preserve pure-weights eval parity;
+# enabled for runs where we want the agent to act despite format defects, with
+# a loud in-context format correction so the model can self-correct.
+_TOOL_RECOVERY = bool(os.environ.get("KAETRAM_TOOL_RECOVERY"))
+_FORMAT_NOTE = (
+    "[format] Your previous call used non-canonical syntax and was auto-recovered. "
+    "Emit tool calls as: <tool_call>\\n<function=NAME>\\n<parameter=key>\\nvalue\\n"
+    "</parameter>\\n</function>\\n</tool_call> — never function(args) or "
+    "<parameter=key=value>."
+)
+
 # ---------------------------------------------------------------------------
 # MCP client — spawns mcp_game_server.py and calls tools over stdio
 # ---------------------------------------------------------------------------
@@ -289,12 +304,15 @@ def log_assistant(
     if text:
         blocks.append({"type": "text", "text": text})
     for parsed in parsed_calls or []:
-        blocks.append({
+        blk = {
             "type": "tool_use",
             "id": parsed.get("id", ""),
             "name": parsed.get("name", ""),
             "input": parsed.get("args", {}) or {},
-        })
+        }
+        if parsed.get("raw_arguments") is not None:
+            blk["raw_arguments"] = parsed["raw_arguments"]
+        blocks.append(blk)
     if not blocks:
         return
     mapped_usage = _map_usage(usage)
@@ -368,20 +386,34 @@ _TOKENIZER: object | None = None
 
 
 def _get_tokenizer():
-    """Lazy-load the Qwen tokenizer once per process (no torch needed)."""
+    """Lazy-load the Qwen tokenizer once per process (no torch needed).
+
+    Apply the SAME chat-template patch the server uses (finetune/render.py,
+    the single source of truth) so the client's token projection matches what
+    SGLang renders — otherwise `<think>` handling diverges and the budget gate
+    mis-counts.
+    """
     global _TOKENIZER
     if _TOKENIZER is None:
         from transformers import AutoTokenizer
+
+        from finetune.render import patch_qwen_chat_template
         _TOKENIZER = AutoTokenizer.from_pretrained(MODEL_ID_FOR_TOKENIZER)
+        patch_qwen_chat_template(_TOKENIZER)
     return _TOKENIZER
 
 
-def _projected_tokens(messages: list) -> int:
+def _projected_tokens(messages: list, tool_defs: list | None = None) -> int:
     """Token count of `messages` rendered with add_generation_prompt=True
-    (the same shape SGLang will see). transformers v5 returns BatchEncoding
-    from apply_chat_template(tokenize=True); pull .input_ids directly."""
+    (the same shape SGLang will see). The base server renders `tools=` into
+    the chat template, so the projection MUST include them or it undercounts
+    by the whole tool-schema block. Passing tools is exact for base and a safe
+    over-count for SFT (which the server ignores → rolls slightly early, never
+    overflows the server). transformers v5 returns BatchEncoding from
+    apply_chat_template(tokenize=True); pull .input_ids directly."""
     out = _get_tokenizer().apply_chat_template(
-        messages, tokenize=True, add_generation_prompt=True
+        messages, tokenize=True, add_generation_prompt=True,
+        tools=tool_defs or None,
     )
     ids = getattr(out, "input_ids", None)
     if ids is None and isinstance(out, dict):
@@ -402,6 +434,81 @@ QWEN_THINK_TEMPERATURE = 1.0
 QWEN_THINK_TOP_P = 0.95
 QWEN_THINK_TOP_K = 20
 QWEN_THINK_PRESENCE_PENALTY = 1.5
+
+
+def _build_session_note(state_dir: Path, last_reason: str) -> str | None:
+    """Programmatic, ADVISORY cross-session note derived from the last observed
+    state (NOT model-authored, so it can't drift from live state). Seeds the next
+    session's orientation to cut the re-derivation tax; the next session still
+    `observe`s first, which confirms or invalidates this note.
+    """
+    try:
+        gs = json.loads((state_dir / "game_state.json").read_text())
+    except Exception:
+        return None
+    if not isinstance(gs, dict):
+        return None
+    parts: list[str] = []
+    active = gs.get("active_quests") or []
+    if isinstance(active, list) and active and isinstance(active[0], dict):
+        a = active[0]
+        note = f"working '{a.get('name')}' stage {a.get('stage')}"
+        rem = (a.get("items_progress") or {}).get("remaining")
+        if isinstance(rem, dict):
+            # Only items still OWED (count>0) — listing "tomato:0" made agents
+            # misread "0 remaining" as "I already have everything".
+            still = ", ".join(f"{n} {k}" for k, n in rem.items()
+                              if isinstance(n, (int, float)) and n > 0)
+            if still:
+                note += f", still need {still}"
+        parts.append(note)
+    # Last position + spawn-dungeon warp tag — lets the next session resume
+    # mid-route (long overland trips span sessions) instead of re-deriving
+    # "where am I / do I need to warp" (~57% of stage-2 sessions burned a turn
+    # on this). Box matches observe._enrich_location / system.md's tutorial tile.
+    pos = gs.get("pos") if isinstance(gs.get("pos"), dict) else {}
+    px, py = pos.get("x"), pos.get("y")
+    if isinstance(px, (int, float)) and isinstance(py, (int, float)):
+        loc = f"last at ({px},{py})"
+        if 300 <= px <= 360 and 860 <= py <= 920:
+            loc += " — spawn dungeon, warp('mudwich') to leave (navigate can't path out)"
+        parts.append(loc)
+    # Rick's Roll stage-1 subgoal: fish + cook 5 shrimp on the main landmass FIRST,
+    # THEN cross the door (379,388) ONCE to Rick. Carry the SUBGOAL keyed on whether
+    # the shrimp exist — a prior note that pinned "go to the door" made the agent
+    # walk past fishing spots while holding 0 shrimp.
+    _core3 = ("Foresting", "Herbalist's Desperation", "Rick's Roll")
+    finished_names = {q.get("name") for q in (gs.get("finished_quests") or [])
+                      if isinstance(q, dict)}
+    active_name = active[0].get("name") if (isinstance(active, list) and active
+                                            and isinstance(active[0], dict)) else None
+    next_core3 = next((q for q in _core3 if q not in finished_names), None)
+    targeting_ricks = active_name == "Rick's Roll" or (
+        active_name is None and next_core3 == "Rick's Roll")
+    if targeting_ricks:
+        cooked = sum(int(i.get("count", 0) or 0)
+                     for i in (gs.get("inventory") or [])
+                     if isinstance(i, dict) and "cookedshrimp" in str(i.get("key", "")).lower())
+        if cooked >= 5:
+            parts.append("Rick's Roll: you hold 5 cooked shrimp — cross the door "
+                         "(379,388) ONCE to Rick (1088,833) and turn in (the seaside "
+                         "is L76+, bring food)")
+        else:
+            parts.append("Rick's Roll: fish + cook 5 shrimp on the main landmass FIRST "
+                         "(don't cross to Rick yet) — shrimp spots ~(325,360)/(336,328), "
+                         "cook at (323,892); they count at turn-in")
+    if gs.get("is_dead"):
+        parts.append("you were dead — expect to respawn, then warp out")
+    finished = [q.get("name") for q in (gs.get("finished_quests") or [])
+                if isinstance(q, dict) and q.get("name")]
+    if finished:
+        parts.append(f"finished: {', '.join(finished)}")
+    if last_reason and last_reason not in ("context_overflow", "interrupted"):
+        parts.append(f"last session ended on {last_reason}")
+    if not parts:
+        return None
+    return ("Note from your prior session (ADVISORY — `observe` first to confirm; "
+            "ignore if it conflicts with what you see): " + "; ".join(parts) + ".")
 
 
 async def _run_inner_loop(
@@ -433,7 +540,7 @@ async def _run_inner_loop(
 
         # Pre-call overflow gate: end the session cleanly when next call
         # would push past Qwen's trained context window.
-        projected = _projected_tokens(messages)
+        projected = _projected_tokens(messages, tool_defs)
         if projected > CONTEXT_BUDGET:
             info(f"  [{turn}] Context budget reached ({projected} > {CONTEXT_BUDGET}); rolling session.")
             return "context_overflow", turn
@@ -482,10 +589,18 @@ async def _run_inner_loop(
             parsed_calls = []
             for tc in tool_calls:
                 fn_name = tc.function.name
+                raw_unparsed = None
                 try:
                     fn_args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
                 except json.JSONDecodeError:
+                    # The server salvaged a function name from malformed tool-call
+                    # XML but its arguments didn't parse. Keep the raw string for
+                    # the session log — it's the only evidence of what the model
+                    # actually emitted (r1 eval: 8.3% of arg-requiring calls).
                     fn_args = {}
+                    raw_unparsed = tc.function.arguments
+                    info(f"  [{turn}] WARN malformed tool args for {fn_name}: "
+                         f"{str(raw_unparsed)[:200]!r}")
                 structured_calls.append({
                     "id": tc.id,
                     "type": "function",
@@ -496,7 +611,10 @@ async def _run_inner_loop(
                     # with "Can only get item pairs from a mapping" on turn 2+.
                     "function": {"name": fn_name, "arguments": fn_args},
                 })
-                parsed_calls.append({"name": fn_name, "args": fn_args, "id": tc.id})
+                parsed = {"name": fn_name, "args": fn_args, "id": tc.id}
+                if raw_unparsed is not None:
+                    parsed["raw_arguments"] = raw_unparsed
+                parsed_calls.append(parsed)
 
             messages.append({
                 "role": "assistant",
@@ -532,9 +650,50 @@ async def _run_inner_loop(
                     except Exception:
                         pass
 
+        elif content and _TOOL_RECOVERY and recover_tool_calls(content):
+            # The server's parser dropped a malformed tool call (e.g.
+            # `<function=gather("Oak")>`), leaving it in content. Recover the
+            # executable call, rewrite history to a CLEAN canonical assistant
+            # turn (severs the in-context copy prior — the model no longer sees
+            # its own malformed exemplar), execute, and return a loud format
+            # note so it self-corrects. Env-gated (KAETRAM_TOOL_RECOVERY).
+            recovered = recover_tool_calls(content)
+            reasoning = re.split(r"<tool_call>|<function=", content, maxsplit=1)[0].rstrip()
+            structured_calls, parsed_calls = [], []
+            for i, rc in enumerate(recovered):
+                cid = f"recovered_{turn}_{i}"
+                structured_calls.append({
+                    "id": cid, "type": "function",
+                    "function": {"name": rc["name"], "arguments": rc["args"]},
+                })
+                parsed_calls.append({"name": rc["name"], "args": rc["args"], "id": cid})
+            messages.append({
+                "role": "assistant", "content": reasoning,
+                "tool_calls": structured_calls,
+            })
+            log_assistant(logger, turn, reasoning, parsed_calls, usage=usage)
+            info(f"  [{turn}] RECOVERED {len(recovered)} malformed call(s): "
+                 f"{[(p['name'], p['args']) for p in parsed_calls]}")
+            for parsed in parsed_calls:
+                try:
+                    result = await mcp.call_tool(parsed["name"], parsed["args"])
+                except Exception as e:
+                    result = f"Error: {e}"
+                result = f"{_FORMAT_NOTE}\n\n{result}"
+                messages.append({
+                    "role": "tool", "content": result,
+                    "tool_call_id": parsed["id"], "name": parsed["name"],
+                })
+                log_tool_result(logger, turn, parsed["id"], parsed["name"], result)
+                if parsed["name"] == "observe" and "\n\nASCII_MAP:" in result:
+                    try:
+                        (state_dir / "game_state.json").write_text(result.split("\n\nASCII_MAP:")[0])
+                    except Exception:
+                        pass
+
         elif content:
-            # Text-only response (no tool call). Log and continue — model
-            # is trained to emit structured tool_calls; divergence is a
+            # Text-only response (no recoverable tool call). Log and continue —
+            # model is trained to emit structured tool_calls; divergence is a
             # serving-side bug, not papered over here.
             messages.append({"role": "assistant", "content": content})
             log_assistant(logger, turn, content, None, usage=usage)
@@ -594,6 +753,10 @@ async def run_agent(args):
         "KAETRAM_EXTRACTOR": os.path.join(project_dir, "state_extractor.js"),
         "KAETRAM_STATE_DIR": str(state_dir),
     }
+    # Forward observe-compaction opt-in (drops the ASCII map from observe to buy
+    # turns/session) to the MCP subprocess when the launcher enabled it.
+    if os.environ.get("KAETRAM_OBSERVE_COMPACT"):
+        mcp_env["KAETRAM_OBSERVE_COMPACT"] = "1"
 
     mcp = MCPClient(venv_python, server_script, mcp_env)
     info("Connecting to MCP game server...")
@@ -630,6 +793,7 @@ async def run_agent(args):
 
     last_session_turn = 0
     last_reason = "interrupted"
+    session_note: str | None = None
     try:
         while True:
             # Wall-clock budget check at session boundary.
@@ -650,6 +814,8 @@ async def run_agent(args):
             # Fresh conversation: same system prompt, fresh bootstrap with
             # the new session_n so the model sees "Session #N".
             bootstrap_text = build_orchestrate_bootstrap(bootstrap_personality, session_n)
+            if session_note:
+                bootstrap_text += "\n\n" + session_note
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": bootstrap_text},
@@ -661,6 +827,8 @@ async def run_agent(args):
                 logger=logger, args=args, deadline=deadline,
             )
             last_session_turn = session_turns
+            # Carry an advisory note into the next session (cuts re-derivation tax).
+            session_note = _build_session_note(state_dir, reason)
             last_reason = reason
 
             info(f"Session {session_n} complete: {session_turns} turns, reason={reason}")

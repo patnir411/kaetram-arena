@@ -382,15 +382,12 @@ class APIMixin:
                 try:
                     with open(meta_file) as mf:
                         meta = json.load(mf)
-                    # personality is one of grinder/completionist/explorer_tinkerer
-                    # — the prior `!= "qwen"` filter was dead code from a
-                    # transitional state where Qwen wasn't first-class. All
-                    # harnesses count toward agent_count now.
+                    # Every harness counts toward agent_count.
                     if meta:
                         agent_count += 1
                 except Exception:
                     pass
-        if mode == "none" and check_process_running("play.sh"):
+        if mode == "none" and check_process_running("play.sh", cwd_prefix=PROJECT_DIR):
             mode = "single"
             agent_count = 1
 

@@ -326,7 +326,7 @@ async def test_s7_picklemob_with_mid_route_gear(test_username, test_debug):
 
     Per combat math in the audit, this is MARGINAL — we expect either
     a pass (Sea Activities is truly viable for a fresh route agent) or
-    a fail (Core 5 benchmark requires heavier gear than an agent can
+    a fail (Core 3 benchmark requires heavier gear than an agent can
     realistically assemble, in which case Sea Activities Stage 4 must
     be a seeded checkpoint rather than agent-driven).
     """
@@ -357,7 +357,7 @@ async def test_s7_prime_picklemob_with_endgame_gear(test_username):
     """S7': Control test — picklemob fight with end-game gear (what the
     existing stage test uses). If S7 fails and this passes, Sea Activities
     Stage 4 is definitively NOT completable with realistic agent-assemblable
-    gear, and Core 5 benchmark must acknowledge that."""
+    gear, and Core 3 benchmark must acknowledge that."""
     pmx, pmy = PICKLEMOB_POS
     seed_player(
         test_username,

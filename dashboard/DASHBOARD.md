@@ -77,6 +77,7 @@ Python `http.server` with HTTP/1.1 keep-alive and threaded request handling. No 
 | Endpoint | Method | Params | Returns |
 |----------|--------|--------|---------|
 | `/api/game-state` | GET | `?agent=N` | Merged MongoDB + live game state JSON |
+| `/api/state` | GET | — | Legacy stub — returns `{}`; live state is served by `/api/game-state` |
 | `/api/agents` | GET | — | All active agents: harness, model, personality, HLS age, session stats. Username comes from `metadata.json` and varies by harness — `ClaudeBot{N}` / `CodexBot{N}` / `GeminiBot{N}`; the in-house Qwen harness uses personality-based names `QwenGrinder` / `QwenCompletionist` / `QwenExplorer`; opencode splits by model family — `BigQwenBot{N}` / `GrokBot{N}` / `DeepSeekBot{N}` / `OpenCodeBot{N}`. See `cli_adapter.opencode_bot_prefix` and `orchestrate.Orchestrator.setup` (qwen_username_map). |
 | `/api/activity` | GET | `?agent=N` | Latest session activity feed (incremental parser; `{events, turn, cost, tokens, model}`) |
 | `/api/sessions` | GET | `?agent=N` | Past session list with cost, turns, model, duration |
@@ -85,6 +86,7 @@ Python `http.server` with HTTP/1.1 keep-alive and threaded request handling. No 
 | `/api/dataset-stats` | GET | — | Raw session count + total size |
 | `/api/sft-stats` | GET | — | Extracted turns count + Qwen SFT train/val record counts |
 | `/api/prompt` | GET | — | System prompt, game knowledge, personality files |
+| `/api/quest-walkthroughs` | GET | — | `prompts/quest_walkthroughs.json` (mtime-cached) — used for dashboard hover tooltips |
 | `/api/session-log` | GET | — | session_log.md content |
 | `/api/eval/latest` | GET | — | Eval comparison results (models vs base) |
 | `/api/eval/live` | GET | — | Live eval sandbox status (TTL fast-path: skips fingerprint glob inside cache window) |
@@ -149,7 +151,7 @@ Per-skill row shows: name, current level (`L##`), an XP bar to the next level, a
 - Amber `NEED L25` chip beside the name; amber XP bar fill.
 - Background tint (`.skill-row.gated`) for at-a-glance distinction.
 
-This means the moment an agent accepts Herbalist's Desperation, Foraging jumps to the top of the panel with a visible gap-to-target — surfacing the same gate the agent should be reading via `query_quest`'s new `live_gate_status` block (see `mcp_server/tools/quest.py`).
+This means the moment an agent accepts Herbalist's Desperation, Foraging jumps to the top of the panel with a visible gap-to-target — surfacing the same gate the agent should be reading via `query_quest`'s `live_gate_status` block (see `mcp_server/tools/quest.py`).
 
 ## Tests-tab subsystem (`dashboard/test_runner.py`)
 

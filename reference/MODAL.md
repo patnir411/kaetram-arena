@@ -1,6 +1,6 @@
 # Modal Infrastructure Reference
 
-> All training, serving, and evaluation for the Kaetram Qwen3.5-9B agent runs on [Modal](https://modal.com). This doc covers the complete setup.
+> All training, serving, and evaluation for the Kaetram Qwen3.5 agents (9B SFT lane + 2B/4B/27B scaffold & OPD lanes) run on [Modal](https://modal.com). This doc covers the complete setup.
 
 ---
 
@@ -8,9 +8,9 @@
 
 ```bash
 # Training
-modal run finetune/train_modal.py              # SFT (H100, ~18h)
-modal run finetune/train_grpo_modal.py         # GRPO (H100, ~6h)
-modal run finetune/train_kto_modal.py          # KTO (H100, ~8h)
+modal run finetune/train_modal.py              # SFT (H200; multi-day at 16k seq)
+modal run finetune/train_grpo_modal.py         # GRPO (planned stub — not yet implemented)
+modal run finetune/train_kto_modal.py          # KTO (planned stub — not yet implemented)
 
 # Merge a checkpoint (without full training)
 modal run finetune/train_modal.py::merge_checkpoint --checkpoint-name checkpoint-150
@@ -33,11 +33,19 @@ modal app list
 
 | File | Purpose |
 |------|---------|
-| `finetune/train_modal.py` | SFT training (LoRA on H100) |
-| `finetune/train_grpo_modal.py` | GRPO reinforcement learning |
-| `finetune/train_kto_modal.py` | KTO preference learning |
+| `finetune/train_modal.py` | SFT training (LoRA on H200; `merge_checkpoint` helper on H100) |
+| `finetune/train_grpo_modal.py` | GRPO reinforcement learning (planned stub) |
+| `finetune/train_kto_modal.py` | KTO preference learning (planned stub) |
 | `finetune/serve_modal.py` | SGLang serving for finetuned model (A100) |
 | `finetune/serve_modal_base.py` | SGLang serving for base Qwen3.5-9B (A100) |
+| `finetune/serve_modal_2b.py` | SGLang serving for base Qwen3.5-2B + `/v1/score` (L4 serving; flip to A100 for batch `/v1/score` builds) — OPD student lane |
+| `finetune/serve_modal_4b.py` | SGLang serving for base Qwen3.5-4B + `/v1/score` (A100) — OPD teacher lane |
+| `finetune/serve_modal_27b.py` | SGLang serving for Qwen3.5-27B (H100) — capacity sanity check |
+| `finetune/serve_modal_2b_opd.py` | SGLang serving for the OPD round-1 2B student + `/v1/score` (L4; A100 for batch scoring) |
+| `finetune/serve_modal_2b_opd_r2.py` | SGLang serving for the OPD round-2 2B student + `/v1/score` (L4) |
+| `finetune/serve_modal_2b_opd_r3.py` | SGLang serving for the OPD round-3 2B student + `/v1/score` (L4) |
+| `finetune/train_opd_2b.py` | OPD trainer (round-parametrized): 4B teacher → base-2B student, clipped-IS reverse-KL (H100) |
+| `finetune/train_opd_modal.py` | 9B OPD trainer (r10 → base+scaffold) — lane parked, never run (H200) |
 | `play_qwen.py` | Inference client (calls Modal endpoints via OpenAI SDK) |
 | `eval_harness.py` | Eval orchestrator (spawns play_qwen.py against both endpoints) |
 | `scripts/run-eval.sh` | Eval launcher (parallel base vs SFT comparison) |
@@ -48,11 +56,19 @@ modal app list
 
 | App Name | File | GPU | Purpose |
 |----------|------|-----|---------|
-| `kaetram-qwen-finetune` | train_modal.py | H100 80GB | SFT training |
-| `kaetram-qwen-grpo` | train_grpo_modal.py | H100 80GB | GRPO training |
-| `kaetram-qwen-kto` | train_kto_modal.py | H100 80GB | KTO training |
+| `kaetram-qwen-finetune` | train_modal.py | H200 | SFT training (`merge_checkpoint` on H100) |
+| `kaetram-qwen-grpo` | train_grpo_modal.py | H100 80GB | GRPO training (planned) |
+| `kaetram-qwen-kto` | train_kto_modal.py | H100 80GB | KTO training (planned) |
 | `kaetram-qwen-serve` | serve_modal.py | A100 40GB | Finetuned model inference |
 | `kaetram-qwen-base` | serve_modal_base.py | A100 40GB | Base model inference |
+| `kaetram-qwen-2b` | serve_modal_2b.py | L4 | Base 2B inference + `/v1/score` (OPD student; A100 for batch scoring) |
+| `kaetram-qwen-4b` | serve_modal_4b.py | A100 | Base 4B inference + `/v1/score` (OPD teacher) |
+| `kaetram-qwen-27b` | serve_modal_27b.py | H100 | 27B capacity sanity check |
+| `kaetram-qwen-2b-opd` | serve_modal_2b_opd.py | L4 | OPD round-1 2B student inference + gate scoring |
+| `kaetram-qwen-2b-opd-r2` | serve_modal_2b_opd_r2.py | L4 | OPD round-2 2B student inference + gate scoring |
+| `kaetram-qwen-2b-opd-r3` | serve_modal_2b_opd_r3.py | L4 | OPD round-3 2B student inference + gate scoring |
+| `kaetram-qwen-2b-opd-finetune` | train_opd_2b.py | H100 | OPD training (4B → 2B), round-parametrized |
+| `kaetram-qwen-opd` | train_opd_modal.py | H200 | 9B OPD training (parked, never run) |
 
 ---
 
@@ -118,7 +134,7 @@ Uses Unsloth's `train_on_responses_only()`:
 
 ### Chat Template Patch
 
-Qwen3.5's stock template strips `<think>` reasoning from intermediate assistant turns (only keeps it on the last turn — QwenLM/Qwen3 #1831, still open against Qwen3.5 as of May 2026). `patch_qwen_chat_template()` in `finetune/render.py` fixes this to preserve reasoning on every turn. Single source of truth — imported by `convert_to_qwen.py` (truncation gate), `train_modal.py`, `serve_modal.py`, `serve_modal_base.py`, `train_kto_modal.py`. Verified by `tests/unit/test_think_roundtrip.py` against `unsloth/Qwen3.5-9B`.
+Qwen3.5's stock template strips `<think>` reasoning from intermediate assistant turns (only keeps it on the last turn — QwenLM/Qwen3 #1831, still open against Qwen3.5 as of May 2026). `patch_qwen_chat_template()` in `finetune/render.py` fixes this to preserve reasoning on every turn. Single source of truth — imported by `convert_to_qwen.py` (truncation gate), `train_modal.py`, `serve_modal.py`, `serve_modal_base.py` (the deferred `train_kto_modal.py` / `train_grpo_modal.py` stubs will re-import it when implemented). Verified by `tests/unit/test_think_roundtrip.py` against `unsloth/Qwen3.5-9B`.
 
 ### Data Augmentation
 
@@ -140,11 +156,11 @@ flash-attn: compiled from source (needs nvcc from devel image)
 | Parameter | Value |
 |-----------|-------|
 | Timeout | 72 hours |
-| GPU | H100 80GB (~$3.95/hr) |
+| GPU | H200 141GB (`merge_checkpoint` helper: H100) |
 | Typical duration | scales with corpus size; multi-day at MAX_SEQ_LEN=16,384 (r10: ~43h for 9,363 records) |
-| Typical cost | $50-200 depending on corpus size and resume strategy (r10 actual: $197 for the final ~43h run, billing-verified; ~$4.7/hr = H100 list + CPU/RAM for gradient offloading) |
+| Typical cost | $50-200 depending on corpus size and resume strategy (r10 actual: $197 for the final ~43h run, billing-verified) |
 
-**Cost note**: at MAX_SEQ_LEN=16,384 a step runs ~5.5 min on H100 80GB due to gradient offloading. Step count = `(train_records / batch_size / grad_accum) * epochs`. Budget accordingly; use checkpoint-resume if a single window won't fit.
+**Cost note**: at MAX_SEQ_LEN=16,384 training is HBM-bandwidth-bound (gradient offloading) — several minutes per step; the H200's bandwidth is why this workload moved off H100. Step count = `(train_records / batch_size / grad_accum) * epochs`. Budget accordingly; use checkpoint-resume if a single window won't fit.
 
 ### Training Data Input
 
@@ -247,12 +263,14 @@ dataset/eval/runs/
 
 ### Scenarios
 
-| ID | Name | Turns | Success Criteria |
-|----|------|-------|------------------|
-| A | Rat Grind | 100 | ≥5 rats killed |
-| B | Snek Quest | 200 | ≥1 quest completed |
-| C | Multi-Zone | 150 | ≥2 warps |
-| D | Open Play | 300 | >10 turns + >50% parse rate |
+Time-based (`eval_harness.SCENARIOS`): each scenario is a wall-clock budget; `play_qwen` runs its warm-session loop for `duration_minutes`, rotating sessions on context overflow. Same budget for SFT and base → fair A/B regardless of model speed. (The Core-3 OPD evals use a separate 6h × 3-archetype protocol via `run-eval.sh`.)
+
+| ID | Name | Duration | Description |
+|----|------|----------|-------------|
+| A | Rat Grind | 5 min | Kill 10 rats from Level 1 in Mudwich |
+| B | Snek Quest | 20 min | Complete Bike Lyson snake quest |
+| C | Multi-Zone | 15 min | Visit 3+ zones via warping |
+| D | Open Play | 30 min | 30 minutes open-ended from Level 1 |
 
 ---
 
@@ -295,7 +313,7 @@ Not built in currently. To resume from a checkpoint:
 
 | Operation | GPU | Duration | Cost |
 |-----------|-----|----------|------|
-| SFT training | H100 | scales with corpus; multi-day at 16k seq (r10: ~43h) | $50-200 (r10 actual: $197) |
+| SFT training | H200 | scales with corpus; multi-day at 16k seq (r10: ~43h) | $50-200 (r10 actual: $197) |
 | GRPO training | H100 | ~6h (deferred) | ~$24 |
 | KTO training | H100 | ~8h (deferred) | ~$32 |
 | Checkpoint merge | H100 | 30 min | ~$2 |

@@ -169,6 +169,15 @@ def cmd_status(rvs: list[RunSessionsView]) -> None:
         active = _fmt_quests(gs.get("active_quests"))
         print(f"{aid:<6}{arch:<14}{str(lvl):<5}{hp:<11}{pos:<13}"
               f"{str(turns):<7}{str(err_total):<6}{str(rl):<4}{finished} | {active}")
+    # Surface malformed-emission spam only when present — it was a hidden
+    # run-killer (r3 paralysis) invisible to every other column.
+    mal = sum(rv.n_malformed_emit for rv in rvs)
+    if mal:
+        recov = sum(1 for rv in rvs for tc in rv.all_tool_calls
+                    if isinstance(tc.result_raw, str) and tc.result_raw.startswith("[format]"))
+        tag = (f"{recov} harness-recovered" if recov
+               else "NONE recovered — dropped as no-op spam")
+        print(f"  ⚠ {mal} malformed tool-call emissions in text ({tag})")
 
 
 def cmd_quests(rvs: list[RunSessionsView]) -> None:

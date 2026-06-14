@@ -55,7 +55,6 @@
     if (map.isOutOfBounds(x, y)) return false;
     var walkable = !map.isColliding(x, y);
     var door = _isDoor(x, y);
-    if (door) console.log('[debug_npc] _isWalkableOrDoor (' + x + ',' + y + ') IS DOOR');
     return walkable || door;
   }
   // ── Dynamic canvas metrics (computed per extraction) ──
@@ -1064,6 +1063,58 @@
     return path.length > 0 ? path : null;
   }
 
+  // Frontier BFS — when the full path to a far target won't fit a bounded
+  // search, find the reachable tile CLOSEST to the target within a box around
+  // the CURRENT position, and return the path to it. This is the "one hop
+  // toward the goal" primitive that powers graceful-progress navigation:
+  // far targets are walked in steps, exactly as a skilled player chains short
+  // navigates. Returns { path, end, remaining } or null if no progress.
+  function _bfsFrontier(fromX, fromY, toX, toY, maxRadius) {
+    var map = window.game.map;
+    if (!map) return null;
+    maxRadius = maxRadius || 100;
+    var minX = fromX - maxRadius, maxX = fromX + maxRadius;
+    var minY = fromY - maxRadius, maxY = fromY + maxRadius;
+    var queue = [{ x: fromX, y: fromY }];
+    var visited = {};
+    var parent = {};
+    var key = function(x, y) { return x + ',' + y; };
+    visited[key(fromX, fromY)] = true;
+    var dirs = [[0,-1],[0,1],[-1,0],[1,0]];
+    var best = { x: fromX, y: fromY };
+    var bestDist = Math.abs(fromX - toX) + Math.abs(fromY - toY);
+
+    while (queue.length > 0) {
+      var cur = queue.shift();
+      var d2 = Math.abs(cur.x - toX) + Math.abs(cur.y - toY);
+      if (d2 < bestDist) { bestDist = d2; best = { x: cur.x, y: cur.y }; }
+      if (cur.x === toX && cur.y === toY) break;
+      for (var d = 0; d < 4; d++) {
+        var nx = cur.x + dirs[d][0], ny = cur.y + dirs[d][1];
+        if (nx < minX || nx > maxX || ny < minY || ny > maxY) continue;
+        var k = key(nx, ny);
+        if (visited[k]) continue;
+        if (!_isWalkableOrDoor(map, nx, ny)) continue;
+        visited[k] = true;
+        parent[k] = { x: cur.x, y: cur.y };
+        queue.push({ x: nx, y: ny });
+      }
+    }
+
+    // No reachable tile is closer to the target than where we stand.
+    if (best.x === fromX && best.y === fromY) return null;
+
+    var path = [];
+    var cx = best.x, cy = best.y;
+    while (cx !== fromX || cy !== fromY) {
+      path.unshift({ x: cx, y: cy });
+      var pp = parent[key(cx, cy)];
+      if (!pp) break;
+      cx = pp.x; cy = pp.y;
+    }
+    return path.length > 0 ? { path: path, end: best, remaining: bestDist } : null;
+  }
+
   function _samplePath(path, sampleInterval) {
     if (!path || path.length === 0) return null;
     sampleInterval = Math.max(1, sampleInterval || 1);
@@ -1201,6 +1252,39 @@
       if (bfsPath && bfsPath.length > 0) { bfsRadiusUsed = radiusTries[ri]; break; }
     }
     if (!bfsPath || bfsPath.length === 0) {
+      // Graceful progress: the target is beyond the bounded search, but it may
+      // still be reachable by walking there in steps. Take ONE hop toward it —
+      // to the reachable tile nearest the target within a box around us — and
+      // tell the agent to observe and call navigate to the same target again.
+      // This is what a skilled player does by hand (chain short navigates);
+      // doing it in the tool lets weaker agents reach far destinations too.
+      var hop = _bfsFrontier(startX, startY, targetX, targetY, 100);
+      if (hop && hop.path && hop.path.length > 0) {
+        var hopSample = Math.max(2, Math.min(5, Math.round(hop.path.length / 25)));
+        nav.active = true;
+        nav.status = 'progressing';
+        nav.waypoints = _samplePath(hop.path, hopSample);
+        nav.currentWP = 0;
+        nav.targetX = hop.end.x;          // advancer walks to the hop end
+        nav.targetY = hop.end.y;
+        nav.startTime = Date.now();
+        nav.lastMoveTime = Date.now();
+        nav.lastPos = { x: startX, y: startY };
+        nav.stuckCount = 0;
+        nav.error = null;
+        nav._pathfindingMethod = 'bfs_hop';
+        nav._stuckReason = null;
+        return {
+          status: 'progressing',
+          pathfinding: 'bfs_hop',
+          player_pos: { x: startX, y: startY },
+          moved_toward: { x: hop.end.x, y: hop.end.y },
+          final_target: { x: targetX, y: targetY },
+          remaining_distance: hop.remaining,
+          hint: 'Target is far — walking there in steps. Observe to confirm the hop, then call navigate to the SAME final target again to keep going.',
+        };
+      }
+      // Even one hop makes no progress → genuinely walled off / wrong region.
       nav.active = false;
       nav.status = 'stuck';
       nav.waypoints = [];
@@ -1211,7 +1295,7 @@
       nav.lastMoveTime = Date.now();
       nav.lastPos = { x: startX, y: startY };
       nav.stuckCount = 0;
-      nav.error = 'No BFS path found within bounded radius (tried up to ' + radiusTries[radiusTries.length - 1] + ')';
+      nav.error = 'No path found in the LOADED map region — the target is likely in a region not yet streamed (the map loads in blocks around you), not a true wall. Walk toward it in stages: navigate to a reachable intermediate waypoint ~100 tiles toward the target, observe (which loads the next region), then re-issue. A locked warp will NOT help.';
       nav._pathfindingMethod = 'bfs_failed';
       nav._stuckReason = 'no_bfs_route';
       return {

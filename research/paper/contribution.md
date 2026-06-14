@@ -40,9 +40,11 @@ This is not just data augmentation — each archetype appears to produce differe
 
 Archetype injection via prompt modification is lightweight (< 20 lines per archetype) and doesn't require retraining the teacher. Keep this as a secondary claim until the archetype-diversity ablation is run.
 
-### 3. Outcome-based preference refinement (KTO on game sessions)
+### 3. Outcome-based preference refinement (KTO on game sessions) — *planned, currently deferred*
 
-After SFT, we apply KTO using **game outcomes as reward signals** — XP gain, quest completion, deaths, navigation efficiency. This is interesting in combination:
+> Status: KTO is **deferred indefinitely** (the pipeline focuses on the quest-completion benchmark over preference-RL; see `training-runs.md` r9-KTO). It is a planned extension, not part of the current Paper-1 evidence. The post-SFT lever the program actually validated is on-policy distillation (a separate write-up, `opd-2b.md`).
+
+The plan: after SFT, apply KTO using **game outcomes as reward signals** — XP gain, quest completion, deaths, navigation efficiency. This is interesting in combination:
 - KTO is typically applied to chat/instruction data with human labels
 - We use automated game metrics as labels — more signal-rich and cheaper than human feedback
 - The scoring function is game-specific (not generic RLHF)
@@ -52,7 +54,7 @@ After SFT, we apply KTO using **game outcomes as reward signals** — XP gain, q
 ## What's Interesting But Secondary
 
 ### World model for reward shaping
-2.2M param Transformer predicting combat outcomes. Interesting, but **not part of the core claim until it improves a downstream metric**. Don't lead with it.
+2.2M param Transformer predicting combat outcomes. **Deprecated / not in use** — `world/` targets an older log shape and is not maintained against the current MCP harness. Not a paper claim.
 
 ### Multi-harness comparison
 Same game, same tools, 4 harnesses: Claude, Codex, Gemini, OpenCode (6 models: Grok-4.1-Fast, Qwen3.5-35A3B, Qwen3.5-397A17B, Qwen3-80A3B, DeepSeek-V4-Flash, DeepSeek-V4-Pro). Model-aware bot usernames enable per-model log separation. Interesting for analysis but not a paper contribution unless we do a rigorous comparison. All harnesses fully integrated end-to-end; `analyze.py metrics` (Apr 29) provides the scorer but cross-harness comparison hasn't been run.
@@ -101,8 +103,8 @@ This is the headline paper-ready ablation. The earlier r7/r8/r9 deltas (loss mas
    - 3.1 Kaetram environment + MCP tool API (17 typed model-visible tools, OODA loop)
    - 3.2 Capability-archetype-diverse data collection (completionist / grinder / explorer_tinkerer; how they differ; why this replaced the older personality framing per KAE-46 audits)
    - 3.3 SFT with loss masking and quality filtering
-   - 3.4 KTO preference refinement with game outcome scoring
-   - 3.5 (if ready) World model reward shaping / GRPO
+   - 3.4 KTO preference refinement with game outcome scoring (planned — deferred)
+   - 3.5 (if ready) GRPO reward shaping
 
 4. **Experiments**
    - 4.1 Setup: Qwen3.5-9B, Modal H100, dataset stats (9,363 records from 135 Claude sessions)
@@ -113,17 +115,17 @@ This is the headline paper-ready ablation. The earlier r7/r8/r9 deltas (loss mas
 
 5. **Analysis** — What the student model learns vs doesn't learn. Where it fails. Context window limitations. Tool selection accuracy.
 
-6. **Conclusion** — Structured tool APIs appear to make game-agent distillation practical. Outcome-based preference learning is the main post-SFT refinement lever; capability-archetype diversity (completionist / grinder / explorer_tinkerer) is promising but still partially unverified.
+6. **Conclusion** — Structured tool APIs appear to make game-agent distillation practical. Outcome-based preference learning (KTO) was the planned post-SFT refinement lever but is deferred; capability-archetype diversity (completionist / grinder / explorer_tinkerer) is promising but still partially unverified.
 
 ---
 
 ## Limitations & Future Work
 
-**Knowledge-leakage in the prompt.** `prompts/game_knowledge.md` contains NPC coordinates, quest walkthroughs, station-finding rules, gate calculus (e.g. exact blueberry counts for Foraging gates), and the Rick's Roll multi-room puzzle pin chain. The agent does not learn this from gameplay — it is given. The Core-3 result therefore measures *plan-execution fidelity given a procedural plan*, not *world-model acquisition*. A no-knowledge ablation arm — running base + r10-sft against `prompts/system.md` only, with `__GAME_KNOWLEDGE_BLOCK__` stripped — would isolate the SFT effect from the scaffolding effect. This is scoped as future work (requires a `--no-knowledge` flag in `eval_harness.py:resolve_system_prompt()`; not implemented in v1). Note: `quest_resume.json` cross-session memory was a second axis of scaffolding but was removed entirely (commit `09e611d`, May 7) — sessions are now amnesic by default.
+**Knowledge-leakage in the prompt.** `prompts/game_knowledge.md` contains NPC coordinates, quest walkthroughs, station-finding rules, gate calculus (e.g. exact blueberry counts for Foraging gates), and the Rick's Roll multi-room puzzle pin chain. The agent does not learn this from gameplay — it is given. The Core-3 result therefore measures *plan-execution fidelity given a procedural plan*, not *world-model acquisition*. A no-knowledge ablation arm — running base + r10-sft against `prompts/system.md` only, with `__GAME_KNOWLEDGE_BLOCK__` stripped — would isolate the SFT effect from the scaffolding effect. This is scoped as future work (requires a `--no-knowledge` flag in `eval_harness.py:resolve_system_prompt()`; not implemented in v1). Note: `quest_resume.json` cross-session memory was a second axis of scaffolding but was removed entirely (commit `09e611d`, May 7) — sessions are amnesic of model-authored memory. (June caveat: the base-Qwen lane now injects a small programmatic state snapshot at context rollover, `play_qwen._build_session_note` — deterministic tool output, not model-authored, and absent from the Claude collection lane; any cross-lane comparison should state whether it was active.)
 
 **Train/eval scaffolding asymmetry (resolved).** Training-time data collection previously injected a `quest_resume.json` block into the system prompt at session start (cross-session memory), while eval ran fresh-Mongo with no carryover. This was a confound. As of May 7 (commit `09e611d`), `quest_resume.json` injection was removed entirely — both training and eval are now amnesic. The r10 dataset (rebuilt May 7) was collected under a mix of pre- and post-removal sessions; the r10 training-runs entry documents which source runs had resume active.
 
-**Harness × model conflation.** All training trajectories are Claude Sonnet via the Claude Code CLI. The base comparator is unfinetuned Qwen3.5-9B served via vLLM. A reviewer can argue we have not separated "distillation works" from "Sonnet > base Qwen on this task." Mitigation requires either same-model-different-harness or same-harness-different-model runs. Cross-harness infrastructure is in place (Codex/Gemini/OpenCode fully integrated, 6 OpenCode models), but cross-model SFT corpora have not been collected. Tracked in `VARIABLES.md` §"Three most dangerous unisolated variables."
+**Harness × model conflation.** All training trajectories are Claude Sonnet via the Claude Code CLI. The base comparator is unfinetuned Qwen3.5-9B served via SGLang (`finetune/serve_modal_base.py`). A reviewer can argue we have not separated "distillation works" from "Sonnet > base Qwen on this task." Mitigation requires either same-model-different-harness or same-harness-different-model runs. Cross-harness infrastructure is in place (Codex/Gemini/OpenCode fully integrated, 6 OpenCode models), but cross-model SFT corpora have not been collected. Tracked in `VARIABLES.md` §"Three most dangerous unisolated variables."
 
 **Statistical power.** The published paper claim requires N ≥ 50 per arm to detect Glass's δ ≈ 0.5 (10% Core-3-stage delta) with 80% power post-Bonferroni over (n_metrics × n_model_pairs). `eval_harness.py:--episodes` default is now 50; smaller exploratory runs should not be quoted as paper claims.
 

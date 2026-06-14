@@ -263,3 +263,53 @@ def test_outer_loop_session_counter_persists_across_rollovers(tmp_path: Path, mo
     names = sorted(p.name for p in run_dir.glob("session_*.log"))
     assert any(n.startswith("session_5_") for n in names)
     assert any(n.startswith("session_6_") for n in names)
+
+
+# ────────────────────────────────────────────────────────────────────────
+# _build_session_note — Rick's-traversal carry
+# ────────────────────────────────────────────────────────────────────────
+
+def _write_state(tmp_path: Path, state: dict) -> Path:
+    (tmp_path / "game_state.json").write_text(json.dumps(state))
+    return tmp_path
+
+
+def test_session_note_ricks_fish_first_when_no_shrimp(tmp_path: Path) -> None:
+    # Foresting + Herbalist's finished, Rick's next, holding 0 cooked shrimp →
+    # the note must say FISH FIRST and must NOT pin the door (no shrimp to deliver yet).
+    state = {
+        "pos": {"x": 250, "y": 300},
+        "finished_quests": [{"name": "Foresting"},
+                            {"name": "Herbalist's Desperation"}],
+        "active_quests": [],
+        "inventory": [{"key": "fishingpole", "count": 1}],
+    }
+    note = play_qwen._build_session_note(_write_state(tmp_path, state), "context_overflow")
+    assert note is not None
+    assert "fish" in note.lower() and "FIRST" in note
+    assert "(379,388)" not in note  # don't send it across before it has shrimp
+
+
+def test_session_note_ricks_cross_when_holding_shrimp(tmp_path: Path) -> None:
+    # Holding 5 cooked shrimp → now the note should send it across the door.
+    state = {
+        "pos": {"x": 250, "y": 300},
+        "finished_quests": [{"name": "Foresting"},
+                            {"name": "Herbalist's Desperation"}],
+        "active_quests": [{"name": "Rick's Roll", "stage": 1}],
+        "inventory": [{"key": "cookedshrimp", "count": 5}],
+    }
+    note = play_qwen._build_session_note(_write_state(tmp_path, state), "context_overflow")
+    assert note is not None
+    assert "(379,388)" in note and "cross" in note.lower()
+
+
+def test_session_note_no_ricks_carry_when_not_targeting_ricks(tmp_path: Path) -> None:
+    # Foresting still unfinished → next Core 3 is Foresting, not Rick's.
+    state = {
+        "pos": {"x": 250, "y": 300},
+        "finished_quests": [],
+        "active_quests": [],
+    }
+    note = play_qwen._build_session_note(_write_state(tmp_path, state), "context_overflow")
+    assert note is None or "Rick's Roll" not in note

@@ -138,13 +138,9 @@ for port in "${KAETRAM_DATA_PORTS[@]}"; do
   fi
 done
 
-# Stale livestream pipeline from a prior ungraceful exit. Without this,
-# a leftover Xvfb on display :9N collides when the new agent N tries to
-# claim the same display number. Same scoping convention as nuke-agents.sh
-# (displays 99..108 map 1:1 to agent slots 0..9).
-pkill -9 -f "Xvfb :9[0-9]" 2>/dev/null || true
-pkill -9 -f "Xvfb :10[0-9]" 2>/dev/null || true
-pkill -9 -f "ffmpeg.*x11grab" 2>/dev/null || true
+# Stale livestream pipeline from a prior ungraceful exit. Without this, a
+# leftover Xvfb on display :9N collides when the new agent N reclaims it.
+kill_kaetram_livestream KILL
 rm -rf /tmp/hls/agent_* 2>/dev/null || true
 
 # ── Step 2: Detect agents with preserved state ──

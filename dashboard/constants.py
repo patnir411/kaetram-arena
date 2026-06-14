@@ -62,8 +62,14 @@ def get_ss_output():
     return _ss_cache["output"]
 
 
-def check_process_running(pattern: str) -> bool:
-    """Check if a process matching pattern is running via /proc scan (no subprocess fork)."""
+def check_process_running(pattern: str, cwd_prefix=None) -> bool:
+    """Check if a process matching pattern is running via /proc scan (no subprocess fork).
+
+    If cwd_prefix is given, the process's working directory must resolve under
+    it. Use this to scope a generic cmdline match (e.g. "play.sh", a script name
+    other projects on this VM also use) to processes launched from this project
+    tree — otherwise an unrelated process would be misreported as ours.
+    """
     import os
     for pid_dir in os.listdir("/proc"):
         if not pid_dir.isdigit():
@@ -71,8 +77,13 @@ def check_process_running(pattern: str) -> bool:
         try:
             with open(f"/proc/{pid_dir}/cmdline", "rb") as f:
                 cmdline = f.read().replace(b"\x00", b" ").decode("utf-8", errors="ignore")
-            if pattern in cmdline:
-                return True
+            if pattern not in cmdline:
+                continue
+            if cwd_prefix is not None:
+                cwd = os.readlink(f"/proc/{pid_dir}/cwd")
+                if cwd != cwd_prefix and not cwd.startswith(cwd_prefix + os.sep):
+                    continue
+            return True
         except (OSError, PermissionError):
             continue
     return False

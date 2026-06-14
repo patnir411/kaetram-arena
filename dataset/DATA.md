@@ -119,8 +119,8 @@ Written automatically by `orchestrate.py` at session start. The `harness` field 
 | Active session logs | live count in `metadata.json::session_count` + `source_runs[]` |
 | Raw OODA turns extracted | live count in `metadata.json::raw_turns` |
 | SFT training records | live count in `metadata.json::record_counts` (after thinking-ratio gate ≤25% no-think + truncation gate ≤16,384 tokens) |
-| Architecture | Modular MCP package (`mcp_server/{core,tools/...}`, entry point `mcp_game_server.py` is a 19-line stub), 17 model-visible typed tools |
-| Active SFT focus | r10 complete (regressed 3.5× below base — see `research/experiments/r10-discussion.md`); r11 in planning (Phase A data fixes → Phase B on-policy distillation). Agent-side unblocks shipped: `live_gate_status`, `mob_stats`, `station_locations`. |
+| Architecture | Modular MCP package (`mcp_server/{core,tools/...}`, entry point `mcp_game_server.py` is a 30-line stub), 17 model-visible typed tools |
+| Active SFT focus | r10 complete (regressed 3.5× below base under the pre-R11 harness — see `research/experiments/r10-discussion.md`). r11 complete: R11 scaffold shipped May 28–Jun 4 (base-9B 12–19/30), then OPD rounds 1–3 — scaffolded 4B teacher → base-2B student, reverse-KL; Core-3 arc base 12 → r1 12 → r2 15 → **r3 18** (past the 4B teacher's 17) (`research/experiments/opd-2b.md`; data under `dataset/opd_2b/`, parked 9B lane under `dataset/opd_r11/`). |
 | Latest completed SFT | r10. r9 archived. |
 
 Rebuild with `scripts/collect_sft_data.sh` or manually:

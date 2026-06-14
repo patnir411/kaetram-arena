@@ -6,6 +6,14 @@ progression benchmark the fine-tuned model scores **3.5× lower than the
 unfinetuned base model** it was built from. This document records the result,
 the mechanism behind it, the supporting literature, and the r11 plan.
 
+> **Baseline-comparability caveat (added June 10 2026):** every number in this document was
+> measured under the **pre-R11 harness** (May 2026). The R11 scaffold (May 28–Jun 4, see
+> [r11-direction.md](r11-direction.md)) changes the state contract enough that these figures are
+> not comparable to any post-June run: under R11, base plays 12–19/30 (not 7/30) and r10-sft
+> plays 10–12/30 (not 2/30 — [r11-probing.md](r11-probing.md)). The 3.5× regression claim
+> stands *within* this document's matched-harness comparison. §7's r11 plan is superseded in
+> part: the OPD lane moved to a 4B-teacher → base-2B student instillation test ([opd-2b.md](opd-2b.md)).
+
 The short version: the SFT policy reproduces the *tool-frequency marginal* of
 its training corpus rather than a task-appropriate, state-conditional policy. It
 suppresses exactly the verbs Core 3 requires — the dialogue tools used to accept
@@ -182,6 +190,8 @@ why the base model, with its prior intact, beats a student that has been pushed
 onto a narrow corpus marginal.
 
 ## 7. The r11 plan
+
+*(Superseded: this section's Phase-B plan — 9B self-distillation toward base+scaffold — was not executed. The OPD lane moved to a 4B-teacher → base-2B student capability-instillation test (rounds 1–3, base 12 → 15 → 18/30). See [opd-2b.md](opd-2b.md). The Phase-A SFT-substrate ideas below remain as historical record.)*
 
 The objective is first to *recover* base-level performance, then to exceed it.
 

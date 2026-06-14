@@ -1,8 +1,11 @@
 """
-Modal serving endpoint for BASE (unfinetuned) Qwen3.5-9B.
+Modal serving endpoint for the non-SFT Qwen3.5-9B.
 
-Used as the baseline comparison against finetuned models. Same architecture
-as serve_modal.py but always loads the base model.
+The BASE lane: the Qwen3.5-9B *instruct* model with none of our SFT applied —
+the baseline that the finetuned model (serve_modal.py) is compared against.
+"base" here means non-SFT, NOT Qwen's raw pretrained `-Base` weights (the bare
+`Qwen/Qwen3.5-9B` repo IS the instruct model). Same serving stack as
+serve_modal.py, just no SFT adapter.
 
 Usage:
     modal deploy finetune/serve_modal_base.py
@@ -65,7 +68,7 @@ from render import patch_qwen_chat_template
 class Inference:
     @modal.enter()
     def load_model(self):
-        """Load the BASE Qwen3.5-9B (no finetuning)."""
+        """Load the non-SFT Qwen3.5-9B instruct model (no SFT adapter)."""
         print(f"Loading BASE model {BASE_MODEL_ID}...")
         self.loaded_model_path = BASE_MODEL_ID
         import sglang as sgl
@@ -151,7 +154,23 @@ class Inference:
                     "top_k": QWEN_THINK_TOP_K,
                     "presence_penalty": QWEN_THINK_PRESENCE_PENALTY,
                 },
+                "capabilities": ["chat", "score"],
+                "supports_system_prefix": True,
             }
+
+        def _apply_system_prefix(messages, system_prefix):
+            """Prepend system_prefix to the first system message, separated by
+            a blank line. Synthesizes a system message if none exists.
+
+            Returns a new list — does not mutate input.
+            """
+            if not system_prefix:
+                return messages
+            if messages and messages[0].get("role") == "system":
+                head = dict(messages[0])
+                head["content"] = f"{system_prefix}\n\n{head.get('content', '')}"
+                return [head] + list(messages[1:])
+            return [{"role": "system", "content": system_prefix}] + list(messages)
 
         @web_app.get("/v1/models")
         async def list_models():
@@ -182,6 +201,11 @@ class Inference:
             # training/serve parity — it learned the format from training,
             # not from the chat template.
             tools = body.get("tools") or None
+            # Teacher-prompt prefix: prepended to the first system message
+            # so the same deployed container can serve Teacher A (no prefix)
+            # and Teacher B (expert hint) without a second cold start.
+            system_prefix = body.get("system_prefix")
+            messages = _apply_system_prefix(messages, system_prefix)
             # Adapt OpenAI-style messages to what Qwen's chat template
             # expects when tools= is set:
             #
@@ -263,6 +287,77 @@ class Inference:
                     "completion_tokens": completion_tokens,
                     "total_tokens": prompt_tokens + completion_tokens,
                 },
+            }
+
+        @web_app.post("/v1/score")
+        async def score(request: Request):
+            """Teacher-forcing logprob computation for a fixed (context, target).
+
+            Request: {"messages": [...], "system_prefix": "..." (optional)}.
+            The LAST message must be role=assistant — the scoring target. All
+            earlier messages form the context.
+
+            CRITICAL: this endpoint does NOT pass tools= to apply_chat_template.
+            Offline scoring needs the prompt structure to match the r10
+            training/inference path byte-for-byte; if we let the base template
+            inject the <tools>...</tools> JSON prefix, the token boundary would
+            shift and the score would not be comparable across endpoints.
+
+            Response: per-token logprobs for the target tokens. Index 0 is None.
+            """
+            body = await request.json()
+            messages = body.get("messages", [])
+            if not messages or messages[-1].get("role") != "assistant":
+                from fastapi import HTTPException
+                raise HTTPException(400, "last message must be role=assistant (the scoring target)")
+
+            system_prefix = body.get("system_prefix")
+            messages_adapted = _apply_system_prefix(messages, system_prefix)
+            # tools=True here only gates the arg-coercion path (tool_calls.arguments
+            # string -> dict); no tools= list is ever passed to apply_chat_template for
+            # scoring, so the Qwen chat template doesn't crash on the score request.
+            messages_adapted = self._adapt_messages_for_qwen_template(messages_adapted, tools=True)
+            context_text = self.tokenizer.apply_chat_template(
+                messages_adapted[:-1], tokenize=False, add_generation_prompt=True,
+            )
+            context_ids = self.tokenizer(context_text, add_special_tokens=False).input_ids
+            full_text = self.tokenizer.apply_chat_template(
+                messages_adapted, tokenize=False, add_generation_prompt=False,
+            )
+            full_ids = self.tokenizer(full_text, add_special_tokens=False).input_ids
+            if len(full_ids) <= len(context_ids):
+                from fastapi import HTTPException
+                raise HTTPException(400, f"target empty after tokenization (full={len(full_ids)}, ctx={len(context_ids)})")
+            target_ids = full_ids[len(context_ids):]
+
+            output = await self.engine.async_generate(
+                input_ids=full_ids,
+                sampling_params={"max_new_tokens": 1, "temperature": 1.0, "top_k": 1},
+                return_logprob=True,
+                logprob_start_len=len(context_ids),
+                top_logprobs_num=0,
+            )
+            raw = output.get("meta_info", {}).get("input_token_logprobs") or []
+            logprobs = [None if (t is None or t[0] is None) else float(t[0]) for t in raw]
+            # The per-token logprobs must line up 1:1 with target_ids — callers
+            # index them together. A mismatch means SGLang returned a different
+            # input_token_logprobs span than logprob_start_len implies (e.g. a
+            # tokenization re-split); fail loudly rather than silently return a
+            # misaligned score.
+            if len(logprobs) != len(target_ids):
+                from fastapi import HTTPException
+                raise HTTPException(
+                    500,
+                    f"logprob/target length mismatch (logprobs={len(logprobs)}, "
+                    f"target={len(target_ids)})",
+                )
+            return {
+                "target_token_ids": target_ids,
+                "target_token_strs": [self.tokenizer.decode([t]) for t in target_ids],
+                "target_logprobs": logprobs,
+                "n_context_tokens": len(context_ids),
+                "n_target_tokens": len(target_ids),
+                "model": body.get("model", "kaetram-base"),
             }
 
         return web_app

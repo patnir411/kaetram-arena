@@ -5,7 +5,7 @@ import json
 from mcp.server.fastmcp import Context
 
 from mcp_server.core import get_page, log_tool, mcp
-from mcp_server.helpers import inventory_diff, inventory_snapshot
+from mcp_server.helpers import inventory_count, inventory_diff, inventory_snapshot
 from mcp_server.resource_gates import gate_for_resource
 
 
@@ -64,6 +64,10 @@ async def gather(ctx: Context, resource_name: str) -> str:
     # structured `gate` block so the agent can decide (grind vs pivot)
     # without having to guess from a vague error string.
     if not gained:
+        # A full inventory silently blocks every gather — surface it as the
+        # cause so the agent drops items instead of looping on "RNG miss".
+        slots_used = await inventory_count(page)
+        inv_full = isinstance(slots_used, int) and slots_used >= 25
         gate = gate_for_resource(resource.get("name", resource_name))
         if gate and gate.get("level", 1) > 1:
             current = await page.evaluate("""(skill) => {
@@ -84,14 +88,26 @@ async def gather(ctx: Context, resource_name: str) -> str:
                     f"{gate['skill']} L{gate['level']} required, you are L{current_level}. "
                     f"Either grind {gate['skill']} XP or pick a different resource/quest."
                 )
+            elif inv_full:
+                response["why_no_items"] = (
+                    f"Inventory full ({slots_used}/25) — drop low-value items "
+                    "(e.g. surplus blueberries) before gathering."
+                )
             else:
                 response["why_no_items"] = (
-                    "Skill level OK — likely depleted, wrong tool equipped, "
-                    "or random RNG miss. Try again or move to another node."
+                    "No items gained, though your skill level is sufficient. "
+                    "Re-observe and check your distance to the node and whether it "
+                    "is still ready before retrying."
                 )
+        elif inv_full:
+            response["why_no_items"] = (
+                f"Inventory full ({slots_used}/25) — drop low-value items "
+                "(e.g. surplus blueberries) before gathering."
+            )
         else:
             response["why_no_items"] = (
-                "Likely depleted, wrong tool equipped, or RNG miss. No skill gate found for this resource."
+                "No items gained. Re-observe and check your distance to the node, "
+                "its state, and your skill level before retrying."
             )
 
     return json.dumps(response)

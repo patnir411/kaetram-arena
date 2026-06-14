@@ -19,17 +19,18 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GIST_ID="$(cat "$PROJECT_DIR/.gist_id" 2>/dev/null || echo "")"
 REPORT="/tmp/kaetram-export/report.json"
 
-# Skip if already running
-if [ -f "$LOCK" ]; then
-    # Stale lock check (older than 5 min)
-    if [ "$(find "$LOCK" -mmin +5 2>/dev/null)" ]; then
-        rm -f "$LOCK"
-    else
-        exit 0
-    fi
+# Reap a stale lock first (older than 5 min → a previous run died holding it).
+if [ -f "$LOCK" ] && [ -n "$(find "$LOCK" -mmin +5 2>/dev/null)" ]; then
+    rm -f "$LOCK"
 fi
-trap "rm -f $LOCK" EXIT
-touch "$LOCK"
+
+# Acquire atomically: `set -C` (noclobber) makes the redirect fail if the lock
+# already exists, closing the check-then-touch race between concurrent crons.
+if ! (set -C; : > "$LOCK") 2>/dev/null; then
+    exit 0
+fi
+# Single-quote so $LOCK is expanded at trap-fire time, not trap-set time.
+trap 'rm -f "$LOCK"' EXIT
 
 # Generate report
 cd "$PROJECT_DIR"

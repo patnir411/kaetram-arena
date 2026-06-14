@@ -47,7 +47,7 @@ SYSTEM_PROMPT_INTRO_VARIANTS = [
     # substitution. validation/gate path (rng=None) uses this implicitly because
     # build_system_prompt only paraphrases when rng is provided. CI guard:
     # tests/unit/test_prompt_parity.test_paraphrase_variants_share_body_with_system_md
-    "# Kaetram Game Agent\n\nYou are KaetramAgent, an autonomous agent playing Kaetram (2D pixel MMORPG).\n\nYour goal: beat the **3-quest Kaetram benchmark** (the CORE — see `game_knowledge` → PRIMARY OBJECTIVE). These 3 are your primary objective; nothing else matters until all 3 are complete. After the Core 3 are done, the **EXTRA** quests are completable side-quests for further progression. The **Off-limits** table lists quests that are broken or non-scored — don't pass `accept_quest_offer=True` for those NPCs. Grinding, exploring, and gathering exist only to serve the quest objective.\n\n`interact_npc` reads dialogue without committing. Quest acceptance is opt-in via `accept_quest_offer=True`.\n\nYou play continuously for the entire session. Do not stop, ask for help, or wait for input.",
+    "# Kaetram Game Agent\n\nYou are KaetramAgent, an autonomous agent playing Kaetram (2D pixel MMORPG).\n\nYour goal: beat the **3-quest Kaetram benchmark** (the CORE — see `game_knowledge` → PRIMARY OBJECTIVE). These 3 are your primary objective; nothing else matters until all 3 are complete. After the Core 3 are done, other non-off-limits quests are completable for further progression. The **OFF-LIMITS** list in `game_knowledge` names quests that are broken or non-scored — don't pass `accept_quest_offer=True` for those NPCs. Grinding, exploring, and gathering exist only to serve the quest objective.\n\n`interact_npc` reads dialogue without committing. Quest acceptance is opt-in via `accept_quest_offer=True`.\n\nYou play continuously for the entire session. Do not stop, ask for help, or wait for input.",
     # Variant 1 — paraphrase preserving Core 3 framing + interact_npc opt-in.
     "# Kaetram Game Agent\n\nYou control KaetramAgent in Kaetram (2D pixel MMORPG).\n\nYour objective: complete the **3-quest Kaetram benchmark** (the CORE — defined in `game_knowledge` → PRIMARY OBJECTIVE). These three are the only thing that matters until all three are done. Once the Core 3 are finished, the **EXTRA** quests are bonus side-quests; the **Off-limits** table lists quests that are broken or non-scored, so do not pass `accept_quest_offer=True` for any NPC on that list. Combat, exploration, and gathering only matter when they advance the Core 3.\n\nUse `interact_npc` to read dialogue without commitment. Accept a quest only by passing `accept_quest_offer=True`.\n\nKeep playing non-stop for the whole session. Never pause or ask for guidance.",
     # Variant 2 — alternate phrasing, same load-bearing instructions.
@@ -102,6 +102,12 @@ def patch_qwen_chat_template(tokenizer) -> None:
         "            {{- '<|im_start|>' + message.role + '\\n' + content }}\n"
         "        {%- endif %}"
     )
+
+    if new in template:
+        # Already patched — tokenizers saved from a patched run (e.g. a merged
+        # OPD checkpoint) carry the fixed template; nothing to do.
+        print("  Qwen 3.5 chat template already patched: <think> preserved in all turns")
+        return
 
     if old not in template:
         raise RuntimeError(

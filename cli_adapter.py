@@ -486,8 +486,28 @@ class OpenCodeAdapter(CLIAdapter):
         return {}
 
 
-QWEN_SFT_ENDPOINT = "https://workspace--kaetram-qwen-serve-inference-serve.modal.run/v1"
-QWEN_BASE_ENDPOINT = "https://workspace--kaetram-qwen-base-inference-serve.modal.run/v1"
+# Modal endpoint resolution. The committed default workspace is the anonymized
+# placeholder "workspace" — the repo is scrubbed of the real Modal workspace
+# name for publication. On a live machine, set MODAL_WORKSPACE (e.g. in
+# ~/.zshrc) so these resolve to the real deployment, or override the full URL
+# via KAETRAM_QWEN_{SFT,BASE}_ENDPOINT. Leaving the placeholder unresolved
+# produces `modal-http: invalid function call` on every request (silent 3h
+# null-run failure mode — see session_log 2026-05-28).
+_MODAL_WORKSPACE = os.environ.get("MODAL_WORKSPACE", "workspace")
+QWEN_SFT_ENDPOINT = os.environ.get("KAETRAM_QWEN_SFT_ENDPOINT") or (
+    f"https://{_MODAL_WORKSPACE}--kaetram-qwen-serve-inference-serve.modal.run/v1"
+)
+QWEN_BASE_ENDPOINT = os.environ.get("KAETRAM_QWEN_BASE_ENDPOINT") or (
+    f"https://{_MODAL_WORKSPACE}--kaetram-qwen-base-inference-serve.modal.run/v1"
+)
+# Variant label for base runs. Defaults to the 9B base ("kaetram-base"); set
+# KAETRAM_QWEN_BASE_MODEL when the base endpoint serves a different model (e.g.
+# "kaetram-base-27b") so run.meta.json / dashboards / log_analysis report it.
+QWEN_BASE_MODEL_LABEL = os.environ.get("KAETRAM_QWEN_BASE_MODEL", "kaetram-base")
+# Variant label for SFT runs. Defaults to "r10-sft"; set KAETRAM_QWEN_SFT_MODEL
+# when the SFT endpoint serves a different checkpoint (e.g. "2b-opd-r1") so
+# run.meta.json / dashboards / log_analysis report the right variant.
+QWEN_SFT_MODEL_LABEL = os.environ.get("KAETRAM_QWEN_SFT_MODEL", "r10-sft")
 
 
 class QwenAdapter(CLIAdapter):
@@ -523,7 +543,7 @@ class QwenAdapter(CLIAdapter):
         # endpoint but didn't override the (sft) default. Saves the dashboard
         # / log_analysis from showing "r10-sft" on a base run.
         if endpoint == QWEN_BASE_ENDPOINT and model == "r10-sft":
-            model = "kaetram-base"
+            model = QWEN_BASE_MODEL_LABEL
         super().__init__(model)
         self.endpoint = endpoint
         self._port: str = ""
@@ -605,7 +625,7 @@ def get_adapter(harness: str = "claude", model: str | None = None,
     elif harness == "opencode":
         return OpenCodeAdapter(model=model)
     elif harness == "qwen":
-        return QwenAdapter(model=model or "r10-sft", endpoint=qwen_endpoint)
+        return QwenAdapter(model=model or QWEN_SFT_MODEL_LABEL, endpoint=qwen_endpoint)
     else:
         return ClaudeAdapter(model=model or "sonnet")
 
