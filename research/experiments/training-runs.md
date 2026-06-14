@@ -1,6 +1,6 @@
 # Training Runs
 
-History of all Qwen3.5-9B finetuning runs, from initial SFT through KTO preference learning. Each entry records what changed, what broke, and what improved.
+History of the Qwen3.5 finetuning runs: the 9B SFT era (r1–r10) and the r11 era — a scaffold reframe across model sizes, then on-policy distillation (4B teacher → base-2B student, rounds 1–3). Each entry records what changed, what broke, and what improved. The r11/OPD detail lives in `research/experiments/opd-2b.md`; this file is the round index.
 
 ---
 
@@ -18,6 +18,10 @@ History of all Qwen3.5-9B finetuning runs, from initial SFT through KTO preferen
 | r9 | Apr 15-16 | SFT | 5,871 train / 575 val | Train/inference alignment fix (system prompt, reasoning, seq length) + degenerate filtering | COMPLETE Apr 16. Deployed via `serve_modal.py`. In early curious eval lost to base (1.5 quests / 28.5 kills / L24 vs base 2.5 / 26.5 / L20). Root cause → r10 P0 fixes. |
 | r10 | May 7-10 | SFT (dataset) | 8,510 train / 853 val (9,363 total) | Claude corpus only, 3 agents (grinder / completionist / explorer_tinkerer). Mixed-mode thinking-ratio gate (≤25% no-think) + strict-16,384 truncation gate (dropped 4,799 overlong). Reasoning rendered verbatim; `_drop_overlong` is the only length authority. | Dataset rebuilt 2026-05-10. **COMPLETE** — final run ~43h on H100 ($197, billing-verified; "~22h" was an optimistic ETA); eval May 19–22 showed **3.5× SFT regression below base** (Mann-Whitney exact p=0.029); see `r10-discussion.md`. |
 | r9-KTO | DEFERRED | KTO | TBD | Preference learning on r9 merged weights | Deferred indefinitely — pipeline focuses on the quest-completion benchmark over preference-RL. |
+| r11-scaffold | May 28–Jun 4 | harness (no training) | — | R11 scaffold/state-contract reframe across model sizes | base-9B Core-3 4→19/30; scaffold transfers down the size ladder (27B 15, 4B 17, 2B 12) — capacity isn't the lever. See `opd-2b.md`, `r11-direction.md`. |
+| opd-r1 | Jun 10 | OPD | 5,564 / 574 | 4B teacher → base-2B student, clipped-IS reverse-KL (init==generator) | Core-3 **12/30** — style transferred, competence didn't (visitation coupling + teacher-forcing copy-prior). |
+| opd-r2 | Jun 12 | OPD | 7,024 / 825 | + env-state seeding at the Herbalist wall (bucket-B) | **15/30** — first weights-driven lift; Herbalist stage-1 passed 3/3 unseeded. |
+| opd-r3 | Jun 13 | OPD | 8,856 / 1,040 | + counterfactual-canonicalized grading + full-ladder seeding + harness recovery | **18/30** — program best, past the 4B teacher (17); Herbalist stage-2 broke; Rick's 0/4 (cook-incompetent teacher). |
 
 ---
 
@@ -241,7 +245,24 @@ Originally planned to replace r8-KTO using r9 merged weights. **Deferred indefin
 
 ---
 
+## r11 — scaffold reframe + OPD (rounds 1–3, Jun 7–14 2026)
+
+After r10's negative result the program pivoted twice. First a **scaffold reframe** (no weight training): harness/state-contract engineering moved the base-9B Core-3 envelope 4 → 19/30, and the scaffold transfers down the size ladder (27B 15/30, 4B 17/30, 2B 12/30) — capacity is not the lever. Then an **on-policy distillation** lane: teacher = scaffolded 4B (17/30), student = base 2B (12/30), ~an order of magnitude cheaper per round than the 9B lane.
+
+| Round | Core-3 /30 | Lever | Outcome |
+|---|---|---|---|
+| base-2B | 12 | — | scaffold floor |
+| opd-r1 | 12 | reverse-KL OPD | style transferred, competence didn't (visitation coupling; teacher-forcing copy-prior) |
+| opd-r2 | **15** | + env-state seeding at the Herbalist wall | first weights-driven lift; stage-1 passed 3/3 unseeded |
+| opd-r3 | **18** | + counterfactual grading + full-ladder seeding + harness recovery | program best, past the 4B teacher; Herbalist stage-2 broke; Rick's 0/4 (cook-incompetent teacher) |
+
+A controlled ablation (r2 weights + harness recovery = 17/30) decomposes r2→r3 as **harness → stages, weights → speed**. Full method, results, and literature alignment: **`research/experiments/opd-2b.md`**; paper: **`reference/overview.pdf`**. Trainer: `finetune/train_opd_2b.py` (round-parametrized). The 9B OPD lane (`train_opd_modal.py`) was parked with round-1 data built but never trained.
+
+---
+
 ## What's Next
+
+*(Snapshot as of mid-May 2026 — superseded by the r11 scaffold reframe + OPD work above; see `opd-2b.md` for the current frontier.)*
 
 **Pivoted away from the SFT/KTO/GRPO ladder as of 2026-04-25.** PR #29 collapsed `mcp_game_server.py` into a modular `mcp_server/` package and scaffolded the per-step quest reachability suite under `tests/e2e/quests/reachability/`, making quest completion (not loss curves) the headline metric. `--opencode` added as a 4th harness peer alongside Claude/Codex/Gemini, routing Qwen via NVIDIA NIM. Capability archetypes (GRINDER / COMPLETIONIST / EXPLORER_TINKERER) replaced the AGGRESSIVE/METHODICAL/CURIOUS personality system (closed Apr 25). Apr 27 (`61cf94f`) Tier-A unblock pass shipped: `live_gate_status`, `quest_resume.json` cross-session memory (later removed May 7, `09e611d`), `recent_failures` injection, `mob_stats` enrichment in observe, `station_locations`, BFS→warp navigation fallback, and `migrate_logs_to_runs.py` (1,384 sessions → 237 runs) — log layout moved to `dataset/raw/agent_*/runs/run_<TS>/`. Apr 27 (`ef3bac4`) wired xAI/Grok-4.1-Fast-Reasoning as a 5th harness path.
 
@@ -249,12 +270,12 @@ Apr 28 strike-team audit (8 parallel agents on `collaborator/kae-50-q2-q3-strike
 
 **Data scale (May 3, updated May 22):** Active corpus (post-archive-split): **42 runs / 3,723 sessions** across 3 agents (agent_0: 16/1,063, agent_1: 13/1,345, agent_2: 13/1,315). Includes both Claude collection and Qwen eval runs. 1,694 sessions archived. Rick's Roll stage-2+ knowledge **now in `game_knowledge.md`** (shipped May 1 commit `154badc` — puzzle-room door chain, Lena coords, all 7 decoy ladders, 2-call turn-in caveat).
 
-**Active backlog (revised priorities):** r10 dataset rebuilt 2026-05-10 (9,363 records). Training not yet launched — ETA ~22h on H100 once kicked off. `quest_resume.json` removed from the agent entirely (May 7, `09e611d`). Eval pipeline upgraded: `core3_stages_advanced` headline metric, N-model Bonferroni FWER, `serve_modal.py` defaults to r10. KAE-49 (paper-variables catalog) shipped.
+**Active backlog (revised priorities):** r10 dataset rebuilt 2026-05-10 (9,363 records); since trained (~43h on H100, $197 billing-verified) and evaluated — 3.5× SFT regression (see `r10-discussion.md`), after which the program moved to the r11 scaffold reframe + OPD (see the r11 section above). `quest_resume.json` removed from the agent entirely (May 7, `09e611d`). Eval pipeline upgraded: `core3_stages_advanced` headline metric, N-model Bonferroni FWER, `serve_modal.py` defaults to r10. KAE-49 (paper-variables catalog) shipped.
 
 **Qwen agent infrastructure (current — May 10 rewrite):**
 - Qwen is a peer harness inside `orchestrate.py` (alongside Claude/Codex/Gemini/OpenCode) with two variants: `--qwen-sft N` (finetuned, default endpoint, model label `r10-sft`) and `--qwen-base N` (unfinetuned, model label `kaetram-base`). Mixable in one run for direct A/B. `QwenAdapter` (`cli_adapter.py`) spawns `play_qwen.py` per session against the corresponding Modal SGLang endpoint (`QWEN_SFT_ENDPOINT` / `QWEN_BASE_ENDPOINT`).
 - Usernames: personality-based — `QwenGrinder` / `QwenCompletionist` / `QwenExplorer` (so the in-game bot maps 1:1 to the personality variant under eval). SFT vs base is reflected in `metadata.json::model`, not the username, so a 3-agent SFT run and a 3-agent base run share the same Mongo player rows.
-- Sessions: bounded by Qwen's 16K trained context, not turn count. **play_qwen runs a warm-session loop** — when next call would overflow, the inner loop rolls into a new session (fresh `messages = [system, bootstrap(N+1)]`, new log file), but MCP/Chromium/login/Xvfb/ffmpeg all persist across rollovers. Mongo state carries per-username across sessions (same as Claude). orchestrate only respawns play_qwen on hard process death (rare crash recovery).
+- Sessions: bounded by Qwen's 16K trained context, not turn count. **play_qwen runs a warm-session loop** — when next call would overflow, the inner loop rolls into a new session (fresh `messages = [system, bootstrap(N+1)]`, new log file), but MCP/Chromium/login/Xvfb/ffmpeg all persist across rollovers. Mongo state carries per-username across sessions (same as Claude). Since June, the new bootstrap also carries a small programmatic state snapshot from the previous session (`_build_session_note` — not model-authored memory). orchestrate only respawns play_qwen on hard process death (rare crash recovery).
 - Logs: play_qwen emits Claude-shaped stream-json (`type:"system"|"assistant"|"user"|"result"` with nested `message.content[]` blocks of `thinking`/`text`/`tool_use`/`tool_result`), so dashboard activity feed, `scripts/log_analysis/`, `extract_turns.py`, and the heartbeat ingest are all harness-agnostic.
 - Multi-agent: `restart-agent.sh --qwen-sft 3 --grinder 1 --completionist 1 --explorer 1 --hours 3` runs 3 finetuned-Qwen agents in parallel on ports 9001/9011/9021. Swap to `--qwen-base 3` for the base lane.
 - Eval: `eval_harness.py` (separate from orchestrate) drives r10-sft vs base on dedicated ports 9061/9071. **Time-based scenarios** (`duration_minutes` per scenario); each episode spawns one warm-loop play_qwen process that rotates sessions internally for the duration. Same JSONL log shape.
