@@ -12,6 +12,7 @@
 The agent calls 17 structured tools (observe, attack, navigate, interact_npc, gather, craft_item, …) — never writes JavaScript or clicks pixels. Sessions across **4 frontier-LLM harnesses** (Claude / Codex / Gemini / OpenCode) are collected as gameplay trajectories (Claude is the primary corpus, the others are cross-harness comparisons), with OpenCode multiplexing across xAI Grok, NVIDIA Qwen3.5, and DeepSeek V4 via `--opencode-model`. Progress is measured against the **Core 3 quest benchmark** (see below).
 
 > **For developers:** see [`CLAUDE.md`](CLAUDE.md) for the full developer reference and [`session_log.md`](session_log.md) for the most recent decisions.
+> For confirmatory experiments, see [`docs/reproducible-runs.md`](docs/reproducible-runs.md) for immutable manifests, artifact hashes, and clean-clone preflight.
 
 ## What it does
 
@@ -47,8 +48,10 @@ For the latest run state, training results, and what's in flight, see
 - **Training.** Dataset stats: [`dataset/DATA.md`](dataset/DATA.md).
 - **Eval.** Core-3 evals run via `orchestrate.py` / `play_qwen.py`, read with
   `scripts/log_analysis/analyze.py` (last-vs-first observe stage deltas).
-  `eval_harness.py` (ports 9061/9071) is the older r10-sft-vs-base scaffold,
-  superseded for the OPD work.
+  The preregistered OPD 2B weights × recovery follow-up uses the safe,
+  manifest-driven [`factorial runbook`](research/experiments/opd-2b-factorial.md);
+  it extends `eval_harness.py` with isolated cells and held-out no-walkthrough
+  evaluation. The older fixed r10-sft-vs-base shell remains superseded.
 - **World model.** Deprecated — [`world/`](world/) is not in use (targets an older log shape).
 - **Iteration history.** r1–r9 were rapid SFT exploration; **r10** was the clean
   negative (9B Claude-SFT regressed 3.5× below base); **r11** is the current phase —

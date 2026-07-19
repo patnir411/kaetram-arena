@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "experiment_id": "opd-2b-targeted-player-state-v2",
+  "held_out_registration": "research/experiments/heldout-quest.json",
+  "random_seed": 20260718,
+  "max_states": 6,
+  "confidence_level": 0.95,
+  "minimum_trials": {
+    "natural_student_rollouts": 500,
+    "teacher_trials": 100,
+    "student_trials": 100,
+    "recovery_trials": 100
+  },
+  "reachability_checkers": {
+    "witness_trajectory": {
+      "path": "../../scripts/opd/check_player_state_reachability.py",
+      "sha256": "278619a79cc84b0d78a869e6277af492c846928c3d2669b2368a242e7149e9b9",
+      "timeout_seconds": 300
+    },
+    "invariant_certificate": {
+      "path": "../../scripts/opd/check_player_state_reachability.py",
+      "sha256": "278619a79cc84b0d78a869e6277af492c846928c3d2669b2368a242e7149e9b9",
+      "timeout_seconds": 300
+    }
+  },
+  "thresholds": {
+    "max_student_visit_rate": 0.05,
+    "min_teacher_success_rate": 0.6,
+    "min_teacher_student_success_gap": 0.3,
+    "min_recovery_rate": 0.8
+  }
+}

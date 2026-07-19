@@ -22,6 +22,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
 from tests.e2e.helpers.seed import STARTER_KIT, seed_player  # noqa: E402
+from heldout_guard import assert_quests_not_reserved  # noqa: E402
 
 FORESTING_DONE = {"key": "foresting", "stage": 3, "subStage": 0, "completedSubStages": []}
 HERBALIST_DONE = {"key": "herbalistdesperation", "stage": 3, "subStage": 0, "completedSubStages": []}
@@ -90,6 +91,10 @@ LANES = {
 
 
 def main() -> None:
+    assert_quests_not_reserved(
+        (q["key"] for milestone in MILESTONES.values() for q in milestone["quests"]),
+        use="training_seed",
+    )
     lane_set = (sys.argv[1] if len(sys.argv) > 1 else "A").upper()
     if lane_set not in LANES:
         sys.exit(f"unknown lane set {lane_set!r} (expected A or B)")

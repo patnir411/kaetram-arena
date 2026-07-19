@@ -29,6 +29,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
 from tests.e2e.helpers.seed import STARTER_KIT, seed_player  # noqa: E402
+from heldout_guard import assert_quests_not_reserved  # noqa: E402
 
 QWEN_NAMES = ("qwengrinder", "qwencompletionist", "qwenexplorer")
 
@@ -54,6 +55,10 @@ WALL_SEED = dict(
 
 
 def main() -> None:
+    assert_quests_not_reserved(
+        (q["key"] for q in WALL_SEED["quests"]),
+        use="training_seed",
+    )
     for name in QWEN_NAMES:
         seeded = seed_player(name, **WALL_SEED)
         quests = {q["key"]: q["stage"] for q in seeded["quests"]}

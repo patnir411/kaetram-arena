@@ -55,6 +55,7 @@ serve_image = (
         "SFT_EXPERIMENT": os.environ.get("SFT_EXPERIMENT", "kaetram-qwen3.5-9b-r10"),
     })
     .add_local_python_source("render")
+    .add_local_python_source("tool_surface")
 )
 
 # ---------------------------------------------------------------------------
@@ -96,7 +97,16 @@ QWEN_DECODE_MODE = "thinking_general"
 # Chat template patch (QwenLM/Qwen3 #1831) lives in finetune/render.py — single
 # source of truth shared with train_modal.py, serve_modal_base.py, and the
 # convert_to_qwen.py truncation gate.
-from render import patch_qwen_chat_template
+from render import (
+    HISTORICAL_R10_EXPERIMENT,
+    NATIVE_TOOLS_V1,
+    RENDER_CONTRACT_FILENAME,
+    adapt_messages_for_qwen_template,
+    patch_qwen_chat_template,
+    render_messages,
+    resolve_checkpoint_render_contract,
+    validate_request_tools,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -128,21 +138,30 @@ class Inference:
         grpo_merged = f"/checkpoints/{GRPO_EXPERIMENT}/merged"
         sft_adapter = f"/checkpoints/{SFT_EXPERIMENT}/adapter"
         grpo_adapter = f"/checkpoints/{GRPO_EXPERIMENT}/adapter"
+        allow_historical_grpo = SFT_EXPERIMENT == HISTORICAL_R10_EXPERIMENT
 
         merged_path = Path(MERGED_MODEL_DIR)
 
         # Priority: cached merge > GRPO merged > SFT merged > adapter merge > base model
         if merged_path.exists() and (merged_path / "config.json").exists():
             print(f"Using cached merged model at {merged_path}")
-        elif os.path.exists(grpo_merged) and os.path.exists(os.path.join(grpo_merged, "config.json")):
+        elif (
+            allow_historical_grpo
+            and os.path.exists(grpo_merged)
+            and os.path.exists(os.path.join(grpo_merged, "config.json"))
+        ):
             merged_path = Path(grpo_merged)
             print(f"Using GRPO merged model: {merged_path}")
         elif os.path.exists(sft_merged) and os.path.exists(os.path.join(sft_merged, "config.json")):
             merged_path = Path(sft_merged)
             print(f"Using SFT merged model: {merged_path}")
-        elif os.path.exists(grpo_adapter) or os.path.exists(sft_adapter):
+        elif (allow_historical_grpo and os.path.exists(grpo_adapter)) or os.path.exists(sft_adapter):
             # Fall back to merging adapter on startup
-            adapter_path = grpo_adapter if os.path.exists(grpo_adapter) else sft_adapter
+            adapter_path = (
+                grpo_adapter
+                if allow_historical_grpo and os.path.exists(grpo_adapter)
+                else sft_adapter
+            )
             print(f"Merging adapter {adapter_path} into base model...")
             from peft import PeftModel
             from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -159,6 +178,11 @@ class Inference:
             merged_path.mkdir(parents=True, exist_ok=True)
             model.save_pretrained(merged_path)
             tokenizer.save_pretrained(merged_path)
+            adapter_contract = Path(adapter_path) / RENDER_CONTRACT_FILENAME
+            if adapter_contract.exists():
+                (merged_path / RENDER_CONTRACT_FILENAME).write_text(
+                    adapter_contract.read_text()
+                )
             model_cache_vol.commit()
             print(f"Merged model saved to {merged_path}")
             del model
@@ -167,6 +191,19 @@ class Inference:
             merged_path = Path(BASE_MODEL_ID)
             print(f"WARNING: No finetuned model found, using base {BASE_MODEL_ID}")
         self.loaded_model_path = str(merged_path)
+
+        contract_path = merged_path / RENDER_CONTRACT_FILENAME
+        if contract_path.exists():
+            import json as _json
+            manifest_metadata = _json.loads(contract_path.read_text())
+        else:
+            manifest_metadata = None
+        # r10 predates render manifests. Its absence is itself part of that
+        # exact named contract; every other experiment fails closed.
+        self.render_contract = resolve_checkpoint_render_contract(
+            SFT_EXPERIMENT, manifest_metadata
+        )
+        print(f"Render contract: {self.render_contract['tool_render_mode']}")
 
         # Patch tokenizer_config.json if saved by transformers 5.x
         # (SGLang uses transformers 4.x which doesn't have TokenizersBackend)
@@ -220,6 +257,9 @@ class Inference:
                 "sft_experiment": SFT_EXPERIMENT,
                 "loaded_model_path": getattr(self, "loaded_model_path", None),
                 "decode_mode": QWEN_DECODE_MODE,
+                "tool_render_mode": self.render_contract["tool_render_mode"],
+                "tool_schema_version": self.render_contract["tool_schema_version"],
+                "tool_schema_sha256": self.render_contract["tool_schema_sha256"],
                 "decode_defaults": {
                     "temperature": QWEN_THINK_TEMP,
                     "top_p": QWEN_THINK_TOP_P,
@@ -232,40 +272,6 @@ class Inference:
         @web_app.get("/v1/models")
         async def list_models():
             return {"data": [{"id": "kaetram", "object": "model"}]}
-
-        def _adapt_for_template(messages):
-            """Coerce assistant tool_calls.arguments from JSON strings to dicts
-            so the Qwen chat template's `.items()` call doesn't crash. Applied
-            unconditionally on /v1/score: reconstructed messages from session
-            logs always carry tool_calls with string-encoded arguments."""
-            import json as _json
-            import re as _re_local
-            out = []
-            for m in messages:
-                if m.get("role") != "assistant":
-                    out.append(m)
-                    continue
-                new_m = dict(m)
-                tcs = new_m.get("tool_calls") or []
-                if tcs:
-                    fixed = []
-                    for tc in tcs:
-                        fn = (tc.get("function") or {})
-                        args = fn.get("arguments")
-                        if isinstance(args, str):
-                            try:
-                                args_obj = _json.loads(args) if args.strip() else {}
-                            except _json.JSONDecodeError:
-                                args_obj = {}
-                        else:
-                            args_obj = args or {}
-                        fixed.append({**tc, "function": {**fn, "arguments": args_obj}})
-                    new_m["tool_calls"] = fixed
-                    content = new_m.get("content") or ""
-                    if isinstance(content, str) and "<tool_call>" in content:
-                        new_m["content"] = _re_local.split(r"<tool_call>", content, maxsplit=1)[0].rstrip()
-                out.append(new_m)
-            return out
 
         @web_app.post("/v1/score")
         async def score(request: Request):
@@ -284,17 +290,26 @@ class Inference:
                 from fastapi import HTTPException
                 raise HTTPException(400, "last message must be role=assistant (the scoring target)")
 
-            # Same template path as /v1/chat/completions: no tools= (SFT
-            # training/serve parity — system prompt embeds the markdown tool
-            # table). Pass through _adapt_for_template so tool_calls.arguments
-            # are dict-shaped (Qwen template requires `.items()`).
-            messages_adapted = _adapt_for_template(messages)
-            context_text = self.tokenizer.apply_chat_template(
-                messages_adapted[:-1], tokenize=False, add_generation_prompt=True,
+            contract = self.render_contract
+            score_messages = messages
+            if contract["tool_render_mode"] != NATIVE_TOOLS_V1:
+                # Historical r10 /score adapted string arguments before
+                # rendering even though its chat route did not.
+                score_messages = adapt_messages_for_qwen_template(messages)
+            context_text = render_messages(
+                self.tokenizer,
+                score_messages[:-1],
+                render_mode=contract["tool_render_mode"],
+                tools=contract["tools"],
+                add_generation_prompt=True,
             )
             context_ids = self.tokenizer(context_text, add_special_tokens=False).input_ids
-            full_text = self.tokenizer.apply_chat_template(
-                messages_adapted, tokenize=False, add_generation_prompt=False,
+            full_text = render_messages(
+                self.tokenizer,
+                score_messages,
+                render_mode=contract["tool_render_mode"],
+                tools=contract["tools"],
+                add_generation_prompt=False,
             )
             full_ids = self.tokenizer(full_text, add_special_tokens=False).input_ids
             if len(full_ids) <= len(context_ids):
@@ -349,13 +364,18 @@ class Inference:
             top_k = body.get("top_k", QWEN_THINK_TOP_K)
             presence_penalty = body.get("presence_penalty", QWEN_THINK_PRESENCE_PENALTY)
 
-            # No tools= kwarg — train and serve both embed the tool table in
-            # the system prompt (markdown). Passing tools= here would emit a
-            # second JSON-schema tool block the model was never trained on.
-            # Source of truth: finetune/render.render_record.
-            prompt = self.tokenizer.apply_chat_template(
+            contract = self.render_contract
+            request_tools = body.get("tools")
+            try:
+                validate_request_tools(contract, request_tools)
+            except (KeyError, TypeError, ValueError) as exc:
+                from fastapi import HTTPException
+                raise HTTPException(400, f"tool schema does not match checkpoint: {exc}")
+            prompt = render_messages(
+                self.tokenizer,
                 messages,
-                tokenize=False,
+                render_mode=contract["tool_render_mode"],
+                tools=contract["tools"],
                 add_generation_prompt=True,
             )
 

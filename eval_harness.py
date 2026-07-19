@@ -20,12 +20,21 @@ import argparse
 import json
 import math
 import os
+import re
+import shutil
 import subprocess
 import sys
 import time
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+
+from heldout_guard import (
+    DEFAULT_REGISTRATION,
+    HeldOutRegistration,
+    normalize_quest,
+    validate_eval_selection,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -120,15 +129,22 @@ def reset_player_db(username: str) -> bool:
 # System prompt resolution
 # ---------------------------------------------------------------------------
 
-def resolve_system_prompt(project_dir: str, username: str, personality: str = "") -> str:
-    """Resolve system.md template with game knowledge and optional personality."""
+def resolve_system_prompt(
+    project_dir: str,
+    username: str,
+    personality: str = "",
+    *,
+    include_game_knowledge: bool = True,
+    held_out_quest: str = "",
+) -> str:
+    """Resolve system.md with optional knowledge and held-out task targeting."""
     system_path = os.path.join(project_dir, "prompts", "system.md")
     knowledge_path = os.path.join(project_dir, "prompts", "game_knowledge.md")
 
     with open(system_path) as f:
         prompt = f.read()
     knowledge = ""
-    if os.path.isfile(knowledge_path):
+    if include_game_knowledge and os.path.isfile(knowledge_path):
         with open(knowledge_path) as f:
             knowledge = f.read()
 
@@ -148,6 +164,30 @@ def resolve_system_prompt(project_dir: str, username: str, personality: str = ""
     prompt = prompt.replace("__PERSONALITY_BLOCK__", personality_block)
     prompt = prompt.replace("__PROJECT_DIR__", project_dir)
     prompt = prompt.replace("__SERVER_PORT__", "")
+    if held_out_quest:
+        # Remove the two static Desert Quest utility hints from system.md when
+        # that quest is held out. The only remaining name occurrence is the
+        # target declaration below; mechanics must be discovered live.
+        if normalize_quest(held_out_quest) == normalize_quest("Desert Quest"):
+            prompt = prompt.replace(
+                "(`lakesworld`/`crullfield` need Desert Quest done first). Reach those areas "
+                "by WALKING with `navigate`; only warp a hub you've confirmed unlocked.",
+                "(some hubs require quest unlocks). Only warp a hub you've confirmed unlocked.",
+            )
+            prompt = prompt.replace(
+                "The `lakesworld` warp only works after Desert Quest is finished — don't "
+                "attempt it before then, it fails silently.",
+                "Some destination warps are quest-gated and fail silently; only use warps "
+                "you have observed as unlocked.",
+            )
+        target = (
+            "\n\n<held_out_evaluation>\n"
+            f"For this evaluation only, your sole objective is to complete {held_out_quest}. "
+            "Ignore the Core-3 ordering elsewhere in this prompt. No walkthrough has been "
+            "provided; discover and execute the quest through the normal game tools.\n"
+            "</held_out_evaluation>\n"
+        )
+        prompt = prompt.replace("# Kaetram Game Agent", "# Kaetram Game Agent" + target, 1)
     return prompt
 
 
@@ -166,6 +206,9 @@ def run_episode(
     run_dir: Path,
     server_port: str = "",
     personality: str = "",
+    held_out_quest: str = "",
+    no_walkthrough: bool = False,
+    endpoint_env: str = "",
 ) -> dict:
     """Run one warm-session play_qwen.py episode. Returns run metadata.
 
@@ -190,7 +233,6 @@ def run_episode(
 
     cmd = [
         sys.executable, os.path.join(project_dir, "play_qwen.py"),
-        "--endpoint", endpoint,
         "--model", model_api_name,
         "--sandbox", sandbox,
         "--run-dir", str(run_dir),
@@ -199,12 +241,22 @@ def run_episode(
         "--system-prompt", system_prompt_file,
         "--project-dir", project_dir,
     ]
+    if endpoint_env:
+        cmd.extend(["--endpoint-env", endpoint_env])
+    else:
+        cmd.extend(["--endpoint", endpoint])
     if server_port:
         cmd.extend(["--server-port", server_port])
     if personality:
         cmd.extend(["--personality", personality])
 
     env = {**os.environ, "KAETRAM_USERNAME": username, "PYTHONUNBUFFERED": "1"}
+    if no_walkthrough:
+        env["KAETRAM_NO_WALKTHROUGH"] = "1"
+        env["KAETRAM_HELDOUT_QUEST"] = held_out_quest
+    else:
+        env.pop("KAETRAM_NO_WALKTHROUGH", None)
+        env.pop("KAETRAM_HELDOUT_QUEST", None)
 
     start = time.time()
     try:
@@ -563,6 +615,39 @@ def _diff_quest_achievement_metrics(before: dict | None, after: dict | None) -> 
     }
 
 
+def _held_out_quest_metrics(
+    before: dict | None,
+    after: dict | None,
+    registration: HeldOutRegistration | None,
+) -> dict:
+    """Return DB-authoritative progress for the preregistered quest."""
+    if registration is None:
+        return {}
+    before_quests = (before or {}).get("quests") or {}
+    after_quests = (after or {}).get("quests") or {}
+
+    def _entry(quests: dict) -> dict:
+        for key, value in quests.items():
+            if normalize_quest(key) in registration.normalized_aliases:
+                return value
+        return {}
+
+    before_entry = _entry(before_quests)
+    after_entry = _entry(after_quests)
+    before_stage = int(before_entry.get("stage", 0) or 0)
+    after_stage = int(after_entry.get("stage", 0) or 0)
+    return {
+        "held_out_quest": registration.quest_name,
+        "held_out_quest_snapshot_available": after is not None,
+        "held_out_quest_stage_before": before_stage,
+        "held_out_quest_stage_after": after_stage,
+        "held_out_quest_stages_advanced": max(0, after_stage - before_stage),
+        "held_out_quest_completed_delta": int(
+            bool(after_entry.get("finished")) and not bool(before_entry.get("finished"))
+        ),
+    }
+
+
 # Known XP values per mob type (from game_knowledge.md)
 MOB_XP = {
     "Rat": 18, "Batterfly": 50, "Goblin": 72, "Snek": 80,
@@ -707,8 +792,10 @@ def compute_episode_metrics(
 # Scenario success criteria
 # ---------------------------------------------------------------------------
 
-def check_scenario_success(scenario: str, metrics: dict) -> bool:
+def check_scenario_success(scenario: str, metrics: dict, held_out_quest: str = "") -> bool:
     """Check if an episode met the scenario-specific success criteria."""
+    if held_out_quest:
+        return metrics.get("held_out_quest_completed_delta", 0) > 0
     if scenario == "A":
         # Rat Grind: killed at least 5 rats
         return metrics["kills"] >= 5 and metrics["action_counts"].get("attack", 0) >= 5
@@ -739,31 +826,50 @@ def run_model_eval(
     server_port: str,
     resume_from: int = 0,
     personality: str = "",
+    include_game_knowledge: bool = True,
+    held_out_registration: HeldOutRegistration | None = None,
+    sandbox: str = "",
+    model_api_name: str = "",
+    endpoint_ref: str = "",
+    endpoint_env: str = "",
+    duration_seconds_override: int = 0,
+    provenance_meta: dict | None = None,
 ) -> dict:
     """Run all episodes for one model. Returns full results dict."""
     scenario_cfg = SCENARIOS[scenario]
-    duration_minutes = scenario_cfg["duration_minutes"]
-    duration_seconds = duration_minutes * 60
-    sandbox = f"/tmp/kaetram_eval_{model_name}"
+    duration_seconds = duration_seconds_override or scenario_cfg["duration_minutes"] * 60
+    duration_minutes = duration_seconds / 60
+    sandbox = sandbox or f"/tmp/kaetram_eval_{model_name}"
     model_output_dir = output_dir / model_name
     model_output_dir.mkdir(parents=True, exist_ok=True)
 
     # Resolve system prompt once, write to temp file
-    prompt_text = resolve_system_prompt(project_dir, username, personality)
+    held_out_quest = held_out_registration.quest_name if held_out_registration else ""
+    endpoint_ref = endpoint_ref or "direct-endpoint"
+    prompt_text = resolve_system_prompt(
+        project_dir,
+        username,
+        personality,
+        include_game_knowledge=include_game_knowledge,
+        held_out_quest=held_out_quest,
+    )
     prompt_file = model_output_dir / "system_prompt.md"
     prompt_file.write_text(prompt_text)
 
     # Model API name (what the endpoint expects)
-    api_name = "kaetram" if "serve" in endpoint else "kaetram-base"
+    api_name = model_api_name or ("kaetram" if "serve" in endpoint else "kaetram-base")
 
     print(f"\n{'='*60}")
     print(f"Evaluating: {model_name}")
-    print(f"  Endpoint:  {endpoint}")
+    print(f"  Endpoint:  {endpoint_ref}")
     print(f"  Scenario:  {scenario} — {scenario_cfg['name']} ({duration_minutes} min)")
     print(f"  Episodes:  {n_episodes} (resuming from {resume_from})")
     print(f"  Sandbox:   {sandbox}")
     print(f"  Username:  {username}")
     print(f"  Port:      {server_port}")
+    print(f"  Knowledge: {'included' if include_game_knowledge else 'omitted'}")
+    if held_out_quest:
+        print(f"  Held out:  {held_out_quest} ({held_out_registration.path})")
     print(f"{'='*60}\n")
 
     # Ensure game server is running on the required port
@@ -842,6 +948,9 @@ def run_model_eval(
             run_dir=run_dir,
             server_port=server_port,
             personality=personality,
+            held_out_quest=held_out_quest,
+            no_walkthrough=bool(held_out_registration),
+            endpoint_env=endpoint_env,
         )
         total_duration = run_info["duration_seconds"]
         last_returncode = run_info["returncode"]
@@ -849,6 +958,10 @@ def run_model_eval(
         # Aggregate across all session logs play_qwen wrote during this episode.
         session_logs = sorted(run_dir.glob("session_*.log"),
                               key=lambda p: p.stat().st_mtime)
+        raw_session_dir = model_output_dir / f"episode_{ep_num:03d}_raw"
+        raw_session_dir.mkdir(parents=True, exist_ok=False)
+        for source in sorted(path for path in run_dir.iterdir() if path.is_file()):
+            shutil.copy2(source, raw_session_dir / source.name)
         all_log_entries: list[dict] = []
         for log_path in session_logs:
             all_log_entries.extend(parse_log(log_path))
@@ -867,7 +980,13 @@ def run_model_eval(
                 "returncode": last_returncode,
             }
             episodes.append(episode)
-            _save_results(results_path, model_name, endpoint, scenario, episodes)
+            _save_results(
+                results_path, model_name, endpoint_ref, scenario, episodes,
+                include_game_knowledge=include_game_knowledge,
+                held_out_registration=held_out_registration,
+                duration_seconds_budget=duration_seconds,
+                provenance_meta=provenance_meta,
+            )
             print("  Aborting remaining episodes after zero-turn failure to avoid contaminating the run")
             break
 
@@ -879,12 +998,22 @@ def run_model_eval(
 
         db_after = _read_player_db_snapshot_with_retry(username)
         qa_after = _read_quest_achievement_snapshot_with_retry(username)
+        state_snapshot_path = model_output_dir / f"episode_{ep_num:03d}_state.json"
+        state_snapshot_path.write_text(json.dumps({
+            "schema_version": "kaetram.eval-state-boundary.v1",
+            "episode": ep_num,
+            "player_metrics_before": db_before,
+            "player_metrics_after": db_after,
+            "quest_achievement_before": qa_before,
+            "quest_achievement_after": qa_after,
+        }, indent=2, sort_keys=True) + "\n")
         metrics = compute_episode_metrics(
             all_log_entries,
             db_before=db_before, db_after=db_after,
             qa_before=qa_before, qa_after=qa_after,
         )
-        success = check_scenario_success(scenario, metrics)
+        metrics.update(_held_out_quest_metrics(qa_before, qa_after, held_out_registration))
+        success = check_scenario_success(scenario, metrics, held_out_quest)
 
         episode = {
             "episode": ep_num,
@@ -913,7 +1042,13 @@ def run_model_eval(
               f"({total_duration:.0f}s)")
 
         # 4. Save intermediate results (crash-safe)
-        _save_results(results_path, model_name, endpoint, scenario, episodes)
+        _save_results(
+            results_path, model_name, endpoint_ref, scenario, episodes,
+            include_game_knowledge=include_game_knowledge,
+            held_out_registration=held_out_registration,
+            duration_seconds_budget=duration_seconds,
+            provenance_meta=provenance_meta,
+        )
 
     # Clean up game server if we started one
     if _game_server_proc and _game_server_proc.poll() is None:
@@ -925,12 +1060,21 @@ def run_model_eval(
             _game_server_proc.kill()
 
     # Final save
-    results = _save_results(results_path, model_name, endpoint, scenario, episodes)
+    results = _save_results(
+        results_path, model_name, endpoint_ref, scenario, episodes,
+        include_game_knowledge=include_game_knowledge,
+        held_out_registration=held_out_registration,
+        duration_seconds_budget=duration_seconds,
+        provenance_meta=provenance_meta,
+    )
     return results
 
 
 def _save_results(path: Path, model_name: str, endpoint: str, scenario: str,
-                  episodes: list[dict]) -> dict:
+                  episodes: list[dict], *, include_game_knowledge: bool = True,
+                  held_out_registration: HeldOutRegistration | None = None,
+                  duration_seconds_budget: int | None = None,
+                  provenance_meta: dict | None = None) -> dict:
     """Save results JSON with metadata and aggregated metrics."""
     # Aggregate per-metric arrays for eval_compare.py
     ok_episodes = [e for e in episodes if e.get("status") == "ok"]
@@ -968,6 +1112,15 @@ def _save_results(path: Path, model_name: str, endpoint: str, scenario: str,
             "stuck_resets": [e.get("stuck_resets", 0) for e in ok_episodes],
             "success_rate": [1 if e.get("success", False) else 0 for e in ok_episodes],
         }
+        if held_out_registration is not None:
+            metrics.update({
+                "held_out_quest_completion_rate": [
+                    e.get("held_out_quest_completed_delta", 0) for e in ok_episodes
+                ],
+                "held_out_quest_stages_advanced": [
+                    e.get("held_out_quest_stages_advanced", 0) for e in ok_episodes
+                ],
+            })
 
     git_sha = ""
     try:
@@ -978,17 +1131,24 @@ def _save_results(path: Path, model_name: str, endpoint: str, scenario: str,
     except Exception:
         pass
 
+    budget_seconds = duration_seconds_budget or SCENARIOS[scenario]["duration_minutes"] * 60
     results = {
         "meta": {
             "model": model_name,
             "endpoint": endpoint,
             "scenario": scenario,
             "scenario_name": SCENARIOS[scenario]["name"],
-            "max_turns": SCENARIOS[scenario]["max_turns"],
+            "duration_minutes": budget_seconds / 60,
+            "duration_seconds_budget": budget_seconds,
+            "include_game_knowledge": include_game_knowledge,
+            "held_out_quest": held_out_registration.quest_name if held_out_registration else "",
+            "held_out_registration": str(held_out_registration.path) if held_out_registration else "",
+            "tool_schema_source": os.environ.get("KAETRAM_TOOL_SCHEMA_SOURCE", "runtime-default"),
             "total_episodes": len(episodes),
             "ok_episodes": len(ok_episodes),
             "timestamp": datetime.now().isoformat(),
             "git_sha": git_sha,
+            **(provenance_meta or {}),
         },
         "episodes": episodes,
         "metrics": metrics,
@@ -1021,6 +1181,10 @@ Examples:
              "Default: DEFAULT_MODELS (see top of file).",
     )
     parser.add_argument(
+        "--models-env", nargs="*",
+        help="Model definitions as name=ENDPOINT_ENV pairs; keeps endpoint URLs out of argv/logs",
+    )
+    parser.add_argument(
         "--episodes", type=int, default=50,
         help="Episodes per model (default: 50 — paper minimum for Bonferroni-corrected stat-sig over 3 models × 5 metrics)",
     )
@@ -1028,6 +1192,16 @@ Examples:
         "--scenario", default="D", choices=list(SCENARIOS.keys()),
         help="Evaluation scenario (default: D = Open Play)",
     )
+    parser.add_argument(
+        "--duration-seconds", type=int, default=0,
+        help="Explicit wall-clock budget per episode; required by frozen long-run protocols",
+    )
+    parser.add_argument("--protocol-id", default="")
+    parser.add_argument("--experiment-manifest-sha256", default="")
+    parser.add_argument("--endpoint-attestation-sha256", default="")
+    parser.add_argument("--checkpoint-sha256", default="")
+    parser.add_argument("--tokenizer-sha256", default="")
+    parser.add_argument("--render-contract-sha256", default="")
     parser.add_argument(
         "--output-dir", type=Path, default=Path("dataset/eval"),
         help="Output directory (default: dataset/eval/)",
@@ -1058,6 +1232,26 @@ Examples:
         help="Inject a personality block into the system prompt (default: none)",
     )
     parser.add_argument(
+        "--omit-game-knowledge", action="store_true",
+        help="Leave the prompts/game_knowledge.md block empty (no-walkthrough eval)",
+    )
+    parser.add_argument(
+        "--held-out-quest", default="",
+        help="Evaluation-only quest; must match the locked preregistration and requires --omit-game-knowledge",
+    )
+    parser.add_argument(
+        "--held-out-registration", type=Path, default=DEFAULT_REGISTRATION,
+        help=f"Locked held-out quest registration (default: {DEFAULT_REGISTRATION})",
+    )
+    parser.add_argument(
+        "--sandbox", default="",
+        help="Explicit isolated sandbox path (default: /tmp/kaetram_eval_<model>)",
+    )
+    parser.add_argument(
+        "--model-api-name", default="",
+        help="Model identifier sent to the OpenAI-compatible endpoint",
+    )
+    parser.add_argument(
         "--watchdog", action="store_true",
         help="Launch a background watchdog for endpoint/process/progress health",
     )
@@ -1075,13 +1269,63 @@ Examples:
     )
     args = parser.parse_args()
 
+    if args.duration_seconds < 0:
+        parser.error("--duration-seconds cannot be negative")
+    provenance_values = {
+        "experiment_manifest_sha256": args.experiment_manifest_sha256,
+        "endpoint_attestation_sha256": args.endpoint_attestation_sha256,
+        "checkpoint_sha256": args.checkpoint_sha256,
+        "tokenizer_sha256": args.tokenizer_sha256,
+        "render_contract_sha256": args.render_contract_sha256,
+    }
+    supplied = [bool(value) for value in provenance_values.values()]
+    if any(supplied) and not all(supplied):
+        parser.error("factorial provenance SHA-256 arguments must be supplied together")
+    if args.protocol_id and not args.duration_seconds:
+        parser.error("--protocol-id requires --duration-seconds")
+    for label, value in provenance_values.items():
+        if value and not re.fullmatch(r"[0-9a-f]{64}", value):
+            parser.error(f"--{label.replace('_', '-')} must be a lowercase SHA-256")
+    provenance_meta = (
+        {"protocol_id": args.protocol_id, **provenance_values}
+        if args.protocol_id or any(supplied)
+        else None
+    )
+
+    held_out_registration = None
+    if args.held_out_quest:
+        if not args.omit_game_knowledge:
+            parser.error("--held-out-quest requires --omit-game-knowledge")
+        try:
+            held_out_registration = validate_eval_selection(
+                args.held_out_quest,
+                args.held_out_registration,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+
     # Parse model definitions
     models = {}
-    if args.models:
+    if args.models and args.models_env:
+        parser.error("use only one of --models or --models-env")
+    if args.models_env:
+        for m in args.models_env:
+            if "=" not in m:
+                parser.error(f"model environment definition must be name=ENV_VAR, got: {m}")
+            name, endpoint_env = m.split("=", 1)
+            endpoint = os.environ.get(endpoint_env, "")
+            if not endpoint:
+                parser.error(f"endpoint environment variable is empty: {endpoint_env}")
+            models[name] = {
+                "endpoint": endpoint,
+                "endpoint_env": endpoint_env,
+                "endpoint_ref": f"env:{endpoint_env}",
+            }
+    elif args.models:
         for m in args.models:
             if "=" in m:
                 name, endpoint = m.split("=", 1)
-                models[name] = {"endpoint": endpoint}
+                models[name] = {"endpoint": endpoint, "endpoint_ref": "direct-endpoint"}
             else:
                 print(f"Error: model must be name=endpoint, got: {m}")
                 sys.exit(1)
@@ -1106,6 +1350,9 @@ Examples:
     print(f"  Models:   {', '.join(models.keys())}")
     print(f"  Parallel: {args.parallel}")
     print(f"  Output:   {args.output_dir}")
+    print(f"  Knowledge: {'omitted' if args.omit_game_knowledge else 'included'}")
+    if held_out_registration:
+        print(f"  Held out: {held_out_registration.quest_name}")
 
     # Check MongoDB
     try:
@@ -1145,7 +1392,6 @@ Examples:
             log_f = open(log_path, "w")
             cmd = [
                 sys.executable, __file__,
-                "--models", f"{model_name}={model_cfg['endpoint']}",
                 "--episodes", str(args.episodes),
                 "--scenario", args.scenario,
                 "--output-dir", str(args.output_dir),
@@ -1153,10 +1399,32 @@ Examples:
                 "--username", model_cfg["username"],
                 "--server-port", model_cfg["server_port"],
             ]
+            if args.duration_seconds:
+                cmd.extend(["--duration-seconds", str(args.duration_seconds)])
+            if args.protocol_id:
+                cmd.extend(["--protocol-id", args.protocol_id])
+            for key, value in provenance_values.items():
+                if value:
+                    cmd.extend([f"--{key.replace('_', '-')}", value])
+            if model_cfg.get("endpoint_env"):
+                cmd.extend(["--models-env", f"{model_name}={model_cfg['endpoint_env']}"])
+            else:
+                cmd.extend(["--models", f"{model_name}={model_cfg['endpoint']}"])
             if args.resume:
                 cmd.extend(["--resume", str(args.resume)])
             if args.personality:
                 cmd.extend(["--personality", args.personality])
+            if args.omit_game_knowledge:
+                cmd.append("--omit-game-knowledge")
+            if held_out_registration:
+                cmd.extend([
+                    "--held-out-quest", held_out_registration.quest_name,
+                    "--held-out-registration", str(held_out_registration.path),
+                ])
+            if args.sandbox:
+                cmd.extend(["--sandbox", args.sandbox])
+            if args.model_api_name:
+                cmd.extend(["--model-api-name", args.model_api_name])
             print(f"  {model_name}: port={model_cfg['server_port']} user={model_cfg['username']} personality={args.personality or 'none'} log={log_path}")
             procs[model_name] = subprocess.Popen(cmd, stdout=log_f, stderr=subprocess.STDOUT)
             log_files[model_name] = log_f
@@ -1209,6 +1477,14 @@ Examples:
                 server_port=model_cfg.get("server_port", args.server_port),
                 resume_from=args.resume,
                 personality=args.personality,
+                include_game_knowledge=not args.omit_game_knowledge,
+                held_out_registration=held_out_registration,
+                sandbox=args.sandbox,
+                model_api_name=args.model_api_name,
+                endpoint_ref=model_cfg.get("endpoint_ref", "direct-endpoint"),
+                endpoint_env=model_cfg.get("endpoint_env", ""),
+                duration_seconds_override=args.duration_seconds,
+                provenance_meta=provenance_meta,
             )
             all_results[model_name] = results
 
