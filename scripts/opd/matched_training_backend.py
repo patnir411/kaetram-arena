@@ -40,6 +40,7 @@ BACKEND_RESULT_SCHEMA = "kaetram.matched-training-result.v2"
 OPD_TRAINER = "finetune/train_opd_2b.py"
 SFT_ADAPTER = "scripts/opd/corrected_interface_sft.py"
 SFT_ADAPTER_PATH = Path(__file__).resolve().parent / "corrected_interface_sft.py"
+SCORE_STYLE_ADAPTER = "finetune/score_style_first_error.py"
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -385,13 +386,25 @@ def _validate_semantics(
     elif arm_id == "score_first_error_prefixes":
         required = {
             "mode", "student_trajectory_id", "first_error_index",
-            "first_error_evidence_sha256", "prefix_verifier_sha256",
+            "verified_prefix_token_count", "verified_prefix_sha256",
+            "correction_target_sha256", "first_error_evidence_sha256",
+            "prefix_verifier_sha256",
         }
-        digest_fields = ("first_error_evidence_sha256", "prefix_verifier_sha256")
+        digest_fields = (
+            "verified_prefix_sha256", "correction_target_sha256",
+            "first_error_evidence_sha256", "prefix_verifier_sha256",
+        )
         if mode != "verified_first_model_visible_error_prefix":
             raise ProtocolError(f"record {record_id} is not a verified first-error prefix")
+        if not isinstance(semantics.get("student_trajectory_id"), str) \
+                or not semantics["student_trajectory_id"]:
+            raise ProtocolError(f"record {record_id}.student_trajectory_id must be non-empty")
         _nonnegative_int(
             semantics.get("first_error_index"), label=f"record {record_id}.first_error_index"
+        )
+        _positive_int(
+            semantics.get("verified_prefix_token_count"),
+            label=f"record {record_id}.verified_prefix_token_count",
         )
     elif arm_id == "snapshot_minimal_history":
         required = {
@@ -518,6 +531,35 @@ def _validate_source_record(
     if normalized_usage["action_tokens"] != action_tokens:
         raise ProtocolError(f"source record {record_id} action-token accounting mismatch")
     semantics = _validate_semantics(arm, record, record_id=record_id)
+    if arm["arm_id"] == "score_first_error_prefixes":
+        prefix_count = semantics["verified_prefix_token_count"]
+        input_ids = supervision["input_ids"]
+        labels = supervision["labels"]
+        if prefix_count >= len(input_ids):
+            raise ProtocolError(
+                f"source record {record_id} verified prefix leaves no correction target"
+            )
+        if any(label != -100 for label in labels[:prefix_count]):
+            raise ProtocolError(
+                f"source record {record_id} supervises tokens inside the verified prefix"
+            )
+        correction = labels[prefix_count:]
+        if not correction or any(label < 0 for label in correction):
+            raise ProtocolError(
+                f"source record {record_id} correction target must be contiguous after the prefix"
+            )
+        if input_ids[prefix_count:] != correction:
+            raise ProtocolError(
+                f"source record {record_id} correction labels must match teacher-forced token IDs"
+            )
+        if semantics["verified_prefix_sha256"] != _sha256_json(input_ids[:prefix_count]):
+            raise ProtocolError(
+                f"source record {record_id} verified-prefix token digest mismatch"
+            )
+        if semantics["correction_target_sha256"] != _sha256_json(correction):
+            raise ProtocolError(
+                f"source record {record_id} correction-target token digest mismatch"
+            )
     source_record_sha = _sha256_json(record)
     return {
         "schema_version": NORMALIZED_SCHEMA,
@@ -659,9 +701,13 @@ def _trainer_route(arm: dict[str, Any]) -> dict[str, Any]:
         }
     if arm["objective"] == "score":
         return {
-            "entrypoint": OPD_TRAINER,
-            "compatibility": "requires_score_first_error_objective_extension",
-            "reason": "existing trainers do not implement the SCoRe first-error-prefix objective",
+            "entrypoint": SCORE_STYLE_ADAPTER,
+            "compatibility": "score_style_two_stage_adapter_stage2_inputs_required_not_executed",
+            "reason": (
+                "the adapter prepares correction SFT and validates the short-horizon target-reward "
+                "loss contract, but fails closed until stage-1 checkpoint, stage-2 rollout/reward "
+                "evidence, and per-stage budgets are registered"
+            ),
         }
     if arm_id == "guided_opd":
         return {

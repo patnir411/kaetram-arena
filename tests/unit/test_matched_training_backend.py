@@ -234,6 +234,9 @@ def test_score_semantics_require_verified_first_model_visible_error() -> None:
             "mode": "verified_first_model_visible_error_prefix",
             "student_trajectory_id": "student-1",
             "first_error_index": 4,
+            "verified_prefix_token_count": 2,
+            "verified_prefix_sha256": "a" * 64,
+            "correction_target_sha256": "b" * 64,
             "first_error_evidence_sha256": "d" * 64,
             "prefix_verifier_sha256": "e" * 64,
         },
@@ -242,6 +245,76 @@ def test_score_semantics_require_verified_first_model_visible_error() -> None:
     record["semantics"]["mode"] = "unverified_error_prefix"
     with pytest.raises(mt.ProtocolError, match="verified first-error prefix"):
         backend._validate_semantics(arm, record, record_id="score-1")
+
+
+def test_score_bundle_binds_verified_token_boundary_and_routes_adapter(
+    tmp_path, monkeypatch
+) -> None:
+    cell_path = _natural_fixture(tmp_path, monkeypatch)
+    cell = json.loads(cell_path.read_text())
+    registry_path = Path(cell["shared_contract"]["artifact_registry"]["path"])
+    registry = json.loads(registry_path.read_text())
+    artifact = registry["artifacts"]["natural"]
+    source_path = Path(artifact["payload"]["uri"].removeprefix("file:"))
+    record = json.loads(source_path.read_text())
+    record["state"]["kind"] = "verified_first_error_prefix_state"
+    record["state"]["constructor"] = "restore_verified_pre_error_state"
+    record["history"]["kind"] = "verified_pre_error_prefix"
+    record["history"]["source"] = "same_verified_student_trajectory"
+    record["supervision"]["advantages"] = None
+    record["supervision"]["behavior_logprobs"] = None
+    record["semantics"] = {
+        "mode": "verified_first_model_visible_error_prefix",
+        "student_trajectory_id": "student-1",
+        "first_error_index": 1,
+        "verified_prefix_token_count": 1,
+        "verified_prefix_sha256": _sha_json([10]),
+        "correction_target_sha256": _sha_json([11, 12]),
+        "first_error_evidence_sha256": "d" * 64,
+        "prefix_verifier_sha256": "e" * 64,
+    }
+    source_bytes = (json.dumps(record) + "\n").encode()
+    source_path.write_bytes(source_bytes)
+    artifact["kind"] = "verified_first_error_prefixes"
+    artifact["payload"]["sha256"] = _sha_bytes(source_bytes)
+    artifact["first_error_evidence"] = {
+        "status": "pass",
+        "metric": "first_model_visible_student_error",
+        "evidence_sha256": "d" * 64,
+        "prefix_verifier_sha256": "e" * 64,
+    }
+    registry_bytes = (json.dumps(registry, indent=2) + "\n").encode()
+    registry_path.write_bytes(registry_bytes)
+    cell["arm"] = {
+        "arm_id": "score_first_error_prefixes",
+        "role": "mechanism_or_baseline",
+        "objective": "score",
+        "training_artifact_id": "natural",
+        "recovery": "on",
+        "state_source": {
+            "kind": "verified_first_error_prefix_state",
+            "constructor": "restore_verified_pre_error_state",
+        },
+        "history_constructor": {
+            "kind": "verified_pre_error_prefix",
+            "source": "same_verified_student_trajectory",
+        },
+    }
+    cell["shared_contract"]["artifact_registry"]["sha256"] = _sha_bytes(registry_bytes)
+    cell_path.write_text(json.dumps(cell, indent=2) + "\n")
+
+    plan, normalized = backend.build_backend_plan(cell_path)
+    assert plan["trainer_route"] == {
+        "entrypoint": backend.SCORE_STYLE_ADAPTER,
+        "compatibility": "score_style_two_stage_adapter_stage2_inputs_required_not_executed",
+        "reason": (
+            "the adapter prepares correction SFT and validates the short-horizon target-reward "
+            "loss contract, but fails closed until stage-1 checkpoint, stage-2 rollout/reward "
+            "evidence, and per-stage budgets are registered"
+        ),
+    }
+    assert normalized[0]["semantics"]["verified_prefix_token_count"] == 1
+    assert normalized[0]["labels"] == [-100, 11, 12]
 
 
 def test_artifact_root_rejects_traversal_and_symlinks(tmp_path) -> None:

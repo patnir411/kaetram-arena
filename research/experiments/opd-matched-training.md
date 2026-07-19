@@ -27,14 +27,14 @@ mechanism arms.
 | Mechanism | Visitation only | Visitation-only persistent-state pool | Matched visible-field reconstruction |
 | Mechanism | Teacher advantage only | Teacher-advantage-only persistent-state pool | Matched visible-field reconstruction |
 | Baseline | Corrected-interface SFT | Corrected-interface teacher trajectory replay | History rendered from that corrected trajectory |
-| Baseline | SCoRe first-error prefixes | Verified state immediately before the first model-visible student error | Verified prefix from the same student trajectory |
+| Baseline | SCoRe-style first-error prefixes | Verified state immediately before the first model-visible student error | Verified prefix from the same student trajectory |
 
 Visitation-only and teacher-advantage-only isolate the two proposed selection
 mechanisms. Corrected-interface SFT controls for learning from corrected teacher
-behavior without OPD. SCoRe requires hash-backed evidence that every prefix ends
-at the first model-visible student error. Random-valid and progress-matched arms
-test whether any legal initialization, or progress alone, explains the
-targeted-arm effect.
+behavior without OPD. The SCoRe-style baseline requires hash-backed evidence
+that every prefix ends at the first model-visible student error. Random-valid
+and progress-matched arms test whether any legal initialization, or progress
+alone, explains the targeted-arm effect.
 
 ## Separate state-by-history ablation
 
@@ -104,10 +104,15 @@ blocker. It may be inspected and preregistered here, but it cannot execute until
 the reviewed live mixed-rollout collector and actor-conditional objective land;
 resolving artifact placeholders is not sufficient to bypass that gate.
 
-SCoRe accepts only verified first-error-prefix artifacts. Its evidence record
-must identify the first model-visible student error and hash both the evidence
-and prefix verifier. All four history-ablation artifacts additionally require
-passed legal-reachability evidence.
+The SCoRe-style arm accepts only verified first-error-prefix artifacts. Its
+evidence record must identify the first model-visible student error and hash
+both the evidence and prefix verifier. Its objective adapter also binds the
+precise prefix-token boundary and correction target. This is not labeled a
+faithful reproduction of published SCoRe: the adapter prepares correction SFT,
+but the second-stage short-horizon target-reward optimization remains blocked
+until its checkpoint, rollouts, reward evidence, and disjoint stage budgets are
+registered. All four history-ablation artifacts additionally require passed
+legal-reachability evidence.
 
 ## Safe preflight
 
@@ -144,9 +149,12 @@ documented in
 and normalizes immutable arm bundles but does not pretend the existing
 single-arm Modal trainer implements every registered objective. The separate
 [`corrected-interface SFT adapter`](opd-corrected-interface-sft.md) now emits a
-pretokenized, render-identity-bound bundle without invoking a trainer. Actual
-Guided sampling, SCoRe, and reviewed accelerator execution remain explicit
-boundaries; the direct-token SFT route is now `executable_pending_compute`.
+pretokenized, render-identity-bound bundle and a direct-token trainer without
+invoking either during preparation. The SCoRe-style adapter prepares correction
+SFT and validates its short-horizon target-reward loss interface, but fails
+closed before Stage 2. Actual Guided sampling, SCoRe-style Stage 2, and reviewed
+accelerator execution remain explicit boundaries; the direct-token SFT route is
+`executable_pending_compute`.
 
 ## Current blockers
 

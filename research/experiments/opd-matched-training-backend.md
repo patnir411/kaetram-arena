@@ -30,6 +30,12 @@ Each JSONL record uses `kaetram.arm-source-record.v1` and carries:
 - arm-specific evidence (snapshot/reachability, matched progress, teacher
   success, corrected-interface trajectory, or verified first-error prefix).
 
+SCoRe-style source records additionally bind the exact token boundary to the
+verified prefix and correction target. The prefix token count must leave a
+non-empty, contiguous correction target; prefix labels must be masked; and
+SHA-256 digests of both token regions must match the record semantics. An
+opaque first-error evidence digest alone is not treated as a token boundary.
+
 The adapter rechecks the held-out exclusion registration, scans model-visible
 state/history for held-out aliases, rejects duplicate records, and requires the
 aggregate source bundle to exactly fill all three registered budgets.
@@ -46,13 +52,18 @@ is deterministic and recorded in the normalized output.
 
 The current OPD collator can consume ordinary normalized OPD arrays, but this
 adapter does not invoke it. Guided-OPD still requires a sampling extension,
-and SCoRe requires a first-error objective extension. Corrected-interface SFT
-now has a separate
+while Guided-OPD still requires a sampling/objective extension.
+Corrected-interface SFT now has a separate
 [`corrected-interface pretokenized adapter`](opd-corrected-interface-sft.md)
 that consumes these normalized token arrays without re-rendering conversations;
 its reviewed trainer path initializes the same fresh bf16 LoRA contract as all
 other arms, but this preparation step still does not invoke accelerator
-training. The backend plan records these compatibility states instead of
+training. The SCoRe-style
+route now points to `finetune/score_style_first_error.py`. That adapter can
+prepare correction-SFT records and validate both loss interfaces, but it fails
+closed before Stage 2 until a Stage-1 checkpoint, post-Stage-1 short-horizon
+rollouts with target-reward evidence, and a reviewed per-stage budget split are
+registered. The backend plan records these compatibility states instead of
 emitting a checkpoint claim.
 
 ## Verification
