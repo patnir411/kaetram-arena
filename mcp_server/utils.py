@@ -281,6 +281,39 @@ def build_quest_query_response(matched_name: str, quest: dict) -> dict:
     return ordered
 
 
+def apply_no_walkthrough_policy(response: dict, matched_name: str) -> dict:
+    """Redact static guidance for the eval-only held-out quest condition.
+
+    This pure helper is deliberately scoped to one exact quest named by the
+    eval harness. Other quests and normal runs retain the full response. Live
+    accepted/stage/finished state and gate status remain visible; walkthrough,
+    next-action, NPC, item, recipe, boss, reward, and station hints do not.
+    """
+    enabled = os.environ.get("KAETRAM_NO_WALKTHROUGH", "").lower() in {"1", "true", "yes"}
+    target = os.environ.get("KAETRAM_HELDOUT_QUEST", "")
+    if not enabled or not target:
+        return response
+    if normalize_quest_name(matched_name) != normalize_quest_name(target):
+        return response
+
+    redacted = {
+        "name": response.get("name", matched_name),
+        "matched_name": response.get("matched_name", matched_name),
+        "off_limits": response.get("off_limits", False),
+        "no_walkthrough": True,
+    }
+    current = response.get("current_step")
+    if isinstance(current, dict):
+        redacted["current_step"] = {
+            key: current[key]
+            for key in ("accepted", "stage", "finished")
+            if key in current
+        }
+    if "live_gate_status" in response:
+        redacted["live_gate_status"] = response["live_gate_status"]
+    return redacted
+
+
 # ── Shop UI helpers ──────────────────────────────────────────────────────────
 
 def compact_shop_ui(ui_state: dict | None) -> dict:

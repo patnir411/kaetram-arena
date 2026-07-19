@@ -74,13 +74,29 @@ def test_no_record_exceeds_max_seq_len_under_any_variant():
     except Exception as e:
         pytest.skip(f"tokenizer fetch failed ({e.__class__.__name__}): {e}")
 
-    from render import patch_qwen_chat_template, render_record  # type: ignore
+    from render import (  # type: ignore
+        patch_qwen_chat_template,
+        render_record,
+        resolve_render_contract,
+    )
 
     patch_qwen_chat_template(tok)
 
     metadata = json.loads(METADATA.read_text())
     system_prompt = metadata["system_prompt"]
     personality_suffixes = metadata.get("personality_suffixes", {})
+    contract = resolve_render_contract(metadata)
+
+    def render(r, rng=None):
+        return render_record(
+            r,
+            system_prompt,
+            personality_suffixes,
+            tok,
+            rng=rng,
+            render_mode=contract["tool_render_mode"],
+            tools=contract["tools"],
+        )
 
     sample_n = int(os.environ.get("TRUNC_VARIANT_SAMPLE_N", "500"))
 
@@ -93,7 +109,7 @@ def test_no_record_exceeds_max_seq_len_under_any_variant():
     # path), pick top-N longest as the sample for variants 1-3.
     train_sized: list[tuple[int, int]] = []  # (idx, n_tokens_v0)
     for i, r in enumerate(train_records):
-        text = render_record(r, system_prompt, personality_suffixes, tok, rng=None)
+        text = render(r, rng=None)
         n = len(tok.encode(text, add_special_tokens=False))
         train_sized.append((i, n))
         if n >= MAX_SEQ_LEN:
@@ -102,7 +118,7 @@ def test_no_record_exceeds_max_seq_len_under_any_variant():
     # Validation: full sweep at variant 0 (validation is rendered without
     # paraphrase, so this is the full picture for val).
     for i, r in enumerate(val_records):
-        text = render_record(r, system_prompt, personality_suffixes, tok, rng=None)
+        text = render(r, rng=None)
         n = len(tok.encode(text, add_special_tokens=False))
         if n >= MAX_SEQ_LEN:
             over.append(("val", i, 0, n))
@@ -130,9 +146,7 @@ def test_no_record_exceeds_max_seq_len_under_any_variant():
         rng = _ForcedRng(variant_idx)
         for i in sample_indices:
             r = train_records[i]
-            text = render_record(
-                r, system_prompt, personality_suffixes, tok, rng=rng
-            )
+            text = render(r, rng=rng)
             n = len(tok.encode(text, add_special_tokens=False))
             if n >= MAX_SEQ_LEN:
                 over.append(("train", i, variant_idx, n))

@@ -31,7 +31,15 @@ Issue refs for the next maintainer:
 from __future__ import annotations
 
 import random
+import json
+import re
 from typing import Optional
+
+NATIVE_TOOLS_V1 = "native_tools_v1"
+LEGACY_MARKDOWN_R10 = "legacy_markdown_r10"
+VALID_TOOL_RENDER_MODES = frozenset({NATIVE_TOOLS_V1, LEGACY_MARKDOWN_R10})
+RENDER_CONTRACT_FILENAME = "kaetram_render_contract.json"
+HISTORICAL_R10_EXPERIMENT = "kaetram-qwen3.5-9b-r10"
 
 
 # ---------------------------------------------------------------------------
@@ -163,21 +171,173 @@ def build_system_prompt(
 # Render
 # ---------------------------------------------------------------------------
 
+def adapt_messages_for_qwen_template(messages: list[dict]) -> list[dict]:
+    """Return template-safe messages without mutating caller-owned input.
+
+    OpenAI histories encode tool arguments as JSON strings, while Qwen's
+    template iterates a mapping. Native-tool rendering also makes any inline
+    ``<tool_call>`` copy redundant, so remove it when structured calls exist.
+    """
+    out: list[dict] = []
+    for message in messages:
+        new_message = dict(message)
+        calls = new_message.get("tool_calls") or []
+        if calls:
+            fixed_calls = []
+            for call in calls:
+                function = dict(call.get("function") or {})
+                arguments = function.get("arguments")
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments) if arguments.strip() else {}
+                    except json.JSONDecodeError:
+                        arguments = {}
+                function["arguments"] = arguments or {}
+                fixed_calls.append({**call, "function": function})
+            new_message["tool_calls"] = fixed_calls
+            content = new_message.get("content") or ""
+            if isinstance(content, str) and "<tool_call>" in content:
+                new_message["content"] = re.split(
+                    r"<tool_call>", content, maxsplit=1
+                )[0].rstrip()
+        out.append(new_message)
+    return out
+
+
+def render_messages(
+    tokenizer,
+    messages: list[dict],
+    *,
+    render_mode: str,
+    tools=None,
+    add_generation_prompt: bool,
+) -> str:
+    """Pure shared train/serve renderer for a versioned render contract."""
+    if render_mode not in VALID_TOOL_RENDER_MODES:
+        raise ValueError(
+            f"unknown tool render mode {render_mode!r}; "
+            f"expected one of {sorted(VALID_TOOL_RENDER_MODES)}"
+        )
+
+    kwargs = {
+        "tokenize": False,
+        "add_generation_prompt": add_generation_prompt,
+    }
+    if render_mode == NATIVE_TOOLS_V1:
+        from tool_surface import validate_tool_definitions
+
+        if not tools:
+            raise ValueError("native_tools_v1 requires the full frozen tool schema")
+        validate_tool_definitions(tools)
+        kwargs["tools"] = tools
+        rendered_messages = adapt_messages_for_qwen_template(messages)
+    elif tools is not None:
+        raise ValueError("legacy_markdown_r10 must omit tools= entirely")
+    else:
+        # Preserve the historical r10 bytes exactly. Its score endpoint opts
+        # into the old adaptation separately; training and chat did not.
+        rendered_messages = messages
+
+    return tokenizer.apply_chat_template(rendered_messages, **kwargs)
+
+
+def resolve_render_contract(metadata: dict) -> dict:
+    """Validate dataset/checkpoint metadata and return a serving contract.
+
+    Only the historical r10 dataset may omit a contract. That one deliberate
+    fallback prevents old checkpoints from silently switching prompt format.
+    Every newly built artifact must carry a complete native-tools contract.
+    """
+    render_mode = metadata.get("tool_render_mode")
+    if render_mode is None:
+        if metadata.get("version") == "r10":
+            return {
+                "tool_render_mode": LEGACY_MARKDOWN_R10,
+                "tool_schema_version": None,
+                "tool_schema_sha256": None,
+                "tools": None,
+            }
+        raise ValueError("artifact is missing required tool_render_mode")
+
+    if render_mode == LEGACY_MARKDOWN_R10:
+        return {
+            "tool_render_mode": render_mode,
+            "tool_schema_version": None,
+            "tool_schema_sha256": None,
+            "tools": None,
+        }
+    if render_mode != NATIVE_TOOLS_V1:
+        raise ValueError(f"unsupported tool_render_mode: {render_mode!r}")
+
+    from tool_surface import (
+        MODEL_VISIBLE_TOOL_SCHEMA_SHA256,
+        TOOL_SCHEMA_VERSION,
+        validate_tool_definitions,
+    )
+
+    tools = metadata.get("tools")
+    validate_tool_definitions(tools)
+    if metadata.get("tool_schema_version") != TOOL_SCHEMA_VERSION:
+        raise ValueError(
+            "tool schema version mismatch: "
+            f"expected={TOOL_SCHEMA_VERSION}, actual={metadata.get('tool_schema_version')}"
+        )
+    if metadata.get("tool_schema_sha256") != MODEL_VISIBLE_TOOL_SCHEMA_SHA256:
+        raise ValueError(
+            "tool schema hash mismatch: "
+            f"expected={MODEL_VISIBLE_TOOL_SCHEMA_SHA256}, "
+            f"actual={metadata.get('tool_schema_sha256')}"
+        )
+    return {
+        "tool_render_mode": render_mode,
+        "tool_schema_version": TOOL_SCHEMA_VERSION,
+        "tool_schema_sha256": MODEL_VISIBLE_TOOL_SCHEMA_SHA256,
+        "tools": tools,
+    }
+
+
+def validate_request_tools(render_contract: dict, request_tools) -> None:
+    """Reject a native request whose schema differs from the checkpoint."""
+    if (
+        render_contract["tool_render_mode"] == NATIVE_TOOLS_V1
+        and request_tools is not None
+    ):
+        from tool_surface import validate_tool_definitions
+
+        validate_tool_definitions(request_tools)
+
+
+def resolve_checkpoint_render_contract(
+    experiment_name: str,
+    manifest_metadata: Optional[dict],
+) -> dict:
+    """Resolve serving metadata, with one named pre-manifest exception."""
+    if manifest_metadata is not None:
+        return resolve_render_contract(manifest_metadata)
+    if experiment_name == HISTORICAL_R10_EXPERIMENT:
+        return resolve_render_contract({"version": "r10"})
+    raise ValueError(
+        f"{experiment_name} is missing {RENDER_CONTRACT_FILENAME}; "
+        "refusing to guess a model-visible prompt format"
+    )
+
 def render_record(
     record: dict,
     base_system_prompt: str,
     personality_suffixes: dict,
     tokenizer,
     rng: Optional[random.Random] = None,
+    *,
+    render_mode: str = LEGACY_MARKDOWN_R10,
+    tools=None,
 ) -> str:
     """Render a record to a tokenizer-ready string, matching the trainer's
     render path exactly.
 
     System prompt is built per-record (with personality substitution and
-    optional intro paraphrase) and prepended. No `tools=` kwarg — the system
-    prompt already embeds the tool markdown table from `prompts/system.md`,
-    and inference doesn't pass `tools=` either, so passing it here would
-    create a second tool block.
+    optional intro paraphrase) and prepended. ``render_mode`` is explicit in
+    production metadata; the default exists only to preserve historical r10
+    callers and tests.
 
     Caller MUST invoke `patch_qwen_chat_template(tokenizer)` before any
     render. This function does not check; failing to patch causes silent
@@ -190,8 +350,10 @@ def render_record(
         rng,
     )
     messages = [{"role": "system", "content": sys_content}] + record["messages"]
-    return tokenizer.apply_chat_template(
+    return render_messages(
+        tokenizer,
         messages,
-        tokenize=False,
+        render_mode=render_mode,
+        tools=tools,
         add_generation_prompt=False,
     )

@@ -1,0 +1,111 @@
+{
+  "schema_version": 2,
+  "experiment_id": "opd-2b-core3-weights-x-recovery-v1",
+  "protocol": {
+    "protocol_id": "core3_canonical_unseeded_6h_v1",
+    "world_initialization": "canonical_unseeded",
+    "duration_seconds": 21600,
+    "source_git_commit": "UNRESOLVED_FOR_REVIEWED_LIVE_MANIFEST",
+    "prompt_inputs": [
+      {
+        "path": "prompts/system.md",
+        "sha256": "2bd299d38ee8d7f726d3d100463e1f5e2a0056c4ab3dca067527f88fb52cc15e"
+      },
+      {
+        "path": "prompts/game_knowledge.md",
+        "sha256": "ff8510797098cb870e5cf75958fd3344f5df14c3fe1c415d176860984370e8b9"
+      },
+      {
+        "path": "prompts/personalities/grinder.md",
+        "sha256": "8bb5687e0d2fdb1656dc673e1dbc4a07d968f94ef4b4bba8a1754561a2483349"
+      },
+      {
+        "path": "prompts/personalities/completionist.md",
+        "sha256": "db206340b0adcd6654ea7aedd05d058cc891c3e8e19f3acdde3830d390cc3817"
+      },
+      {
+        "path": "prompts/personalities/explorer_tinkerer.md",
+        "sha256": "c384bb663a94f9da04ed6e22c2d92b0b63ff5592357bee1e811dfc403f8083c6"
+      }
+    ]
+  },
+  "design": {
+    "weights": [
+      "base",
+      "r2",
+      "r3"
+    ],
+    "recovery": [
+      false,
+      true
+    ],
+    "replicates": 20
+  },
+  "models": {
+    "base": {
+      "endpoint_env": "KAETRAM_QWEN_2B_BASE_ENDPOINT",
+      "api_model": "2b-base",
+      "checkpoint_provenance": "research/experiments/provenance/base.checkpoint-provenance.example.json",
+      "endpoint_attestation": "research/experiments/provenance/base.endpoint-attestation.example.json"
+    },
+    "r2": {
+      "endpoint_env": "KAETRAM_QWEN_2B_R2_ENDPOINT",
+      "api_model": "2b-opd-r2",
+      "checkpoint_provenance": "research/experiments/provenance/r2.checkpoint-provenance.example.json",
+      "endpoint_attestation": "research/experiments/provenance/r2.endpoint-attestation.example.json"
+    },
+    "r3": {
+      "endpoint_env": "KAETRAM_QWEN_2B_R3_ENDPOINT",
+      "api_model": "2b-opd-r3",
+      "checkpoint_provenance": "research/experiments/provenance/r3.checkpoint-provenance.example.json",
+      "endpoint_attestation": "research/experiments/provenance/r3.endpoint-attestation.example.json"
+    }
+  },
+  "evaluation": {
+    "episodes": 1,
+    "scenario": "D",
+    "personalities": [
+      "grinder",
+      "completionist",
+      "explorer_tinkerer"
+    ],
+    "tool_schema_source": "canonical",
+    "omit_game_knowledge": false,
+    "held_out_quest": "",
+    "held_out_registration": "",
+    "held_out_registration_sha256": ""
+  },
+  "analysis": {
+    "primary_metric": "core3_stages_advanced",
+    "outcome_definition": "Sum the DB-authoritative one-episode Core-3 stage deltas over the three frozen personality lanes within each replicate x weights x recovery arm; range 0-30.",
+    "independent_unit": "fresh_world_replicate_cluster",
+    "primary_estimands": [
+      "r2_minus_base_recovery_off",
+      "r3_minus_base_recovery_off",
+      "recovery_on_minus_off_base",
+      "recovery_on_minus_off_r2",
+      "recovery_on_minus_off_r3",
+      "r2_minus_base_recovery_interaction",
+      "r3_minus_base_recovery_interaction"
+    ],
+    "familywise_alpha": 0.05,
+    "sample_size": {
+      "phase": "confirmatory",
+      "planned_replicates": 20,
+      "target_power": 0.8,
+      "confirmatory_replicates": 20,
+      "power_analysis_artifact": "research/experiments/opd-2b-factorial-power-v1.json",
+      "power_analysis_sha256": "19b0eaf084b9353029136669488b284074b953e453d35f14b8edab788eca2df2"
+    }
+  },
+  "isolation": {
+    "username_prefix": "opdfx",
+    "server_port_start": 9300,
+    "sandbox_root": "/tmp/kaetram_opd_factorial",
+    "output_root": "dataset/eval/opd_factorial"
+  },
+  "execution": {
+    "allow_launch": false,
+    "max_parallel": 6
+  }
+}
