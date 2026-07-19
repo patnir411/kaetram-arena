@@ -1,5 +1,8 @@
 # Evaluating Game-Playing LLM Agents: SOTA Research & Protocol
 
+> **Current OPD 2B follow-up:** see the manifest-driven
+> [weights × recovery factorial and held-out no-walkthrough runbook](../research/experiments/opd-2b-factorial.md).
+
 **Compiled:** April 13, 2026
 **Sources:** ICLR 2025-2026, NeurIPS 2024-2025, ACL 2025, arXiv, Berkeley BFCL, Anthropic, OpenAI, DeepEval, Reddit (r/LocalLLaMA, r/MachineLearning), practitioner guides
 **Scope:** Evaluating finetuned vs base LLM game agents, MCP tool-use evaluation, MMORPG agent benchmarks, statistical methodology for agent comparison

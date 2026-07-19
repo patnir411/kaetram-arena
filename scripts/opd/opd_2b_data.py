@@ -61,6 +61,7 @@ from opd_probe import reconstruct_session  # noqa: E402
 from opd_round1 import turn_to_chat  # noqa: E402
 from opd_wall_probe import _frontier, _finished_from_payload  # noqa: E402
 from render import patch_qwen_chat_template  # noqa: E402
+from heldout_guard import assert_text_not_reserved  # noqa: E402
 
 STUDENT_EP = os.environ["TWOB_EP"].rstrip("/")
 TEACHER_EP = os.environ["FOURB_EP"].rstrip("/")
@@ -128,6 +129,23 @@ def collect_action_states(run_ids):
             base_messages, turns = reconstruct_session(lp)
         except Exception:
             continue
+        # Exclude the always-on system prompt from this scan: it mentions the
+        # quest name as a warp prerequisite but contains no walkthrough.  Any
+        # model action/reasoning or tool result touching the reserved quest is
+        # nevertheless a hard stop before either endpoint grades the session.
+        activity_text = json.dumps([
+            {
+                "text": turn.text,
+                "tool_calls": turn.tool_calls,
+                "results": [result.result_str for result in results],
+            }
+            for turn, results in turns
+        ])
+        assert_text_not_reserved(
+            activity_text,
+            use="teacher_grading",
+            source=str(lp),
+        )
         if not turns:
             continue
         holdout = (log_i % HOLDOUT_EVERY) == 0

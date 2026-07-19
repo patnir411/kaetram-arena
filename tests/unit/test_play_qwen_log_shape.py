@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -129,6 +130,35 @@ def test_log_assistant_skips_when_nothing_to_emit(tmp_path: Path) -> None:
     )
     logger.close()
     assert _read_records(logger) == []
+
+
+def test_raw_model_emission_preserves_pre_rewrite_content_and_arguments(tmp_path: Path) -> None:
+    logger = _make_logger(tmp_path)
+    logger.open_next_session()
+    call = SimpleNamespace(
+        id="raw_1",
+        function=SimpleNamespace(
+            name="gather",
+            arguments='<parameter=item="Oak">',
+        ),
+    )
+    play_qwen.log_raw_model_emission(
+        logger,
+        turn=4,
+        content='<function=gather("Oak")>',
+        tool_calls=[call],
+        usage={"prompt_tokens": 10, "completion_tokens": 3},
+    )
+    logger.close()
+    record = _read_records(logger)[0]
+    assert record["type"] == "raw_model_emission"
+    assert record["content"] == '<function=gather("Oak")>'
+    assert record["tool_calls"] == [{
+        "id": "raw_1",
+        "name": "gather",
+        "arguments": '<parameter=item="Oak">',
+    }]
+    assert record["usage"] == {"input_tokens": 10, "output_tokens": 3}
 
 
 def test_log_tool_result_pairs_via_tool_use_id(tmp_path: Path) -> None:

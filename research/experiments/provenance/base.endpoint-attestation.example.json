@@ -1,0 +1,12 @@
+{
+  "schema_version": "kaetram.endpoint-attestation.v1",
+  "status": "unresolved_example",
+  "health_path": "/health",
+  "expected_health": {
+    "deployment_id": "UNRESOLVED_FOR_REVIEWED_LIVE_MANIFEST",
+    "api_model": "2b-base",
+    "checkpoint_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "tokenizer_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "render_contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

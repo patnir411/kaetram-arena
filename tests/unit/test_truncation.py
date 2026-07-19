@@ -1,8 +1,8 @@
 """End-to-end truncation gate for the SFT dataset.
 
 Verifies that every record in the built dataset, when rendered through the
-exact path the trainer uses (system prompt prepended, patched chat template,
-no tools= kwarg), tokenizes to ≤ MAX_SEQ_LEN.
+exact path the trainer uses (system prompt prepended plus the metadata-selected
+tool render contract), tokenizes to ≤ MAX_SEQ_LEN.
 
 Routes through `finetune/render.py` so the test cannot drift from the gate
 or the trainer. If the gate accepted a record, this test must accept it too;
@@ -70,17 +70,30 @@ def test_no_record_exceeds_max_seq_len():
     except Exception as e:
         pytest.skip(f"tokenizer fetch failed ({e.__class__.__name__}): {e}")
 
-    from render import patch_qwen_chat_template, render_record  # type: ignore
+    from render import (  # type: ignore
+        patch_qwen_chat_template,
+        render_record,
+        resolve_render_contract,
+    )
     patch_qwen_chat_template(tok)
 
     metadata = json.loads(METADATA.read_text())
     system_prompt = metadata["system_prompt"]
     personality_suffixes = metadata.get("personality_suffixes", {})
+    contract = resolve_render_contract(metadata)
 
     records = json.loads(TRAIN.read_text()) + json.loads(VAL.read_text())
     over: list[tuple[int, int]] = []
     for i, r in enumerate(records):
-        text = render_record(r, system_prompt, personality_suffixes, tok, rng=None)
+        text = render_record(
+            r,
+            system_prompt,
+            personality_suffixes,
+            tok,
+            rng=None,
+            render_mode=contract["tool_render_mode"],
+            tools=contract["tools"],
+        )
         n = len(tok.encode(text, add_special_tokens=False))
         if n > MAX_SEQ_LEN:
             over.append((i, n))

@@ -1,0 +1,22 @@
+{
+  "schema_version": "kaetram.input-provenance.v1",
+  "kind": "checkpoint",
+  "name": "UNRESOLVED EXAMPLE: Qwen3.5-2B OPD r2",
+  "reference": "UNRESOLVED_FOR_REVIEWED_LIVE_MANIFEST",
+  "content": {
+    "kind": "remote",
+    "reference": "UNRESOLVED_FOR_REVIEWED_LIVE_MANIFEST",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "size_bytes": null,
+    "file_count": null
+  },
+  "source": "Example placeholder only; replace with a hash-verified checkpoint record before launch.",
+  "created_at_utc": "2026-07-19T00:00:00+00:00",
+  "producer_git": {
+    "repository": "git@github.com:patnir411/kaetram-arena.git",
+    "commit": "456a8da9a874c3665266700b12172fff3a334531",
+    "branch": "main",
+    "dirty": false,
+    "dirty_paths": []
+  }
+}

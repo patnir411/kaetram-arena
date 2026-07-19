@@ -19,6 +19,9 @@ instantiation of the OPD plan in [r11-direction.md](r11-direction.md) ("Where r1
 companion to [r11-probing.md](r11-probing.md) (the 9B feasibility probes) and
 [r11-27b-sanity-check.md](r11-27b-sanity-check.md) (the upward capacity check). Operational
 state machine for the running chain: `dataset/opd_2b/ROUND1_RUNBOOK.md`.
+The preregistered follow-up weights × recovery ablation and held-out
+no-walkthrough protocol is documented in
+[`opd-2b-factorial.md`](opd-2b-factorial.md).
 
 ## The pivot (June 7)
 
