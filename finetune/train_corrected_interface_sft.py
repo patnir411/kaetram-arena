@@ -195,7 +195,7 @@ def causal_sft_loss(logits: Any, labels: Any, step_weight: Any) -> Any:
         reduction="none",
         ignore_index=-100,
     ).view_as(shift_labels)
-    row_loss = (token_loss * valid).sum(dim=1) / valid.sum(dim=1)
+    row_loss = (token_loss * valid).sum(dim=1) / valid.sum(dim=1).to(token_loss.dtype)
     weights = step_weight.to(row_loss.dtype)
     return (row_loss * weights).sum() / weights.sum()
 
@@ -321,9 +321,14 @@ def execute_training(plan_path: Path, confirmation: str) -> dict[str, Any]:
 
     class DirectTokenTrainer(Trainer):
         def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-            step_weight = inputs.pop("step_weight")
-            labels = inputs.pop("labels")
-            outputs = model(**inputs, use_cache=False)
+            step_weight = inputs["step_weight"]
+            labels = inputs["labels"]
+            model_inputs = {
+                key: value
+                for key, value in inputs.items()
+                if key not in {"step_weight", "labels"}
+            }
+            outputs = model(**model_inputs, use_cache=False)
             loss = causal_sft_loss(outputs.logits, labels, step_weight)
             return (loss, outputs) if return_outputs else loss
 
