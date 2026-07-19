@@ -113,11 +113,12 @@ Dry-run does not resolve the teacher endpoint, create output directories, or
 start a worker. The checked-in example intentionally reports blockers: real base
 checkpoint and teacher attestations, fourteen core/history artifacts and exclusion records,
 reachability and teacher-success evidence, an exact clean source commit, and a
-hash-locked backend adapter are not present.
+reviewed absolute artifact root are not present. The preparation adapter itself
+is hash-locked in the example.
 
 ## Live handoff contract
 
-A real training backend must accept:
+The materialization adapter accepts:
 
 ```text
 python <hash-locked-adapter> --cell-config <create-only-cell-config.json>
@@ -129,9 +130,13 @@ After every placeholder is replaced and independently reviewed, live execution
 still requires `execution.allow_launch=true`, `--execute`, and
 `--confirm-launch <exact-experiment-id>`. The launcher then verifies a clean,
 exact Git commit, creates a prelaunch seal, and starts at most
-`execution.max_parallel` workers. This PR deliberately does not pretend the
-existing single-arm Modal trainer implements targeted restoration, TCOD-B2F, or
-Guided-OPD; the backend adapter is the remaining implementation boundary.
+`execution.max_parallel` workers. The hash-pinned preparation adapter is
+documented in
+[`opd-matched-training-backend.md`](opd-matched-training-backend.md). It verifies
+and normalizes immutable arm bundles but does not pretend the existing
+single-arm Modal trainer implements every registered objective. Actual Guided
+sampling, corrected-interface SFT, SCoRe, and reviewed Modal execution remain
+explicit trainer boundaries.
 
 ## Current blockers
 
@@ -141,7 +146,8 @@ Guided-OPD; the backend adapter is the remaining implementation boundary.
   conditions.
 - Held-out scans, legal-reachability witnesses, and DB-backed teacher-success
   evidence are unresolved examples.
-- The training backend does not yet implement the arm contract.
+- The material adapter implements all arm/history record contracts, but live
+  trainer extensions and reviewed execution are still required.
 - No cost/power review has approved 50 core plus 20 history-ablation cells.
 
 No expensive compute was run while adding this protocol.

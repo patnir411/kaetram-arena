@@ -35,6 +35,7 @@ def _sandbox_manifest(tmp_path: Path, monkeypatch, mutate_manifest=None, mutate_
         SOURCE_REPO / "prompts" / "system.md",
         SOURCE_REPO / "prompts" / "game_knowledge.md",
         SOURCE_REPO / "finetune" / "render.py",
+        SOURCE_REPO / "scripts" / "opd" / "matched_training_backend.py",
     ):
         relative = source.relative_to(SOURCE_REPO)
         target = repo / relative
@@ -284,6 +285,56 @@ def test_backend_result_rejects_unresolved_output_artifact(tmp_path: Path, monke
         "output_artifact": {"uri": "UNRESOLVED://checkpoint", "sha256": "a" * 64},
     }))
     with pytest.raises(mt.ProtocolError, match="URI is unresolved"):
+        mt.validate_cell_result(plan, cell)
+
+
+def test_prepared_backend_result_verifies_material_and_never_claims_training(
+    tmp_path: Path, monkeypatch
+) -> None:
+    plan = mt.build_plan(_sandbox_manifest(tmp_path, monkeypatch))
+    cell = plan.cells[0]
+    output_dir = Path(cell.output_dir)
+    output_dir.mkdir(parents=True)
+    (output_dir / "cell-config.json").write_text(json.dumps(cell.config))
+    records = output_dir / "normalized-records.jsonl"
+    records.write_text('{"record_id":"one"}\n')
+    backend_plan = output_dir / "backend-plan.json"
+    backend_plan.write_text(json.dumps({
+        "schema_version": "kaetram.matched-training-backend-plan.v1",
+        "experiment_id": plan.experiment_id,
+        "cell_id": cell.cell_id,
+        "arm_id": cell.arm_id,
+        "training_seed": cell.seed,
+        "source_git_commit": plan.source_git_commit,
+        "experiment_manifest_sha256": plan.manifest_sha256,
+        "budgets": plan.budgets,
+        "execution_status": "not_run",
+        "normalized_records": {"path": str(records), "sha256": _sha256(records)},
+    }))
+    result = {
+        "schema_version": "kaetram.matched-training-result.v2",
+        "experiment_id": plan.experiment_id,
+        "cell_id": cell.cell_id,
+        "status": "prepared_not_trained",
+        "source_git_commit": plan.source_git_commit,
+        "experiment_manifest_sha256": plan.manifest_sha256,
+        "base_checkpoint_artifact_id": plan.base_checkpoint_artifact_id,
+        "teacher_artifact_id": plan.teacher_artifact_id,
+        "training_seed": cell.seed,
+        "allocated_budgets": plan.budgets,
+        "backend_plan": {"path": str(backend_plan), "sha256": _sha256(backend_plan)},
+        "output_artifact": {
+            "kind": "normalized_training_records",
+            "uri": f"file:{records}",
+            "sha256": _sha256(records),
+        },
+        "trainer_execution_status": "not_run",
+        "trainer_compatibility": "record_schema_compatible_not_executed",
+    }
+    (output_dir / "result.json").write_text(json.dumps(result))
+    mt.validate_cell_result(plan, cell)
+    records.write_text("tampered\n")
+    with pytest.raises(mt.ProtocolError, match="material SHA-256 mismatch"):
         mt.validate_cell_result(plan, cell)
 
 

@@ -164,6 +164,7 @@ class TrainingPlan:
     allow_launch: bool
     max_parallel: int
     output_root: str
+    artifact_root: str
     backend_adapter_path: str
     backend_adapter_sha256: str
     launch_blockers: tuple[str, ...]
@@ -655,7 +656,11 @@ def build_plan(path: str | Path) -> TrainingPlan:
         )
 
     execution = _mapping(raw.get("execution"), label="execution")
-    _exact_keys(execution, {"allow_launch", "max_parallel", "output_root", "backend_adapter"}, label="execution")
+    _exact_keys(
+        execution,
+        {"allow_launch", "max_parallel", "output_root", "artifact_root", "backend_adapter"},
+        label="execution",
+    )
     allow_launch = execution.get("allow_launch")
     if not isinstance(allow_launch, bool):
         raise ProtocolError("execution.allow_launch must be boolean")
@@ -667,6 +672,20 @@ def build_plan(path: str | Path) -> TrainingPlan:
     output_root = output_path.resolve() if output_path.is_absolute() else (REPO / output_path).resolve()
     if output_root == REPO or REPO not in output_root.parents:
         raise ProtocolError("execution.output_root must be a specific path inside the repository")
+    artifact_root_raw = execution.get("artifact_root")
+    if not isinstance(artifact_root_raw, str) or not artifact_root_raw:
+        raise ProtocolError("execution.artifact_root must be a non-empty absolute path")
+    if artifact_root_raw.startswith(UNRESOLVED):
+        blockers.append("execution artifact root is unresolved")
+        artifact_root = artifact_root_raw
+    else:
+        artifact_path = Path(artifact_root_raw)
+        if not artifact_path.is_absolute():
+            raise ProtocolError("execution.artifact_root must be absolute")
+        artifact_path = artifact_path.resolve()
+        if artifact_path == Path(artifact_path.anchor) or len(artifact_path.parts) < 3:
+            raise ProtocolError("execution.artifact_root must be a specific non-root directory")
+        artifact_root = str(artifact_path)
     backend = _mapping(execution.get("backend_adapter"), label="execution.backend_adapter")
     _exact_keys(backend, {"path", "sha256"}, label="execution.backend_adapter")
     backend_path = backend.get("path")
@@ -694,6 +713,7 @@ def build_plan(path: str | Path) -> TrainingPlan:
             "path": registry_path.relative_to(REPO).as_posix(),
             "sha256": registry_sha,
         },
+        "artifact_root": artifact_root,
     }
     cells: list[TrainingCell] = []
     for arm in arms:
@@ -759,6 +779,7 @@ def build_plan(path: str | Path) -> TrainingPlan:
         allow_launch=allow_launch,
         max_parallel=max_parallel,
         output_root=str(output_root),
+        artifact_root=artifact_root,
         backend_adapter_path=backend_path,
         backend_adapter_sha256=backend_sha,
         launch_blockers=tuple(sorted(set(blockers))),
@@ -879,7 +900,7 @@ def launch(plan: TrainingPlan, *, confirmation: str, environ: dict[str, str] | N
 
 
 def validate_cell_result(plan: TrainingPlan, cell: TrainingCell) -> None:
-    """Require a complete, attributed, budget-matched backend result."""
+    """Require an attributed result without conflating preparation and training."""
     config_path = Path(cell.output_dir) / "cell-config.json"
     try:
         recorded_config = json.loads(config_path.read_text())
@@ -894,6 +915,9 @@ def validate_cell_result(plan: TrainingPlan, cell: TrainingCell) -> None:
         raise ProtocolError(f"cell {cell.cell_id} has no valid result.json: {exc}") from exc
     if not isinstance(result, dict):
         raise ProtocolError(f"cell {cell.cell_id} result root must be an object")
+    if result.get("schema_version") == "kaetram.matched-training-result.v2":
+        _validate_prepared_cell_result(plan, cell, result)
+        return
     expected = {
         "schema_version": "kaetram.matched-training-result.v1",
         "experiment_id": plan.experiment_id,
@@ -918,6 +942,101 @@ def validate_cell_result(plan: TrainingPlan, cell: TrainingCell) -> None:
     if not isinstance(output["uri"], str) or not output["uri"] or output["uri"].startswith(UNRESOLVED):
         raise ProtocolError(f"cell {cell.cell_id} output artifact URI is unresolved")
     _digest(output["sha256"], label=f"cell {cell.cell_id}.output_artifact.sha256", nonzero=True)
+
+
+def _verified_result_file(value: Any, expected_sha: Any, *, label: str) -> Path:
+    if not isinstance(value, str) or not value:
+        raise ProtocolError(f"{label} path is missing")
+    raw = value[len("file:"):] if value.startswith("file:") else value
+    path = _repo_file(raw, label=label)
+    expected = _digest(expected_sha, label=f"{label}.sha256", nonzero=True)
+    if _sha256(path) != expected:
+        raise ProtocolError(f"{label} material SHA-256 mismatch")
+    return path
+
+
+def _validate_prepared_cell_result(
+    plan: TrainingPlan, cell: TrainingCell, result: dict[str, Any]
+) -> None:
+    """Validate a materialized bundle while preserving its not-trained status."""
+    _exact_keys(
+        result,
+        {
+            "schema_version", "experiment_id", "cell_id", "status", "source_git_commit",
+            "experiment_manifest_sha256", "base_checkpoint_artifact_id",
+            "teacher_artifact_id", "training_seed", "allocated_budgets", "backend_plan",
+            "output_artifact", "trainer_execution_status", "trainer_compatibility",
+        },
+        label=f"cell {cell.cell_id} prepared result",
+    )
+    expected = {
+        "experiment_id": plan.experiment_id,
+        "cell_id": cell.cell_id,
+        "status": "prepared_not_trained",
+        "source_git_commit": plan.source_git_commit,
+        "experiment_manifest_sha256": plan.manifest_sha256,
+        "base_checkpoint_artifact_id": plan.base_checkpoint_artifact_id,
+        "teacher_artifact_id": plan.teacher_artifact_id,
+        "training_seed": cell.seed,
+        "allocated_budgets": plan.budgets,
+        "trainer_execution_status": "not_run",
+    }
+    mismatches = {
+        key: {"expected": value, "actual": result.get(key)}
+        for key, value in expected.items()
+        if result.get(key) != value
+    }
+    if mismatches:
+        raise ProtocolError(f"cell {cell.cell_id} prepared result contract mismatch: {mismatches}")
+    if not isinstance(result.get("trainer_compatibility"), str) \
+            or not result["trainer_compatibility"]:
+        raise ProtocolError(f"cell {cell.cell_id} trainer compatibility is missing")
+    backend_plan = _mapping(
+        result.get("backend_plan"), label=f"cell {cell.cell_id}.backend_plan"
+    )
+    _exact_keys(backend_plan, {"path", "sha256"}, label=f"cell {cell.cell_id}.backend_plan")
+    backend_path = _verified_result_file(
+        backend_plan["path"], backend_plan["sha256"], label=f"cell {cell.cell_id}.backend_plan"
+    )
+    output = _mapping(result.get("output_artifact"), label=f"cell {cell.cell_id}.output_artifact")
+    _exact_keys(output, {"kind", "uri", "sha256"}, label=f"cell {cell.cell_id}.output_artifact")
+    if output.get("kind") != "normalized_training_records":
+        raise ProtocolError(f"cell {cell.cell_id} output is not normalized training records")
+    output_path = _verified_result_file(
+        output["uri"], output["sha256"], label=f"cell {cell.cell_id}.output_artifact"
+    )
+    try:
+        backend_payload = json.loads(backend_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProtocolError(f"cell {cell.cell_id} backend plan is unreadable: {exc}") from exc
+    if not isinstance(backend_payload, dict):
+        raise ProtocolError(f"cell {cell.cell_id} backend plan root must be an object")
+    backend_expected = {
+        "schema_version": "kaetram.matched-training-backend-plan.v1",
+        "experiment_id": plan.experiment_id,
+        "cell_id": cell.cell_id,
+        "arm_id": cell.arm_id,
+        "training_seed": cell.seed,
+        "source_git_commit": plan.source_git_commit,
+        "experiment_manifest_sha256": plan.manifest_sha256,
+        "budgets": plan.budgets,
+        "execution_status": "not_run",
+    }
+    backend_mismatches = {
+        key: {"expected": value, "actual": backend_payload.get(key)}
+        for key, value in backend_expected.items()
+        if backend_payload.get(key) != value
+    }
+    if backend_mismatches:
+        raise ProtocolError(
+            f"cell {cell.cell_id} backend plan contract mismatch: {backend_mismatches}"
+        )
+    normalized = _mapping(
+        backend_payload.get("normalized_records"),
+        label=f"cell {cell.cell_id}.backend_plan.normalized_records",
+    )
+    if normalized.get("path") != str(output_path) or normalized.get("sha256") != output["sha256"]:
+        raise ProtocolError(f"cell {cell.cell_id} backend plan/output material mismatch")
 
 
 def main() -> int:

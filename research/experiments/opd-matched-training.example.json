@@ -6,7 +6,7 @@
     "source_git_commit": "UNRESOLVED_FOR_REVIEWED_LIVE_MANIFEST",
     "artifact_registry": {
       "path": "research/experiments/opd-matched-training-artifacts.example.json",
-      "sha256": "6bc8df9f744b7eed78312db695112462a8eb8723560d887aca6872ac1ef3acb4"
+      "sha256": "142ee6148872778b95f20ab4e1cb129825e0e6fde24ec921d040ef8de2044bcf"
     }
   },
   "shared_inputs": {
@@ -302,9 +302,10 @@
     "allow_launch": false,
     "max_parallel": 1,
     "output_root": "artifacts/opd-matched-training",
+    "artifact_root": "UNRESOLVED_FOR_IMMUTABLE_ARTIFACT_ROOT",
     "backend_adapter": {
-      "path": "UNRESOLVED_FOR_BACKEND_ADAPTER",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      "path": "scripts/opd/matched_training_backend.py",
+      "sha256": "670011a148305926a84ddc21b62a9b7b1c65054d3953eef3964fb1c1b4454c41"
     }
   }
 }
