@@ -30,6 +30,12 @@ from scripts.opd.matched_training import (  # noqa: E402
     UNRESOLVED,
     _validate_parameterization,
 )
+from scripts.opd.guided_opd_contract import (  # noqa: E402
+    GUIDANCE_ALGORITHM,
+    GUIDANCE_SCHEMA,
+    GuidedContractError,
+    validate_guided_records,
+)
 
 
 CELL_SCHEMA = "kaetram.matched-training-cell.v1"
@@ -245,6 +251,7 @@ def _validate_arrays(
     record_id: str,
     tokenizer_vocab_size: int,
     forbidden_token_sequences: list[list[int]],
+    guided_actor_role: str | None = None,
 ) -> int:
     _exact_keys(
         supervision,
@@ -283,7 +290,19 @@ def _validate_arrays(
         raise ProtocolError(f"record {record_id}.step_weight must be positive")
     advantages = supervision["advantages"]
     behavior = supervision["behavior_logprobs"]
-    if objective == "opd":
+    if objective == "opd" and guided_actor_role == "teacher":
+        if advantages is not None:
+            raise ProtocolError(
+                f"Guided teacher-turn record {record_id} must not carry reverse-KL advantages"
+            )
+        if not isinstance(behavior, list) or len(behavior) != len(input_ids) or not all(
+            isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+            for value in behavior
+        ):
+            raise ProtocolError(
+                f"Guided teacher-turn record {record_id} must carry aligned teacher logprobs"
+            )
+    elif objective == "opd":
         for name, values in (("advantages", advantages), ("behavior_logprobs", behavior)):
             if not isinstance(values, list) or len(values) != len(input_ids) or not all(
                 isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
@@ -351,7 +370,7 @@ def _validate_semantics(
             raise ProtocolError(f"record {record_id} matched_stratum is missing")
         if _finite(semantics.get("match_distance"), label=f"record {record_id}.match_distance") < 0:
             raise ProtocolError(f"record {record_id} match_distance must be nonnegative")
-    elif arm_id in PREFIX_ARMS:
+    elif arm_id == "tcod_b2f_prefixes":
         required = {
             "mode", "prefix_id", "teacher_success_evidence_sha256", "distance_to_success",
         }
@@ -361,6 +380,29 @@ def _validate_semantics(
         _nonnegative_int(
             semantics.get("distance_to_success"),
             label=f"record {record_id}.distance_to_success",
+        )
+    elif arm_id == "guided_opd":
+        required = {
+            "mode", "trajectory_id", "turn_index", "actor_role", "turn_loss",
+            "role_decision",
+        }
+        if mode != "guided_opd_actor_turn":
+            raise ProtocolError(f"record {record_id} is not a Guided-OPD actor turn")
+        _nonnegative_int(
+            semantics.get("turn_index"),
+            label=f"record {record_id}.turn_index",
+        )
+        if not isinstance(semantics.get("trajectory_id"), str) or not semantics["trajectory_id"]:
+            raise ProtocolError(f"record {record_id}.trajectory_id must be non-empty")
+        actor = semantics.get("actor_role")
+        expected_loss = {"student": "reverse_kl", "teacher": "forward_kl"}.get(actor)
+        if semantics.get("turn_loss") != expected_loss:
+            raise ProtocolError(
+                f"record {record_id} must pair student/reverse-KL or teacher/forward-KL"
+            )
+        _mapping(
+            semantics.get("role_decision"),
+            label=f"record {record_id}.role_decision",
         )
     elif arm_id in {"visitation_only", "teacher_advantage_only"}:
         required = {
@@ -493,12 +535,15 @@ def _validate_source_record(
     _history_alias_scan(record, aliases, record_id=record_id)
 
     supervision = _mapping(record["supervision"], label=f"record {record_id}.supervision")
+    guided_actor_role = record["semantics"].get("actor_role") \
+        if arm["arm_id"] == "guided_opd" and isinstance(record["semantics"], dict) else None
     action_tokens = _validate_arrays(
         supervision,
         objective=arm["objective"],
         record_id=record_id,
         tokenizer_vocab_size=tokenizer_vocab_size,
         forbidden_token_sequences=forbidden_token_sequences,
+        guided_actor_role=guided_actor_role,
     )
     usage = _mapping(record["budget_usage"], label=f"record {record_id}.budget_usage")
     _exact_keys(
@@ -589,6 +634,15 @@ def _order_records(records: list[dict[str, Any]], arm: dict[str, Any], seed: int
             for stratum in strata:
                 if groups[stratum]:
                     ordered.append(groups[stratum].pop(0))
+    elif arm_id == "guided_opd":
+        ordered = sorted(
+            records,
+            key=lambda record: (
+                record["semantics"]["role_decision"]["training_step"],
+                _rank(seed, record["semantics"]["trajectory_id"]),
+                record["semantics"]["turn_index"],
+            ),
+        )
     else:
         ordered = sorted(records, key=lambda record: _rank(seed, record["record_id"]))
     if arm_id == "tcod_b2f_prefixes":
@@ -607,20 +661,14 @@ def _order_records(records: list[dict[str, Any]], arm: dict[str, Any], seed: int
             }
             cumulative += record["budget_usage"]["action_tokens"]
     elif arm_id == "guided_opd":
-        cfg = arm["guided_annealing"]
-        cumulative = 0
         for record in ordered:
-            progress = cumulative / cfg["anneal_action_tokens"]
-            probability = max(0.0, cfg["start_teacher_prefix_probability"] + progress * (
-                cfg["end_teacher_prefix_probability"]
-                - cfg["start_teacher_prefix_probability"]
-            ))
+            decision = record["semantics"]["role_decision"]
             record["curriculum"] = {
                 "kind": "guided_opd",
-                "teacher_prefix_probability": probability,
-                "schedule_position_action_tokens": cumulative,
+                "teacher_turn_probability": decision["teacher_turn_probability"],
+                "actor_role": decision["actor_role"],
+                "role_decision": decision,
             }
-            cumulative += record["budget_usage"]["action_tokens"]
     elif arm_id == "backplay_witness_annealing":
         cfg = arm["backplay_annealing"]
         cumulative = 0
@@ -666,8 +714,12 @@ def _trainer_route(arm: dict[str, Any]) -> dict[str, Any]:
     if arm_id == "guided_opd":
         return {
             "entrypoint": OPD_TRAINER,
-            "compatibility": "requires_guided_sampling_extension",
-            "reason": "existing OPD trainer does not consume per-record teacher-prefix probabilities",
+            "compatibility": "guided_collection_supported_objective_blocked",
+            "reason": (
+                "role scheduling and bundle validation are implemented, but the offline PPO-style "
+                "trainer does not implement online mixed rollout plus student-turn reverse KL and "
+                "teacher-turn forward KL"
+            ),
         }
     return {
         "entrypoint": OPD_TRAINER,
@@ -690,12 +742,6 @@ def build_backend_plan(cell_config_path: str | Path) -> tuple[dict[str, Any], li
         raise ProtocolError("cell_id must be non-empty")
     _positive_int(cell.get("training_seed"), label="training_seed")
     arm = _mapping(cell.get("arm"), label="cell arm")
-    if arm.get("arm_id") == "guided_opd":
-        raise ProtocolError(
-            "Guided-OPD materialization is blocked until the reviewed live "
-            "mixed-rollout collector and actor-conditional reverse-KL/forward-KL "
-            "trainer are available"
-        )
     shared = _mapping(cell.get("shared_contract"), label="shared_contract")
     _exact_keys(
         shared,
@@ -853,7 +899,6 @@ def build_backend_plan(cell_config_path: str | Path) -> tuple[dict[str, Any], li
         for record in records
     ):
         raise ProtocolError("corrected-interface SFT record does not match the frozen render contract")
-    records = _order_records(records, arm, cell["training_seed"])
     budgets = _mapping(shared.get("budgets"), label="shared_contract.budgets")
     _exact_keys(
         budgets,
@@ -869,6 +914,17 @@ def build_backend_plan(cell_config_path: str | Path) -> tuple[dict[str, Any], li
             f"source artifact does not exactly fill the matched budget: "
             f"registered={registered_budgets}, observed={observed_budgets}"
         )
+    if arm["arm_id"] == "guided_opd":
+        try:
+            validate_guided_records(
+                records,
+                seed=cell["training_seed"],
+                config=arm["guided_annealing"],
+                action_token_budget=registered_budgets["action_tokens"],
+            )
+        except GuidedContractError as exc:
+            raise ProtocolError(f"Guided-OPD rollout trace is invalid: {exc}") from exc
+    records = _order_records(records, arm, cell["training_seed"])
     optimizer = _mapping(shared.get("optimizer"), label="shared_contract.optimizer")
     route = _trainer_route(arm)
     plan = {
@@ -900,6 +956,15 @@ def build_backend_plan(cell_config_path: str | Path) -> tuple[dict[str, Any], li
         "parameterization": parameterization,
         "parameterization_sha256": parameterization_sha,
         "budgets": registered_budgets,
+        "curriculum_contract": arm.get("guided_annealing"),
+        "intervention_scheduler": {
+            "entrypoint": "scripts/opd/guided_opd_schedule.py",
+            "entrypoint_sha256": _sha256(REPO / "scripts/opd/guided_opd_schedule.py"),
+            "contract_module": "scripts/opd/guided_opd_contract.py",
+            "contract_sha256": _sha256(REPO / "scripts/opd/guided_opd_contract.py"),
+            "schema_version": GUIDANCE_SCHEMA,
+            "algorithm": GUIDANCE_ALGORITHM,
+        } if arm["arm_id"] == "guided_opd" else None,
         "trainer_route": route,
         "execution_status": "not_run",
     }

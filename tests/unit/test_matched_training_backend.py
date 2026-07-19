@@ -177,44 +177,6 @@ def test_materializes_hash_verified_records_without_claiming_training(tmp_path, 
         backend.materialize(cell_path)
 
 
-def test_guided_opd_cannot_materialize_before_live_role_backend(tmp_path, monkeypatch) -> None:
-    cell_path = _natural_fixture(tmp_path, monkeypatch)
-    cell = json.loads(cell_path.read_text())
-    cell["arm"] = {
-        "arm_id": "guided_opd",
-        "role": "primary",
-        "objective": "opd",
-        "training_artifact_id": "guided_live_rollouts",
-        "recovery": "on",
-        "state_source": {
-            "kind": "canonical_guided_rollout",
-            "constructor": "fresh_canonical_world_online",
-        },
-        "history_constructor": {
-            "kind": "guided_mixed_history",
-            "source": "same_live_mixed_rollout",
-        },
-        "guided_annealing": {
-            "schedule": "cosine",
-            "schedule_basis": "training_progress",
-            "start_teacher_turn_probability": 1.0,
-            "end_teacher_turn_probability": 0.0,
-            "curriculum_ratio": 0.8,
-            "trajectory_probability": "held_fixed_within_trajectory",
-            "total_training_steps": 250,
-            "student_turn_loss": "reverse_kl",
-            "teacher_turn_loss": "forward_kl",
-        },
-    }
-    cell_path.write_text(json.dumps(cell, indent=2) + "\n")
-
-    with pytest.raises(mt.ProtocolError, match="Guided-OPD materialization is blocked"):
-        backend.materialize(cell_path)
-    assert not (cell_path.parent / "normalized-records.jsonl").exists()
-    assert not (cell_path.parent / "backend-plan.json").exists()
-    assert not (cell_path.parent / "result.json").exists()
-
-
 def test_rejects_source_material_hash_drift(tmp_path, monkeypatch) -> None:
     cell_path = _natural_fixture(tmp_path, monkeypatch)
     cell = json.loads(cell_path.read_text())
@@ -242,6 +204,25 @@ def test_score_semantics_require_verified_first_model_visible_error() -> None:
     record["semantics"]["mode"] = "unverified_error_prefix"
     with pytest.raises(mt.ProtocolError, match="verified first-error prefix"):
         backend._validate_semantics(arm, record, record_id="score-1")
+
+
+def test_guided_semantics_require_exact_rollout_decision_field() -> None:
+    arm = {"arm_id": "guided_opd"}
+    record = {
+        "state": {"content_sha256": "c" * 64},
+        "semantics": {
+            "mode": "guided_opd_actor_turn",
+            "trajectory_id": "trajectory-1",
+            "turn_index": 1,
+            "actor_role": "teacher",
+            "turn_loss": "forward_kl",
+            "role_decision": {"schema_version": "kaetram.guided-opd-role-decision.v1"},
+        },
+    }
+    assert backend._validate_semantics(arm, record, record_id="guided-1")["role_decision"]
+    record["semantics"]["unexpected"] = True
+    with pytest.raises(mt.ProtocolError, match="fields must be exactly"):
+        backend._validate_semantics(arm, record, record_id="guided-1")
 
 
 def test_artifact_root_rejects_traversal_and_symlinks(tmp_path) -> None:

@@ -675,10 +675,6 @@ def build_plan(path: str | Path) -> TrainingPlan:
         )
         for index, item in enumerate(arms_raw)
     )
-    blockers.append(
-        "guided_opd requires the reviewed live mixed-rollout collector and "
-        "actor-conditional reverse-KL/forward-KL trainer before execution"
-    )
     if tuple(arm["arm_id"] for arm in arms) != ARM_IDS:
         raise ProtocolError(f"arms must appear exactly in registered order: {list(ARM_IDS)}")
 

@@ -81,6 +81,8 @@ train_image = (
         "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
     })
     .add_local_python_source("render")
+    .add_local_python_source("scripts.opd.guided_opd_contract")
+    .add_local_python_source("scripts.opd.guided_opd_schedule")
 )
 
 # Round-parametrized via the CLI (see main); these are the round-2 defaults.
@@ -106,19 +108,45 @@ with train_image.imports():
     from unsloth import FastLanguageModel
 
 
-def _load_records(path):
+def _load_records(path, backend_plan_path=""):
     import json
+    if backend_plan_path:
+        from scripts.opd.guided_opd_contract import load_guided_training_bundle
+        load_guided_training_bundle(path, backend_plan_path)
+        raise RuntimeError(
+            "Guided-OPD bundle validated, but execution is blocked: this offline PPO-style "
+            "trainer does not implement live mixed actor turns with reverse KL on student "
+            "turns and forward KL on teacher turns"
+        )
     recs = []
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
                 recs.append(json.loads(line))
+    if not all(isinstance(record, dict) for record in recs):
+        raise RuntimeError("OPD records must be JSON objects")
+
+    def has_guided_marker(record):
+        semantics = record.get("semantics")
+        curriculum = record.get("curriculum")
+        history = record.get("history")
+        return record.get("schema_version") == "kaetram.normalized-training-record.v1" \
+            or record.get("arm_id") == "guided_opd" \
+            or (isinstance(semantics, dict) and semantics.get("mode") == "guided_opd_actor_turn") \
+            or (isinstance(curriculum, dict) and curriculum.get("kind") == "guided_opd") \
+            or (isinstance(history, dict) and history.get("kind") == "guided_mixed_history")
+
+    if any(has_guided_marker(record) for record in recs):
+        raise RuntimeError(
+            "Guided-OPD records require --backend-plan-path for fail-closed "
+            "schema, provenance, role-schedule, and mixed-trajectory validation"
+        )
     return recs
 
 
 def _opd_collator(features):
-    """Pad pre-tokenized records; carry advantages/behavior/step_weight row-aligned."""
+    """Pad legacy pre-tokenized OPD records."""
     import torch
     maxlen = max(len(f["input_ids"]) for f in features)
 
@@ -223,12 +251,17 @@ def _make_trainer_cls():
 def train_opd(max_steps: int = -1, lr: float = 5e-5,
               init_model: str = INIT_MODEL,
               records_path: str = RECORDS_PATH,
+              backend_plan_path: str = "",
               experiment: str = OPD_EXPERIMENT):
     import gc
     import os
     os.environ["UNSLOTH_RETURN_LOGITS"] = "1"
     from transformers import TrainingArguments
     from render import patch_qwen_chat_template
+
+    # Reject any schema, provenance, or rollout-trace drift before loading the
+    # model or starting accelerator work.
+    recs = _load_records(records_path, backend_plan_path)
 
     print(f"Loading {init_model} with a FRESH LoRA (init == rollout policy)...")
     model, tokenizer = FastLanguageModel.from_pretrained(
@@ -239,9 +272,8 @@ def train_opd(max_steps: int = -1, lr: float = 5e-5,
         lora_dropout=0, bias="none", use_rslora=False,
         use_gradient_checkpointing=True, random_state=42)
 
-    import datasets
-    recs = _load_records(records_path)
     print(f"OPD records: {len(recs)}  (lr={lr}, experiment={experiment})")
+    import datasets
     ds = datasets.Dataset.from_list(recs)
 
     output_dir = f"/checkpoints/{experiment}"
@@ -322,6 +354,8 @@ def train_opd(max_steps: int = -1, lr: float = 5e-5,
 def main(max_steps: int = -1, lr: float = 5e-5,
          init_model: str = INIT_MODEL,
          records_path: str = RECORDS_PATH,
+         backend_plan_path: str = "",
          experiment: str = OPD_EXPERIMENT):
     train_opd.remote(max_steps=max_steps, lr=lr, init_model=init_model,
-                     records_path=records_path, experiment=experiment)
+                     records_path=records_path, backend_plan_path=backend_plan_path,
+                     experiment=experiment)
