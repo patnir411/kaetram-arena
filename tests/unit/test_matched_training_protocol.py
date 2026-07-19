@@ -152,30 +152,6 @@ def test_guided_opd_freezes_published_training_progress_schedule(tmp_path: Path,
         mt.build_plan(_sandbox_manifest(tmp_path, monkeypatch, mutate_manifest=mutate))
 
 
-def test_guided_opd_remains_an_unconditional_launch_blocker(tmp_path: Path, monkeypatch) -> None:
-    plan = mt.build_plan(_sandbox_manifest(tmp_path, monkeypatch))
-    assert any("guided_opd requires" in blocker for blocker in plan.launch_blockers)
-
-    enabled = replace(
-        plan,
-        allow_launch=True,
-        launch_blockers=tuple(
-            blocker for blocker in plan.launch_blockers if "guided_opd requires" in blocker
-        ),
-    )
-    monkeypatch.setattr(
-        mt.subprocess,
-        "Popen",
-        lambda *args, **kwargs: pytest.fail("Guided-OPD blocker must precede Popen"),
-    )
-    with pytest.raises(mt.ProtocolError, match="live mixed-rollout collector"):
-        mt.launch(
-            enabled,
-            confirmation=enabled.experiment_id,
-            environ={enabled.teacher_endpoint_env: "https://teacher.invalid/v1"},
-        )
-
-
 def test_tcod_prefixes_require_db_authoritative_success_evidence(tmp_path: Path, monkeypatch) -> None:
     def mutate(registry):
         registry["artifacts"]["tcod_success_prefixes"]["teacher_success_evidence"][

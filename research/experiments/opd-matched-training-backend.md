@@ -4,7 +4,7 @@
 one immutable arm bundle into a hash-pinned normalized record bundle. It is a
 preparation boundary, not a training job: every successful result is explicitly
 `prepared_not_trained`, records `trainer_execution_status: not_run`, and names
-any trainer extension still required.
+any remaining live boundary.
 
 ## Material boundary
 
@@ -37,22 +37,31 @@ aggregate source bundle to exactly fill all three registered budgets.
 ## Curriculum handling
 
 TCOD-B2F records are ordered backward from success. Progress-matched records are
-deterministically interleaved by registered stratum. Guided-OPD annotates the
-linear teacher-prefix probability over the complete action-token budget, and
-Backplay annotates the corresponding witness-distance schedule. Seeded ordering
-is deterministic and recorded in the normalized output.
+deterministically interleaved by registered stratum. Guided-OPD uses fresh live
+rollouts rather than restored teacher-success states. Before every complete
+turn, a collector calls `scripts/opd/guided_opd_schedule.py`; the hash-pinned
+scheduler draws the teacher or student independently using the registered seed,
+trajectory ID, and turn index. Its probability comes from the published cosine
+training-progress schedule (250 total steps, curriculum ratio 0.8) and is held
+fixed throughout a trajectory. The collector records every actor turn in one
+append-only shared history. The adapter recomputes every role draw and
+probability, rejects rewritten or incomplete trajectory histories, requires
+student/reverse-KL and teacher/forward-KL labels, and checks the complete matched
+budget. Backplay annotates the corresponding witness-distance schedule.
 
 ## Honest trainer routes
 
-The current OPD collator can consume ordinary normalized OPD arrays, but this
-adapter does not invoke it. Guided-OPD still requires a sampling extension,
-and SCoRe requires a first-error objective extension. Corrected-interface SFT
-now has a separate
+The legacy OPD trainer can validate a Guided bundle's hashes, identities,
+registered seed, scheduler contract, and every role decision, but it then raises
+an objective-blocked error before loading the model. Its offline PPO-style loss
+cannot faithfully substitute for online mixed trajectories with reverse KL on
+student turns and forward KL on teacher turns. This adapter does not invoke the
+trainer. A live collector and asymmetric objective still need implementation;
+SCoRe separately requires a first-error objective extension. Corrected-interface
+SFT now has a separate
 [`corrected-interface pretokenized adapter`](opd-corrected-interface-sft.md)
-that consumes these normalized token arrays without re-rendering conversations;
-its reviewed trainer path initializes the same fresh bf16 LoRA contract as all
-other arms, but this preparation step still does not invoke accelerator
-training. The backend plan records these compatibility states instead of
+that consumes normalized token arrays without re-rendering and preserves the
+shared fresh bf16 LoRA contract. The plan records these boundaries instead of
 emitting a checkpoint claim.
 
 ## Verification

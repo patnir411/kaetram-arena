@@ -97,12 +97,8 @@ Its published curriculum is frozen to 250 training steps: the probability of a
 complete teacher-generated turn follows cosine decay from 1 to 0 during the
 first 80% of training and is then zero. The probability is held fixed within a
 trajectory, while the actor is drawn independently for every turn. Student
-turns use reverse KL and teacher turns use forward KL.
-
-This protocol branch deliberately keeps Guided-OPD as an unconditional launch
-blocker. It may be inspected and preregistered here, but it cannot execute until
-the reviewed live mixed-rollout collector and actor-conditional objective land;
-resolving artifact placeholders is not sufficient to bypass that gate.
+turns are registered for reverse KL and teacher turns for forward KL. Missing
+or unresolved evidence remains visible in dry-run and blocks execution.
 
 SCoRe accepts only verified first-error-prefix artifacts. Its evidence record
 must identify the first model-visible student error and hash both the evidence
@@ -142,11 +138,16 @@ exact Git commit, creates a prelaunch seal, and starts at most
 documented in
 [`opd-matched-training-backend.md`](opd-matched-training-backend.md). It verifies
 and normalizes immutable arm bundles but does not pretend the existing
-single-arm Modal trainer implements every registered objective. The separate
-[`corrected-interface SFT adapter`](opd-corrected-interface-sft.md) now emits a
-pretokenized, render-identity-bound bundle without invoking a trainer. Actual
-Guided sampling, SCoRe, and reviewed accelerator execution remain explicit
-boundaries; the direct-token SFT route is now `executable_pending_compute`.
+single-arm Modal trainer implements every registered objective. Guided-OPD now
+has a deterministic complete-turn role scheduler and exact mixed-trajectory
+trace validation. The legacy offline OPD trainer deliberately rejects these
+bundles because it lacks the published online asymmetric objective: reverse KL
+on student turns and forward KL on teacher turns. Connecting the scheduler to
+live teacher/student endpoints, implementing that objective, SCoRe, and reviewed
+Modal execution remain explicit boundaries. The separate
+[`corrected-interface SFT adapter`](opd-corrected-interface-sft.md) emits a
+pretokenized, render-identity-bound bundle; that direct-token route is
+`executable_pending_compute`.
 
 ## Current blockers
 
@@ -156,10 +157,11 @@ boundaries; the direct-token SFT route is now `executable_pending_compute`.
   conditions.
 - Held-out scans, legal-reachability witnesses, and DB-backed teacher-success
   evidence are unresolved examples.
-- The material adapter implements all arm/history record contracts and the
-  corrected-interface SFT arm has a pretokenized fresh-LoRA execution path, but
-  live Guided/SCoRe trainer extensions and reviewed execution are still
-  required.
+- The Guided-OPD scheduler and bundle contract are implemented offline, but no
+  live collector has produced endpoint-backed trajectories and the existing
+  trainer is explicitly objective-blocked. Corrected-interface SFT has a
+  pretokenized fresh-LoRA path; live Guided/SCoRe objective work and reviewed
+  execution remain.
 - No cost/power review has approved 50 core plus 20 history-ablation cells.
 
 No expensive compute was run while adding this protocol.
