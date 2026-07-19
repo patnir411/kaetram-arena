@@ -127,10 +127,13 @@ def _load_records(path, backend_plan_path=""):
     if any(
         record.get("schema_version") == "kaetram.normalized-training-record.v1"
         or record.get("arm_id") == "guided_opd"
+        or record.get("semantics", {}).get("mode") == "guided_opd_actor_turn"
+        or record.get("curriculum", {}).get("kind") == "guided_opd"
+        or record.get("history", {}).get("kind") == "guided_mixed_history"
         for record in recs
     ):
         raise RuntimeError(
-            "normalized Guided-OPD records require --backend-plan-path for fail-closed "
+            "Guided-OPD records require --backend-plan-path for fail-closed "
             "schema, provenance, role-schedule, and mixed-trajectory validation"
         )
     return recs

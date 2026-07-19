@@ -97,8 +97,11 @@ Its published curriculum is frozen to 250 training steps: the probability of a
 complete teacher-generated turn follows cosine decay from 1 to 0 during the
 first 80% of training and is then zero. The probability is held fixed within a
 trajectory, while the actor is drawn independently for every turn. Student
-turns are registered for reverse KL and teacher turns for forward KL. Missing
-or unresolved evidence remains visible in dry-run and blocks execution.
+turns are registered for reverse KL and teacher turns for forward KL. Each
+record binds the full actor-response tokens and hashed content at the boundary
+before the subsequent environment observation; partial-turn records are
+rejected. Missing or unresolved evidence remains visible in dry-run and blocks
+execution.
 
 SCoRe accepts only verified first-error-prefix artifacts. Its evidence record
 must identify the first model-visible student error and hash both the evidence

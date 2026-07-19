@@ -9,6 +9,7 @@ import pytest
 
 from scripts.opd.guided_opd_contract import (
     BACKEND_PLAN_SCHEMA,
+    COMPLETE_TURN_BOUNDARY,
     GUIDANCE_ALGORITHM,
     GUIDANCE_SCHEMA,
     NORMALIZED_SCHEMA,
@@ -38,6 +39,11 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _sha_json(value) -> str:
+    material = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(material).hexdigest()
+
+
 def _records(*, training_step: int = 100) -> list[dict]:
     records = []
     turns = []
@@ -52,11 +58,16 @@ def _records(*, training_step: int = 100) -> list[dict]:
             config=SCHEDULE,
         )
         actor = decision["actor_role"]
+        content = f"complete {actor} turn"
+        actor_token_ids = [10 + turn_index] * 5
         turns.append({
             "turn_id": record_id,
             "turn_index": turn_index,
             "actor_role": actor,
-            "content": f"complete {actor} turn",
+            "content": content,
+            "content_sha256": _sha_json(content),
+            "actor_token_ids": list(actor_token_ids),
+            "boundary": COMPLETE_TURN_BOUNDARY,
             "role_decision_id": record_id,
         })
         records.append({
@@ -83,8 +94,8 @@ def _records(*, training_step: int = 100) -> list[dict]:
                 "turn_loss": "forward_kl" if actor == "teacher" else "reverse_kl",
                 "role_decision": decision,
             },
-            "input_ids": [10 + turn_index] * 5,
-            "labels": [10 + turn_index] * 5,
+            "input_ids": list(actor_token_ids),
+            "labels": list(actor_token_ids),
             "advantages": None if actor == "teacher" else [0.2] * 5,
             "behavior_logprobs": [-0.2] * 5,
             "budget_usage": {
@@ -164,7 +175,27 @@ def test_bundle_validates_both_actor_roles_and_append_only_history() -> None:
     records = _records()
     validate_guided_records(records, seed=7, config=SCHEDULE, action_token_budget=10)
     records[1]["history"]["content"]["turns"][0]["content"] = "rewritten history"
+    records[1]["history"]["content"]["turns"][0]["content_sha256"] = _sha_json(
+        "rewritten history"
+    )
     with pytest.raises(GuidedContractError, match="append-only history"):
+        validate_guided_records(records, seed=7, config=SCHEDULE, action_token_budget=10)
+
+
+def test_complete_turn_content_and_tokens_are_bound_before_observation() -> None:
+    records = _records()
+    records[0]["history"]["content"]["turns"][0]["actor_token_ids"][-1] = 99
+    with pytest.raises(GuidedContractError, match="bound to supervised tokens"):
+        validate_guided_records(records, seed=7, config=SCHEDULE, action_token_budget=10)
+
+    records = _records()
+    records[0]["input_ids"][-1] = 99
+    with pytest.raises(GuidedContractError, match="bound to supervised tokens"):
+        validate_guided_records(records, seed=7, config=SCHEDULE, action_token_budget=10)
+
+    records = _records()
+    records[0]["history"]["content"]["turns"][0]["boundary"] = "includes_observation"
+    with pytest.raises(GuidedContractError, match="before the environment observation"):
         validate_guided_records(records, seed=7, config=SCHEDULE, action_token_budget=10)
 
 
@@ -204,7 +235,7 @@ def test_scheduler_derives_total_steps_from_registered_cell(tmp_path: Path) -> N
     assert actual["total_training_steps"] == 250
 
 
-def test_legacy_trainer_compiles_and_explicitly_blocks_guided_objective() -> None:
+def test_legacy_trainer_compiles_and_explicitly_blocks_guided_objective(tmp_path: Path) -> None:
     trainer_path = Path(__file__).parents[2] / "finetune/train_opd_2b.py"
     source = trainer_path.read_text()
     tree = ast.parse(source, filename=str(trainer_path))
@@ -215,3 +246,22 @@ def test_legacy_trainer_compiles_and_explicitly_blocks_guided_objective() -> Non
     assert len(retries_keywords) == 1
     assert "Guided-OPD bundle validated, but execution is blocked" in source
     assert "forward KL on teacher turns" in source
+    assert 'record.get("semantics", {}).get("mode") == "guided_opd_actor_turn"' in source
+    assert 'record.get("history", {}).get("kind") == "guided_mixed_history"' in source
+
+    load_node = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_load_records"
+    )
+    namespace = {}
+    exec(compile(ast.Module(body=[load_node], type_ignores=[]), str(trainer_path), "exec"), namespace)
+    records_path = tmp_path / "guided-without-plan.jsonl"
+    records_path.write_text(json.dumps({
+        "semantics": {"mode": "guided_opd_actor_turn"},
+        "input_ids": [1],
+        "labels": [1],
+        "advantages": [0.0],
+        "behavior_logprobs": [-0.1],
+    }) + "\n")
+    with pytest.raises(RuntimeError, match="require --backend-plan-path"):
+        namespace["_load_records"](records_path)

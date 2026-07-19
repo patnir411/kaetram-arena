@@ -44,10 +44,13 @@ scheduler draws the teacher or student independently using the registered seed,
 trajectory ID, and turn index. Its probability comes from the published cosine
 training-progress schedule (250 total steps, curriculum ratio 0.8) and is held
 fixed throughout a trajectory. The collector records every actor turn in one
-append-only shared history. The adapter recomputes every role draw and
-probability, rejects rewritten or incomplete trajectory histories, requires
-student/reverse-KL and teacher/forward-KL labels, and checks the complete matched
-budget. Backplay annotates the corresponding witness-distance schedule.
+append-only shared history. Each turn marks the complete-response boundary
+before the next environment observation, hashes its response content, and binds
+the exact actor token IDs to the supervised labels. The adapter recomputes every
+role draw and probability, rejects rewritten, partial, or incomplete trajectory
+histories, requires student/reverse-KL and teacher/forward-KL labels, and checks
+the complete matched budget. Backplay annotates the corresponding
+witness-distance schedule.
 
 ## Honest trainer routes
 
@@ -56,7 +59,10 @@ registered seed, scheduler contract, and every role decision, but it then raises
 an objective-blocked error before loading the model. Its offline PPO-style loss
 cannot faithfully substitute for online mixed trajectories with reverse KL on
 student turns and forward KL on teacher turns. This adapter does not invoke the
-trainer. A live collector and asymmetric objective still need implementation;
+trainer. Invoking the legacy entrypoint without a plan is also rejected when a
+record carries any Guided schema, arm, semantics, curriculum, or history
+marker, so omitting the plan cannot silently select the legacy loss. A live
+collector and asymmetric objective still need implementation;
 SCoRe separately requires a first-error objective extension. Corrected-interface
 SFT now has a separate
 [`corrected-interface pretokenized adapter`](opd-corrected-interface-sft.md)

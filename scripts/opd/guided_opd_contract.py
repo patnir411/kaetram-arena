@@ -17,6 +17,7 @@ from typing import Any
 
 GUIDANCE_SCHEMA = "kaetram.guided-opd-role-decision.v1"
 GUIDANCE_ALGORITHM = "sha256-turn-role-v1"
+COMPLETE_TURN_BOUNDARY = "complete_actor_response_before_environment_observation"
 BACKEND_PLAN_SCHEMA = "kaetram.matched-training-backend-plan.v1"
 NORMALIZED_SCHEMA = "kaetram.normalized-training-record.v1"
 MAX_SEED = 2**31 - 1
@@ -24,6 +25,11 @@ MAX_SEED = 2**31 - 1
 
 class GuidedContractError(ValueError):
     pass
+
+
+def _sha256_json(value: Any) -> str:
+    material = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(material).hexdigest()
 
 
 def _seed(value: Any) -> int:
@@ -173,11 +179,25 @@ def _validate_turn_history(record: dict[str, Any]) -> list[dict[str, Any]]:
         raise GuidedContractError(f"record {record_id} must end at its complete actor turn")
     for expected_index, turn in enumerate(turns):
         if not isinstance(turn, dict) or set(turn) != {
-            "turn_id", "turn_index", "actor_role", "content", "role_decision_id",
+            "turn_id", "turn_index", "actor_role", "content", "content_sha256",
+            "actor_token_ids", "boundary", "role_decision_id",
         } or turn.get("turn_index") != expected_index \
                 or turn.get("actor_role") not in {"teacher", "student"} \
                 or not isinstance(turn.get("turn_id"), str) or not turn["turn_id"]:
             raise GuidedContractError(f"record {record_id} has malformed mixed-history turns")
+        if not isinstance(turn["content"], str) or not turn["content"] \
+                or turn["content_sha256"] != _sha256_json(turn["content"]):
+            raise GuidedContractError(f"record {record_id} has unbound actor-turn content")
+        if turn["boundary"] != COMPLETE_TURN_BOUNDARY:
+            raise GuidedContractError(
+                f"record {record_id} does not end before the environment observation"
+            )
+        if not isinstance(turn["actor_token_ids"], list) or not turn["actor_token_ids"] \
+                or not all(
+                    isinstance(token, int) and not isinstance(token, bool) and token >= 0
+                    for token in turn["actor_token_ids"]
+                ):
+            raise GuidedContractError(f"record {record_id} has invalid complete-turn token IDs")
     current = turns[index]
     if current["actor_role"] != semantics["actor_role"] \
             or current["role_decision_id"] != record_id:
@@ -231,6 +251,15 @@ def validate_guided_records(
                 or len(input_ids) != len(labels) \
                 or sum(label != -100 for label in labels) != action_tokens:
             raise GuidedContractError(f"record {record_id} labels do not match actor-turn tokens")
+        supervised_tokens = [label for label in labels if label != -100]
+        actor_input_tokens = [
+            token for token, label in zip(input_ids, labels, strict=True) if label != -100
+        ]
+        if turns[-1]["actor_token_ids"] != supervised_tokens \
+                or actor_input_tokens != supervised_tokens:
+            raise GuidedContractError(
+                f"record {record_id} complete actor turn is not bound to supervised tokens"
+            )
         behavior = record.get("behavior_logprobs")
         advantages = record.get("advantages")
         if not isinstance(behavior, list) or len(behavior) != len(input_ids):
