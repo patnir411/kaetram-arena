@@ -16,7 +16,7 @@ from typing import Any
 
 
 GUIDANCE_SCHEMA = "kaetram.guided-opd-role-decision.v1"
-GUIDANCE_ALGORITHM = "sha256-turn-role-v1"
+GUIDANCE_ALGORITHM = "sha256-turn-role-53bit-v1"
 COMPLETE_TURN_BOUNDARY = "complete_actor_response_before_environment_observation"
 BACKEND_PLAN_SCHEMA = "kaetram.matched-training-backend-plan.v1"
 NORMALIZED_SCHEMA = "kaetram.normalized-training-record.v1"
@@ -109,7 +109,7 @@ def make_role_decision(
         config, training_step=training_step
     )
     draw_hex = _draw_hex(seed, trajectory_id, turn_index)
-    draw = int(draw_hex, 16) / 2**64
+    draw = (int(draw_hex, 16) >> 11) / (1 << 53)
     return {
         "schema_version": GUIDANCE_SCHEMA,
         "algorithm": GUIDANCE_ALGORITHM,
@@ -314,7 +314,7 @@ def load_guided_training_bundle(
     records_file = Path(records_path).resolve()
     plan_file = Path(backend_plan_path).resolve()
     try:
-        plan = json.loads(plan_file.read_text())
+        plan = json.loads(plan_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise GuidedContractError(f"cannot load backend plan: {exc}") from exc
     if not isinstance(plan, dict) or plan.get("schema_version") != BACKEND_PLAN_SCHEMA:
@@ -355,12 +355,15 @@ def load_guided_training_bundle(
         raise GuidedContractError("normalized records filename, schema, or SHA-256 mismatch")
     records: list[dict[str, Any]] = []
     try:
-        for line_number, line in enumerate(records_file.read_text().splitlines(), 1):
-            if line.strip():
-                value = json.loads(line)
-                if not isinstance(value, dict):
-                    raise GuidedContractError(f"normalized record {line_number} is not an object")
-                records.append(value)
+        with records_file.open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, 1):
+                if line.strip():
+                    value = json.loads(line)
+                    if not isinstance(value, dict):
+                        raise GuidedContractError(
+                            f"normalized record {line_number} is not an object"
+                        )
+                    records.append(value)
     except (OSError, json.JSONDecodeError) as exc:
         raise GuidedContractError(f"cannot load normalized records: {exc}") from exc
     if len(records) != normalized["records"]:
@@ -375,7 +378,8 @@ def load_guided_training_bundle(
                 or record.get("training_seed") != seed \
                 or record.get("identities") != identities:
             raise GuidedContractError("normalized Guided record provenance mismatch")
-        decision = record.get("semantics", {}).get("role_decision")
+        semantics = record.get("semantics")
+        decision = semantics.get("role_decision") if isinstance(semantics, dict) else None
         expected_curriculum = {
             "kind": "guided_opd",
             "teacher_turn_probability": decision.get("teacher_turn_probability")

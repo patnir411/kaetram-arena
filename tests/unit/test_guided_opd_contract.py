@@ -246,8 +246,10 @@ def test_legacy_trainer_compiles_and_explicitly_blocks_guided_objective(tmp_path
     assert len(retries_keywords) == 1
     assert "Guided-OPD bundle validated, but execution is blocked" in source
     assert "forward KL on teacher turns" in source
-    assert 'record.get("semantics", {}).get("mode") == "guided_opd_actor_turn"' in source
-    assert 'record.get("history", {}).get("kind") == "guided_mixed_history"' in source
+    assert 'isinstance(semantics, dict)' in source
+    assert 'semantics.get("mode") == "guided_opd_actor_turn"' in source
+    assert 'isinstance(history, dict)' in source
+    assert 'history.get("kind") == "guided_mixed_history"' in source
 
     load_node = next(
         node for node in tree.body

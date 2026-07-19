@@ -119,19 +119,25 @@ def _load_records(path, backend_plan_path=""):
             "turns and forward KL on teacher turns"
         )
     recs = []
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
                 recs.append(json.loads(line))
-    if any(
-        record.get("schema_version") == "kaetram.normalized-training-record.v1"
-        or record.get("arm_id") == "guided_opd"
-        or record.get("semantics", {}).get("mode") == "guided_opd_actor_turn"
-        or record.get("curriculum", {}).get("kind") == "guided_opd"
-        or record.get("history", {}).get("kind") == "guided_mixed_history"
-        for record in recs
-    ):
+    if not all(isinstance(record, dict) for record in recs):
+        raise RuntimeError("OPD records must be JSON objects")
+
+    def has_guided_marker(record):
+        semantics = record.get("semantics")
+        curriculum = record.get("curriculum")
+        history = record.get("history")
+        return record.get("schema_version") == "kaetram.normalized-training-record.v1" \
+            or record.get("arm_id") == "guided_opd" \
+            or (isinstance(semantics, dict) and semantics.get("mode") == "guided_opd_actor_turn") \
+            or (isinstance(curriculum, dict) and curriculum.get("kind") == "guided_opd") \
+            or (isinstance(history, dict) and history.get("kind") == "guided_mixed_history")
+
+    if any(has_guided_marker(record) for record in recs):
         raise RuntimeError(
             "Guided-OPD records require --backend-plan-path for fail-closed "
             "schema, provenance, role-schedule, and mixed-trajectory validation"
