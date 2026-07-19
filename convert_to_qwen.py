@@ -33,12 +33,16 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-from tool_surface import MODEL_VISIBLE_TOOL_DEFINITIONS as TOOL_DEFINITIONS
+from tool_surface import (
+    MODEL_VISIBLE_TOOL_DEFINITIONS as TOOL_DEFINITIONS,
+    MODEL_VISIBLE_TOOL_SCHEMA_SHA256,
+    TOOL_SCHEMA_VERSION,
+)
 
 # Render path is shared with the trainer + serve so the gate measures exactly
 # what the trainer renders. See finetune/render.py for issue refs.
 sys.path.insert(0, str(Path(__file__).resolve().parent / "finetune"))
-from render import patch_qwen_chat_template, render_record  # noqa: E402
+from render import NATIVE_TOOLS_V1, patch_qwen_chat_template, render_record  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -489,8 +493,8 @@ def _drop_overlong(records: list[dict], tokenizer) -> tuple[list[dict], int, lis
     """Drop records whose train-time token count exceeds MAX_SEQ_LEN.
 
     Render path matches finetune/train_modal.load_kaetram_dataset exactly:
-    same tokenizer (unsloth/Qwen3.5-9B), patched chat template, no tools=
-    kwarg, system prompt prepended via render_record with rng=None
+    same tokenizer (unsloth/Qwen3.5-9B), patched chat template, native tools=
+    schema, system prompt prepended via render_record with rng=None
     (canonical intro, validation path).
 
     Records over MAX_SEQ_LEN are dropped wholesale; no inner truncation.
@@ -511,7 +515,15 @@ def _drop_overlong(records: list[dict], tokenizer) -> tuple[list[dict], int, lis
     dropped = 0
     kept_counts: list[int] = []
     for r in records:
-        text = render_record(r, SYSTEM_PROMPT, PERSONALITY_SUFFIXES, tokenizer, rng=None)
+        text = render_record(
+            r,
+            SYSTEM_PROMPT,
+            PERSONALITY_SUFFIXES,
+            tokenizer,
+            rng=None,
+            render_mode=NATIVE_TOOLS_V1,
+            tools=TOOL_DEFINITIONS,
+        )
         # tokenize=False + tok.encode() separately. transformers V5 changed
         # apply_chat_template(tokenize=True) to return BatchEncoding (a dict),
         # so len() of that gives 2, not the token count.
@@ -687,7 +699,7 @@ def main():
 
     sess_count, raw_turns = _count_extracted(args.input)
     metadata = {
-        "version": "r10",
+        "version": "native-tools-v1",
         "built_at": datetime.now(timezone.utc).isoformat(),
         "prompt_commit": _git_head_short(),
         "harness": "claude",
@@ -705,6 +717,9 @@ def main():
         "bootstrap_source": "orchestrate",
         "personality_labels": list(PERSONALITY_SUFFIXES.keys()),
         "system_prompt": SYSTEM_PROMPT,
+        "tool_render_mode": NATIVE_TOOLS_V1,
+        "tool_schema_version": TOOL_SCHEMA_VERSION,
+        "tool_schema_sha256": MODEL_VISIBLE_TOOL_SCHEMA_SHA256,
         "tools": TOOL_DEFINITIONS,
         "personality_suffixes": PERSONALITY_SUFFIXES,
     }

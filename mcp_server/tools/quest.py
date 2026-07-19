@@ -8,6 +8,7 @@ from mcp.server.fastmcp import Context
 from mcp_server.core import get_page, mcp
 from mcp_server.utils import (
     build_quest_query_response,
+    apply_no_walkthrough_policy,
     load_quest_walkthroughs,
     normalize_quest_lists,
     normalize_quest_name,
@@ -279,4 +280,5 @@ async def query_quest(ctx: Context, quest_name: str) -> str:
     except Exception:
         pass
 
+    response = apply_no_walkthrough_policy(response, matched_name)
     return json.dumps(response, indent=2)

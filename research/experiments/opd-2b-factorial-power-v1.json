@@ -1,0 +1,27 @@
+{
+  "schema_version": "kaetram-opd-power-analysis-v1",
+  "experiment_id": "opd-2b-core3-weights-x-recovery-v1",
+  "primary_metric": "core3_stages_advanced",
+  "primary_estimands": [
+    "r2_minus_base_recovery_off",
+    "r3_minus_base_recovery_off",
+    "recovery_on_minus_off_base",
+    "recovery_on_minus_off_r2",
+    "recovery_on_minus_off_r3",
+    "r2_minus_base_recovery_interaction",
+    "r3_minus_base_recovery_interaction"
+  ],
+  "familywise_alpha": 0.05,
+  "target_power": 0.8,
+  "planned_replicates": 20,
+  "method": "Prospective normal-approximation sizing for paired replicate-cluster contrasts with a two-sided Bonferroni allocation of 0.05/7 per registered primary estimand; 20 clusters is frozen as a conservative round-up above the approximation and must not be reduced after outcomes are observed.",
+  "assumptions": [
+    "The independent unit is one fresh-world replicate cluster, not a personality lane or cell.",
+    "The minimum relevant paired cluster difference is 3 Core-3 stages on the 0-30 replicate-arm scale.",
+    "The standard deviation of a paired cluster difference is at most 3 Core-3 stages.",
+    "All three personality lanes are summed before any registered contrast is formed.",
+    "This is an assumption-driven prospective calculation; it does not claim an empirical variance estimate from the historical unpaired runs."
+  ],
+  "standardized_effect": 1.0,
+  "per_estimand_two_sided_alpha": 0.007142857142857143
+}
