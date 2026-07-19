@@ -53,10 +53,18 @@ mechanism/baseline arms.
 ## What is forced to match
 
 The manifest has one global base checkpoint, teacher attestation/environment
-variable, optimizer, action-token budget, teacher-scoring-token budget,
-environment-interaction budget, seed schedule, held-out registration, and
-rendered-interface contract. Arm records cannot override any of them. Every
-generated cell embeds the identical shared contract.
+variable, parameterization, optimizer, action-token budget,
+teacher-scoring-token budget, environment-interaction budget, seed schedule,
+held-out registration, and rendered-interface contract. Arm records cannot
+override any of them. Every generated cell embeds the identical shared
+contract.
+
+Every arm initializes a fresh bf16 LoRA over the same frozen base checkpoint:
+rank 64, alpha 64, zero dropout, no bias, and exactly `q_proj`, `k_proj`,
+`v_proj`, `o_proj`, `gate_proj`, `up_proj`, and `down_proj`. Base parameters
+remain frozen. The normalized parameterization contract and its SHA-256 are
+copied into every cell so a baseline cannot silently full-finetune or reuse an
+adapter while another arm starts fresh.
 
 The checked optimizer contract is AdamW 8-bit, learning rate `5e-5`, cosine
 scheduling, 3% warmup, gradient norm 1, effective batch 32, and one epoch. The
@@ -134,9 +142,11 @@ exact Git commit, creates a prelaunch seal, and starts at most
 documented in
 [`opd-matched-training-backend.md`](opd-matched-training-backend.md). It verifies
 and normalizes immutable arm bundles but does not pretend the existing
-single-arm Modal trainer implements every registered objective. Actual Guided
-sampling, corrected-interface SFT, SCoRe, and reviewed Modal execution remain
-explicit trainer boundaries.
+single-arm Modal trainer implements every registered objective. The separate
+[`corrected-interface SFT adapter`](opd-corrected-interface-sft.md) now emits a
+pretokenized, render-identity-bound bundle without invoking a trainer. Actual
+Guided sampling, SCoRe, and reviewed accelerator execution remain explicit
+boundaries; the direct-token SFT route is now `executable_pending_compute`.
 
 ## Current blockers
 
@@ -146,8 +156,10 @@ explicit trainer boundaries.
   conditions.
 - Held-out scans, legal-reachability witnesses, and DB-backed teacher-success
   evidence are unresolved examples.
-- The material adapter implements all arm/history record contracts, but live
-  trainer extensions and reviewed execution are still required.
+- The material adapter implements all arm/history record contracts and the
+  corrected-interface SFT arm has a pretokenized fresh-LoRA execution path, but
+  live Guided/SCoRe trainer extensions and reviewed execution are still
+  required.
 - No cost/power review has approved 50 core plus 20 history-ablation cells.
 
 No expensive compute was run while adding this protocol.
