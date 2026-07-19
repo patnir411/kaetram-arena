@@ -38,6 +38,20 @@ def _natural_fixture(tmp_path: Path, monkeypatch) -> Path:
             for item in interface_files
         ],
     })
+    parameterization = {
+        "contract_id": mt.PARAMETERIZATION_CONTRACT,
+        "method": "lora",
+        "fresh_adapter_per_cell": True,
+        "precision": "bf16",
+        "rank": 64,
+        "alpha": 64,
+        "dropout": 0.0,
+        "bias": "none",
+        "target_modules": list(mt.LORA_TARGET_MODULES),
+        "task_type": "CAUSAL_LM",
+        "base_model_trainable": False,
+        "init_lora_weights": True,
+    }
     state_content = {"player": "train-player", "quest_stage": 2}
     history_content = [{"role": "user", "content": "visible training state"}]
     record = {
@@ -134,6 +148,8 @@ def _natural_fixture(tmp_path: Path, monkeypatch) -> Path:
             "held_out_registration_artifact_id": "heldout",
             "interface_contract_id": mt.INTERFACE_CONTRACT,
             "frozen_interfaces": interface_files,
+            "parameterization": parameterization,
+            "parameterization_sha256": _sha_json(parameterization),
             "optimizer": {"name": "adamw_8bit"},
             "artifact_root": str(repo / "artifacts"),
             "budgets": {

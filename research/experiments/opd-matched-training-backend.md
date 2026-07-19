@@ -46,9 +46,14 @@ is deterministic and recorded in the normalized output.
 
 The current OPD collator can consume ordinary normalized OPD arrays, but this
 adapter does not invoke it. Guided-OPD still requires a sampling extension,
-corrected-interface SFT requires a pretokenized SFT adapter, and SCoRe requires a
-first-error objective extension. The backend plan records these compatibility
-states instead of emitting a checkpoint claim.
+and SCoRe requires a first-error objective extension. Corrected-interface SFT
+now has a separate
+[`corrected-interface pretokenized adapter`](opd-corrected-interface-sft.md)
+that consumes these normalized token arrays without re-rendering conversations;
+its reviewed trainer path initializes the same fresh bf16 LoRA contract as all
+other arms, but this preparation step still does not invoke accelerator
+training. The backend plan records these compatibility states instead of
+emitting a checkpoint claim.
 
 ## Verification
 

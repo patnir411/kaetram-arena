@@ -24,6 +24,11 @@ REPO = Path(__file__).resolve().parents[2]
 PROTOCOL_ID = "kaetram.opd-matched-training.v1"
 REGISTRY_SCHEMA = "kaetram.matched-training-artifact-registry.v1"
 INTERFACE_CONTRACT = "kaetram-tool-render-contract-v1"
+PARAMETERIZATION_CONTRACT = "kaetram-matched-lora-v1"
+LORA_TARGET_MODULES = (
+    "q_proj", "k_proj", "v_proj", "o_proj",
+    "gate_proj", "up_proj", "down_proj",
+)
 UNRESOLVED = "UNRESOLVED"
 PRIMARY_ARMS = (
     "natural_opd",
@@ -156,6 +161,8 @@ class TrainingPlan:
     teacher_endpoint_env: str
     held_out_registration_artifact_id: str
     frozen_interfaces: tuple[dict[str, str], ...]
+    parameterization: dict[str, Any]
+    parameterization_sha256: str
     optimizer: dict[str, Any]
     budgets: dict[str, int]
     training_seed_schedule: tuple[int, ...]
@@ -269,6 +276,41 @@ def _validate_optimizer(raw: Any) -> dict[str, Any]:
     _positive_int(optimizer["effective_batch_size"], label="optimizer.effective_batch_size")
     _positive_int(optimizer["epochs"], label="optimizer.epochs")
     return optimizer
+
+
+def _validate_parameterization(raw: Any) -> tuple[dict[str, Any], str]:
+    value = _mapping(raw, label="shared_inputs.parameterization")
+    _exact_keys(
+        value,
+        {
+            "contract_id", "method", "fresh_adapter_per_cell", "precision",
+            "rank", "alpha", "dropout", "bias", "target_modules",
+            "task_type", "base_model_trainable", "init_lora_weights",
+        },
+        label="shared_inputs.parameterization",
+    )
+    expected_scalars = {
+        "contract_id": PARAMETERIZATION_CONTRACT,
+        "method": "lora",
+        "fresh_adapter_per_cell": True,
+        "precision": "bf16",
+        "rank": 64,
+        "alpha": 64,
+        "dropout": 0.0,
+        "bias": "none",
+        "task_type": "CAUSAL_LM",
+        "base_model_trainable": False,
+        "init_lora_weights": True,
+    }
+    for key, expected in expected_scalars.items():
+        if value.get(key) != expected:
+            raise ProtocolError(f"parameterization.{key} must be frozen to {expected!r}")
+    if value.get("target_modules") != list(LORA_TARGET_MODULES):
+        raise ProtocolError(
+            f"parameterization.target_modules must be exactly {list(LORA_TARGET_MODULES)}"
+        )
+    normalized = {**value, "target_modules": list(LORA_TARGET_MODULES)}
+    return normalized, _sha256_json(normalized)
 
 
 def _validate_arm(
@@ -550,7 +592,8 @@ def build_plan(path: str | Path) -> TrainingPlan:
         shared,
         {
             "base_checkpoint_artifact_id", "teacher", "held_out_registration_artifact_id",
-            "frozen_interfaces", "optimizer", "budgets", "training_seed_schedule",
+            "frozen_interfaces", "parameterization", "optimizer", "budgets",
+            "training_seed_schedule",
         },
         label="shared_inputs",
     )
@@ -600,6 +643,9 @@ def build_plan(path: str | Path) -> TrainingPlan:
     if len({item["path"] for item in frozen}) != len(frozen):
         raise ProtocolError("frozen interface files must be unique")
 
+    parameterization, parameterization_sha = _validate_parameterization(
+        shared.get("parameterization")
+    )
     optimizer = _validate_optimizer(shared.get("optimizer"))
     budgets_raw = _mapping(shared.get("budgets"), label="shared_inputs.budgets")
     _exact_keys(
@@ -707,6 +753,8 @@ def build_plan(path: str | Path) -> TrainingPlan:
         "held_out_registration_artifact_id": heldout_id,
         "interface_contract_id": INTERFACE_CONTRACT,
         "frozen_interfaces": frozen,
+        "parameterization": parameterization,
+        "parameterization_sha256": parameterization_sha,
         "optimizer": optimizer,
         "budgets": budgets,
         "artifact_registry": {
@@ -771,6 +819,8 @@ def build_plan(path: str | Path) -> TrainingPlan:
         teacher_endpoint_env=teacher_env,
         held_out_registration_artifact_id=heldout_id,
         frozen_interfaces=tuple(frozen),
+        parameterization=parameterization,
+        parameterization_sha256=parameterization_sha,
         optimizer=optimizer,
         budgets=budgets,
         training_seed_schedule=seeds,

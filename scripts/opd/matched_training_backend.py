@@ -28,6 +28,7 @@ from scripts.opd.matched_training import (  # noqa: E402
     REACHABILITY_ARMS,
     REGISTRY_SCHEMA,
     UNRESOLVED,
+    _validate_parameterization,
 )
 
 
@@ -37,7 +38,8 @@ NORMALIZED_SCHEMA = "kaetram.normalized-training-record.v1"
 BACKEND_PLAN_SCHEMA = "kaetram.matched-training-backend-plan.v1"
 BACKEND_RESULT_SCHEMA = "kaetram.matched-training-result.v2"
 OPD_TRAINER = "finetune/train_opd_2b.py"
-SFT_TRAINER = "finetune/train_modal.py"
+SFT_ADAPTER = "scripts/opd/corrected_interface_sft.py"
+SFT_ADAPTER_PATH = Path(__file__).resolve().parent / "corrected_interface_sft.py"
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -647,10 +649,13 @@ def _budget_totals(records: list[dict[str, Any]]) -> dict[str, int]:
 def _trainer_route(arm: dict[str, Any]) -> dict[str, Any]:
     arm_id = arm["arm_id"]
     if arm["objective"] == "sft":
+        if not SFT_ADAPTER_PATH.is_file():
+            raise ProtocolError(f"corrected-interface SFT adapter is missing: {SFT_ADAPTER_PATH}")
         return {
-            "entrypoint": SFT_TRAINER,
-            "compatibility": "requires_sft_pretokenized_adapter",
-            "reason": "existing SFT trainer consumes conversation records, not this normalized token contract",
+            "entrypoint": SFT_ADAPTER,
+            "entrypoint_sha256": _sha256(SFT_ADAPTER_PATH),
+            "compatibility": "requires_separate_pretokenized_sft_adapter",
+            "reason": "normalized token records must pass the direct-token SFT adapter before execution",
         }
     if arm["objective"] == "score":
         return {
@@ -698,7 +703,8 @@ def build_backend_plan(cell_config_path: str | Path) -> tuple[dict[str, Any], li
             "source_git_commit", "experiment_manifest_sha256",
             "base_checkpoint_artifact_id", "teacher_artifact_id", "teacher_endpoint_env",
             "held_out_registration_artifact_id", "interface_contract_id", "frozen_interfaces",
-            "optimizer", "budgets", "artifact_registry", "artifact_root",
+            "parameterization", "parameterization_sha256", "optimizer", "budgets",
+            "artifact_registry", "artifact_root",
         },
         label="shared_contract",
     )
@@ -714,6 +720,9 @@ def build_backend_plan(cell_config_path: str | Path) -> tuple[dict[str, Any], li
     )
     material_root = _artifact_root(shared.get("artifact_root"))
     render_sha = _interface_digest(shared)
+    parameterization, parameterization_sha = _validate_parameterization(shared.get("parameterization"))
+    if shared.get("parameterization_sha256") != parameterization_sha:
+        raise ProtocolError("shared_contract parameterization SHA-256 mismatch")
     registry_ref = _mapping(shared["artifact_registry"], label="artifact_registry")
     _exact_keys(registry_ref, {"path", "sha256"}, label="artifact_registry")
     registry_path = _inside_repo(Path(registry_ref["path"]), label="artifact registry")
@@ -888,6 +897,8 @@ def build_backend_plan(cell_config_path: str | Path) -> tuple[dict[str, Any], li
             "held_out_registration_artifact_id": heldout_id,
         },
         "optimizer": optimizer,
+        "parameterization": parameterization,
+        "parameterization_sha256": parameterization_sha,
         "budgets": registered_budgets,
         "trainer_route": route,
         "execution_status": "not_run",

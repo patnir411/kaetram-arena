@@ -72,6 +72,15 @@ def test_example_expands_core_and_separate_history_cells_with_matched_contracts(
     }
     assert all("budgets" not in cell.config["arm"] for cell in plan.cells)
     assert all("optimizer" not in cell.config["arm"] for cell in plan.cells)
+    assert all("parameterization" not in cell.config["arm"] for cell in plan.cells)
+    assert plan.parameterization["rank"] == 64
+    assert plan.parameterization["alpha"] == 64
+    assert plan.parameterization["target_modules"] == list(mt.LORA_TARGET_MODULES)
+    assert all(
+        cell.config["shared_contract"]["parameterization_sha256"]
+        == plan.parameterization_sha256
+        for cell in plan.cells
+    )
     assert plan.launch_blockers
 
 
@@ -113,6 +122,16 @@ def test_arm_cannot_override_shared_budget(tmp_path: Path, monkeypatch) -> None:
         raw["arms"][0]["budgets"] = {"action_tokens": 1}
 
     with pytest.raises(mt.ProtocolError, match="only arm-specific fields"):
+        mt.build_plan(_sandbox_manifest(tmp_path, monkeypatch, mutate_manifest=mutate))
+
+
+def test_lora_parameterization_is_shared_and_fails_closed_on_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    def mutate(raw):
+        raw["shared_inputs"]["parameterization"]["rank"] = 32
+
+    with pytest.raises(mt.ProtocolError, match="parameterization.rank"):
         mt.build_plan(_sandbox_manifest(tmp_path, monkeypatch, mutate_manifest=mutate))
 
 

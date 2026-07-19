@@ -33,6 +33,28 @@
         }
       ]
     },
+    "parameterization": {
+      "contract_id": "kaetram-matched-lora-v1",
+      "method": "lora",
+      "fresh_adapter_per_cell": true,
+      "precision": "bf16",
+      "rank": 64,
+      "alpha": 64,
+      "dropout": 0.0,
+      "bias": "none",
+      "target_modules": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "task_type": "CAUSAL_LM",
+      "base_model_trainable": false,
+      "init_lora_weights": true
+    },
     "optimizer": {
       "name": "adamw_8bit",
       "learning_rate": 0.00005,
@@ -305,7 +327,7 @@
     "artifact_root": "UNRESOLVED_FOR_IMMUTABLE_ARTIFACT_ROOT",
     "backend_adapter": {
       "path": "scripts/opd/matched_training_backend.py",
-      "sha256": "670011a148305926a84ddc21b62a9b7b1c65054d3953eef3964fb1c1b4454c41"
+      "sha256": "fa1279e1fa74adf78e3deef3f84cdb6e2a4f84c13b61c689ef6b3f7c8b8a04c6"
     }
   }
 }
