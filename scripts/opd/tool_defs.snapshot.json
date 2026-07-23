@@ -1,0 +1,338 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "observe",
+   "description": "Observe the current game state.\n\n    Returns a unified view optimized for decision-making:\n    - Player: pos, stats, equipment, skills\n    - Status: dead, stuck, nav, indoors, combat target\n    - Nearby: categorized NPCs, mobs, resources, ground items \u2014 with\n      direction (N/S/E/W) and distance from player\n    - Inventory: stacked by item key with counts\n    - Quests: active and finished, each active quest tagged with items_progress\n    - Events: recent chat, combat, XP, NPC dialogue\n    - ASCII map: terrain layout with entity symbols (dropped when\n      KAETRAM_OBSERVE_COMPACT is set; STUCK_CHECK is always kept)\n    ",
+   "parameters": {
+    "properties": {},
+    "title": "observeArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "navigate",
+   "description": "Navigate to grid coordinates using BFS pathfinding.\n\n    Auto-advances waypoints in background. Call observe() to check navigation.status.\n    For distances > 100 tiles, warp to nearest town first.\n\n    Args:\n        x: Target grid X coordinate\n        y: Target grid Y coordinate\n    ",
+   "parameters": {
+    "properties": {
+     "x": {
+      "title": "X",
+      "type": "integer"
+     },
+     "y": {
+      "title": "Y",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "x",
+     "y"
+    ],
+    "title": "navigateArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "warp",
+   "description": "Fast travel to a town. Auto-waits up to 25s if combat cooldown is active.\n\n    Args:\n        location: 'mudwich', 'aynor', 'lakesworld', 'patsow', 'crullfield', or 'undersea'\n    ",
+   "parameters": {
+    "properties": {
+     "location": {
+      "default": "mudwich",
+      "title": "Location",
+      "type": "string"
+     }
+    },
+    "title": "warpArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "cancel_nav",
+   "description": "Cancel active navigation.",
+   "parameters": {
+    "properties": {},
+    "title": "cancel_navArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "stuck_reset",
+   "description": "Reset stuck detection. Use when stuck check shows stuck=true.",
+   "parameters": {
+    "properties": {},
+    "title": "stuck_resetArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "attack",
+   "description": "Attack the nearest alive mob matching the given name.\n\n    Args:\n        mob_name: Name of mob to attack (e.g. 'Rat', 'Snek', 'Goblin')\n    ",
+   "parameters": {
+    "properties": {
+     "mob_name": {
+      "title": "Mob Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "mob_name"
+    ],
+    "title": "attackArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "set_attack_style",
+   "description": "Set combat attack style.\n\n    Args:\n        style: 'hack' (strength+defense), 'chop' (accuracy+defense), or 'defensive' (defense)\n    ",
+   "parameters": {
+    "properties": {
+     "style": {
+      "default": "hack",
+      "title": "Style",
+      "type": "string"
+     }
+    },
+    "title": "set_attack_styleArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "respawn",
+   "description": "Respawn after death, clear all combat state, and warp to Mudwich.",
+   "parameters": {
+    "properties": {},
+    "title": "respawnArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "interact_npc",
+   "description": "Walk to an NPC and read dialogue. Quest offers are NOT accepted unless\n    you explicitly opt in via `accept_quest_offer=True`.\n\n    Flow:\n    1. Walk to NPC if not adjacent (targets orthogonal neighbor tile).\n    2. Verify adjacency (Manhattan distance < 2, server requirement).\n    3. Read all dialogue lines until the NPC cycles or stops.\n    4. If a quest panel opens:\n         - `accept_quest_offer=True` \u2192 click \"Start Quest\"; result has\n           `quest_accepted=True`.\n         - default \u2192 dismiss the panel; result has `quest_offered=<name>`\n           so you can decide and call again with the flag set.\n\n    Quest TURN-INS happen via normal dialogue progression and do NOT\n    require the flag \u2014 the server consumes inventory items automatically\n    when you talk to a quest NPC at the right stage.\n\n    Returns dialogue_complete=true when all unique dialogue has been exhausted.\n    Do NOT call interact_npc again on the same NPC after dialogue_complete=true\n    unless you need to trigger a different quest stage or shop.\n\n    Args:\n        npc_name: Name of the NPC (e.g. 'Forester', 'Blacksmith', 'Village Girl').\n        expect: Expected interaction result: 'dialogue' (default), 'shop', or 'any'.\n        include_ui_state: Include a best-effort snapshot of the visible UI state.\n        accept_quest_offer: When True, accept (click Start Quest) any quest\n            offered during this interaction. When False (default), the panel\n            is dismissed and the quest stays unstarted.\n    ",
+   "parameters": {
+    "properties": {
+     "npc_name": {
+      "title": "Npc Name",
+      "type": "string"
+     },
+     "expect": {
+      "default": "dialogue",
+      "title": "Expect",
+      "type": "string"
+     },
+     "include_ui_state": {
+      "default": true,
+      "title": "Include Ui State",
+      "type": "boolean"
+     },
+     "accept_quest_offer": {
+      "default": false,
+      "title": "Accept Quest Offer",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "npc_name"
+    ],
+    "title": "interact_npcArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "buy_item",
+   "description": "Buy an item from an NPC's shop.\n\n    Args:\n        npc_name: Store NPC name (e.g. 'Forester', 'Miner', 'Clerk')\n        item_index: Index of item in the shop (0-based)\n        count: Number to buy (default 1)\n    ",
+   "parameters": {
+    "properties": {
+     "npc_name": {
+      "title": "Npc Name",
+      "type": "string"
+     },
+     "item_index": {
+      "title": "Item Index",
+      "type": "integer"
+     },
+     "count": {
+      "default": 1,
+      "title": "Count",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "npc_name",
+     "item_index"
+    ],
+    "title": "buy_itemArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "eat_food",
+   "description": "Eat food from inventory to heal HP.\n\n    Args:\n        slot: Inventory slot number (0-24)\n    ",
+   "parameters": {
+    "properties": {
+     "slot": {
+      "title": "Slot",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "slot"
+    ],
+    "title": "eat_foodArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "drop_item",
+   "description": "Drop an item from inventory to free space.\n\n    Args:\n        slot: Inventory slot number (0-24)\n    ",
+   "parameters": {
+    "properties": {
+     "slot": {
+      "title": "Slot",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "slot"
+    ],
+    "title": "drop_itemArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "equip_item",
+   "description": "Equip an item from inventory.\n\n    Args:\n        slot: Inventory slot number (0-24)\n    ",
+   "parameters": {
+    "properties": {
+     "slot": {
+      "title": "Slot",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "slot"
+    ],
+    "title": "equip_itemArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "gather",
+   "description": "Gather from a nearby resource (tree, rock, bush, fish spot).\n\n    Args:\n        resource_name: Name of resource (e.g. 'Oak', 'Nisoc Rock', 'Tomato', 'Blueberry Bush')\n    ",
+   "parameters": {
+    "properties": {
+     "resource_name": {
+      "title": "Resource Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "resource_name"
+    ],
+    "title": "gatherArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "loot",
+   "description": "Pick up nearby ground items and lootbag contents after combat.",
+   "parameters": {
+    "properties": {},
+    "title": "lootArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "craft_item",
+   "description": "Open the relevant production interface and craft a recipe by key.\n\n    Supports Crafting, Cooking, Smithing, Smelting, Alchemy, Fletching, and\n    Chiseling. Station-based skills auto-walk to the nearest matching station.\n    ",
+   "parameters": {
+    "properties": {
+     "skill": {
+      "title": "Skill",
+      "type": "string"
+     },
+     "recipe_key": {
+      "title": "Recipe Key",
+      "type": "string"
+     },
+     "count": {
+      "default": 1,
+      "title": "Count",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "skill",
+     "recipe_key"
+    ],
+    "title": "craft_itemArguments",
+    "type": "object"
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "query_quest",
+   "description": "Look up detailed walkthrough + live state for a specific quest.\n\n    Leads with `current_step` (canonical facts \u2014 accepted/stage/needed/have/\n    remaining \u2014 plus an advisory `recommended_action` + `preconditions`) computed\n    against your current player state, then requirements, unlocks, reward caveats,\n    walkthrough, boss/recipe notes, `station_locations`, and a `live_gate_status`\n    block. **Call this BEFORE `interact_npc(accept_quest_offer=true)` for any\n    Core-3 candidate.** If `live_gate_status.gated` is true, check\n    `blockers`: a `skill` blocker is clearable \u2014 accept the quest and grind that\n    skill to proceed; a `quest`/`achievement` blocker is a hard dependency \u2014 pick\n    a different quest.\n\n    Args:\n        quest_name: Exact or near-exact quest name (e.g. 'Sorcery and Stuff',\n            'Scavenger', 'Royal Drama').\n    ",
+   "parameters": {
+    "properties": {
+     "quest_name": {
+      "title": "Quest Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "quest_name"
+    ],
+    "title": "query_questArguments",
+    "type": "object"
+   }
+  }
+ }
+]
