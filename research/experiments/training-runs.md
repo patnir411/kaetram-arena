@@ -20,7 +20,7 @@ History of the Qwen3.5 finetuning runs: the 9B SFT era (r1–r10) and the r11 er
 | r9-KTO | DEFERRED | KTO | TBD | Preference learning on r9 merged weights | Deferred indefinitely — pipeline focuses on the quest-completion benchmark over preference-RL. |
 | r11-scaffold | May 28–Jun 4 | harness (no training) | — | R11 scaffold/state-contract reframe across model sizes | base-9B Core-3 4→19/30; scaffold transfers down the size ladder (27B 15, 4B 17, 2B 12) — capacity isn't the lever. See `opd-2b.md`, `r11-direction.md`. |
 | opd-r1 | Jun 10 | OPD | 5,564 / 574 | 4B teacher → base-2B student, clipped-IS reverse-KL (init==generator) | Core-3 **12/30** — style transferred, competence didn't (visitation coupling + teacher-forcing copy-prior). |
-| opd-r2 | Jun 12 | OPD | 7,024 / 825 | + env-state seeding at the Herbalist wall (bucket-B) | **15/30** — first weights-driven lift; Herbalist stage-1 passed 3/3 unseeded. |
+| opd-r2 | Jun 12 | OPD | 7,024 / 825 | + env-state seeding at the Herbalist wall (bucket-B) | **Reported 15/30** recovery-off run; clustered prompts passed Herbalist stage 1; causal attribution unavailable. |
 | opd-r3 | Jun 13 | OPD | 8,856 / 1,040 | + counterfactual-canonicalized grading + full-ladder seeding + harness recovery | **18/30** — program best, past the 4B teacher (17); Herbalist stage-2 broke; Rick's 0/4 (cook-incompetent teacher). |
 
 ---
@@ -247,16 +247,16 @@ Originally planned to replace r8-KTO using r9 merged weights. **Deferred indefin
 
 ## r11 — scaffold reframe + OPD (rounds 1–3, Jun 7–14 2026)
 
-After r10's negative result the program pivoted twice. First a **scaffold reframe** (no weight training): harness/state-contract engineering moved the base-9B Core-3 envelope 4 → 19/30, and the scaffold transfers down the size ladder (27B 15/30, 4B 17/30, 2B 12/30) — capacity is not the lever. Then an **on-policy distillation** lane: teacher = scaffolded 4B (17/30), student = base 2B (12/30), ~an order of magnitude cheaper per round than the 9B lane.
+After the reported r10 negative result the program pivoted twice. First, harness/state-contract changes coincided with a 4 → 19/30 base-9B envelope and a small duration-mismatched size sweep; this motivates a scaffold hypothesis, not a capacity conclusion. Then an on-policy-distillation lane used a scaffolded 4B teacher and base 2B student. The historical raw bundles are absent, so all scores below are reported observations.
 
 | Round | Core-3 /30 | Lever | Outcome |
 |---|---|---|---|
 | base-2B | 12 | — | scaffold floor |
 | opd-r1 | 12 | reverse-KL OPD | style transferred, competence didn't (visitation coupling; teacher-forcing copy-prior) |
-| opd-r2 | **15** | + env-state seeding at the Herbalist wall | first weights-driven lift; stage-1 passed 3/3 unseeded |
-| opd-r3 | **18** | + counterfactual grading + full-ladder seeding + harness recovery | program best, past the 4B teacher; Herbalist stage-2 broke; Rick's 0/4 (cook-incompetent teacher) |
+| opd-r2 | **15** | + env-state seeding at the Herbalist wall | recovery-off historical run; clustered prompts passed stage 1 |
+| opd-r3 | **18** | + counterfactual grading + full-ladder seeding + harness recovery | weights-plus-recovery historical system run |
 
-A controlled ablation (r2 weights + harness recovery = 17/30) decomposes r2→r3 as **harness → stages, weights → speed**. Full method, results, and literature alignment: **`research/experiments/opd-2b.md`**; paper: **`reference/overview.pdf`**. Trainer: `finetune/train_opd_2b.py` (round-parametrized). The 9B OPD lane (`train_opd_modal.py`) was parked with round-1 data built but never trained.
+An unmatched r2-weights-plus-recovery run is reported at 17/30; it does not decompose weights and recovery. Full evidence boundary: **`research/paper/claims-evidence-matrix.md`**. Historical narrative: **`research/experiments/opd-2b.md`**. Trainer: `finetune/train_opd_2b.py` (round-parametrized). The 9B OPD lane (`train_opd_modal.py`) was parked with round-1 data built but never trained.
 
 ---
 

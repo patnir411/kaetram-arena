@@ -1,10 +1,14 @@
 # Paper 1: Contribution & Framing
 
-Working notes for the ICLR 2027 submission (Paper 1 of the two-paper roadmap). This is a thinking document — not paper-ready prose.
+Working notes for Paper 1 of the two-paper roadmap. This is a historical thinking document, not paper-ready prose. The July 18, 2026 submission audit in [submission-readiness.md](submission-readiness.md), [claims-evidence-matrix.md](claims-evidence-matrix.md), and [literature-positioning.md](literature-positioning.md) supersedes any conflicting framing below.
 
-**Context:** This is Paper 1 (Kaetram distillation). Paper 2 (RuneScape adversarial multi-agent) is in [paper2-runescape-vision.md](paper2-runescape-vision.md). The two papers are fully independent — do not conflate them. Paper 1 proves the distillation infrastructure. Paper 2 is the agent safety contribution. Both publish under the arXiv.
+**Context:** This is Paper 1 (Kaetram distillation). Paper 2 (RuneScape adversarial multi-agent) is in [paper2-runescape-vision.md](paper2-runescape-vision.md). The two papers are fully independent — do not conflate them. Paper 1 evaluates a distillation hypothesis and its infrastructure; it does not yet prove a method effect. Paper 2 is the agent safety contribution.
 
-**Publication strategy:** arXiv-first + simultaneous ICLR/NeurIPS submission. Post to arXiv the day we submit — community reads immediately, conference review runs in parallel. Do NOT skip conference submission — one Spotlight/Oral is disproportionately valuable for the acqui-hire path.
+**Publication strategy:** arXiv plus one archival venue at a time. The working
+target is NAACL 2027 through the October 12, 2026 ARR cycle only if the matched
+causal and transfer experiments are complete; TMLR is the rolling fallback.
+
+**Current framing:** reachability-targeted persistent-player-state initialization for on-policy distillation in persistent tool-using agents (4B teacher to 2B student). The method is prospective: direct player snapshots must be selected by a frozen visitation/teacher-advantage/recoverability rule and compared against natural OPD, random-valid and progress-matched resets, TCOD-B2F, and Guided-OPD. The implementation does not restore a complete shared world. The historical round-two 12/30 to 15/30 sequence used a hand-selected milestone and is motivation, not validation; the 18/30 round-three result combines weights with a recovery affordance. The original 9B SFT result is a motivating negative result, not the current method contribution.
 
 ---
 
@@ -127,7 +131,15 @@ This is the headline paper-ready ablation. The earlier r7/r8/r9 deltas (loss mas
 
 **Harness × model conflation.** All training trajectories are Claude Sonnet via the Claude Code CLI. The base comparator is unfinetuned Qwen3.5-9B served via SGLang (`finetune/serve_modal_base.py`). A reviewer can argue we have not separated "distillation works" from "Sonnet > base Qwen on this task." Mitigation requires either same-model-different-harness or same-harness-different-model runs. Cross-harness infrastructure is in place (Codex/Gemini/OpenCode fully integrated, 6 OpenCode models), but cross-model SFT corpora have not been collected. Tracked in `VARIABLES.md` §"Three most dangerous unisolated variables."
 
-**Statistical power.** The published paper claim requires N ≥ 50 per arm to detect Glass's δ ≈ 0.5 (10% Core-3-stage delta) with 80% power post-Bonferroni over (n_metrics × n_model_pairs). `eval_harness.py:--episodes` default is now 50; smaller exploratory runs should not be quoted as paper claims.
+**Statistical power.** The current prospective contract schedules 20
+frozen-checkpoint evaluation clusters. Its 80% calculation is explicitly
+conditional on a three-stage minimum relevant paired difference and
+paired-difference SD no greater than three stages after multiplicity adjustment
+across seven estimands. It does not replicate the training procedure. That
+variance bound has no independent pilot support yet. Before compute, justify it
+with independent pilot data or a conservative prespecified variance grid (or
+use blinded variance re-estimation with a fixed maximum); neither 20 nor the
+historical default of 50 is automatically confirmatory.
 
 **Archetype-diversity claim is provisional.** The n=731 automated audit found that "task pressure dominates personality" — under quest deadlines, archetype-flavored agents converge to similar action distributions. We retain capability-archetype labels because they appear to produce different *decision boundaries*, but the 1-archetype-vs-3 ablation is not yet run. If the ablation ties, the claim should be downgraded to "data-augmentation strategy" rather than a research contribution.
 

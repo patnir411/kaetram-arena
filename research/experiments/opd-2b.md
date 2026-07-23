@@ -1,18 +1,18 @@
 # OPD rounds 1–3: 4B teacher → base-2B student (the small-model pivot)
 
 **Status:** rounds 1–3 complete + evaluated, June 7–14 2026 (branch `feat/r11-opd-tinker`).
-**Headline: OPD took the base 2B from 12/30 to 18/30 (+50%) — a clear step beyond base. Every
-agent completes two Core-3 chains unseeded (Foresting AND Herbalist's Desperation) where base
-completes one; the Herbalist wall base passed 0/3 falls 3/3.** The Core-3 arc is monotone:
-base 12 → r1 12 → r2 15 → **r3 18**. The competence is **weights-driven** — round 2 (15/30) is
-the cleanest piece, a weights-only result on the same harness base ran on (no affordance). Over
-base, the +6 decomposes as **+3 pure weights (r2, the wall) / +2 harness recovery / +1 r3
-weights** (the +1 is within n=1 noise — the r3 weight update's reliable payoff is speed). Round 3 broke the stage-2 wall and fixed the format defect via the harness recovery
+**Historical observation:** project notes report a monotone Core-3 sequence of base 12 → r1 12 →
+r2 15 → **r3 18**, with one complete run per cell. Round 2 ran without the recovery affordance;
+round 3 combined new weights with recovery. The June raw session trees, immutable manifests,
+checkpoint/configuration digests, and gameplay seeds are not preserved in this repository, so the
+sequence cannot establish a causal weights effect, exact harness parity, or a +3/+2/+1 effect
+decomposition. Within the reported runs, every round-3 agent completed Foresting and Herbalist's
+Desperation where the reported base agents completed only Foresting. Round 3 broke the stage-2 wall and fixed the format defect via the harness recovery
 affordance — but Rick's Roll stayed 0/4 (over-determined: a displaced fishing tool gates link 1
-before cooking is reached, with the cook-incompetent teacher a wall behind it). The r2→r3 ablation (round-2 weights + recovery = 17/30) shows the harness
-carried ~2 of those 3 stages and the r3 weight update ~1, whose distinct payoff is ~2× faster
-progression — so **harness → stages, weights → speed describes the r2→r3 step only; over base,
-weights are the competence engine**. We label 18/30 a weights-plus-interface result and don't lean
+before cooking is reached, with the cook-incompetent teacher a wall behind it). The reported
+round-2-weights-plus-recovery result (17/30) was also a single unmatched historical run; it is
+suggestive, not a controlled effect estimate.
+We label 18/30 a weights-plus-interface result and don't lean
 on nominally edging the 4B teacher (18 vs 17, with a recovery fix the teacher lacked). Supersedes
 the 9B
 instantiation of the OPD plan in [r11-direction.md](r11-direction.md) ("Where r11 sits");
@@ -126,7 +126,7 @@ not a same-harness ceiling.
 
 ## Execution notes
 
-- Training (174 steps = 5,564/32 exactly, lr 5e-5) ran on the **pure-torch Gated-DeltaNet
+- Training (174 steps = ceil(5,564/32), lr 5e-5) ran on the **pure-torch Gated-DeltaNet
   fallback** (~168 s/step, ~8h — Qwen3.5-2B has 18/24 linear-attention layers and the
   fast-kernel paths were broken in our image: fla 0.5.0 refuses Triton ≥ 3.4 on Hopper,
   tilelang 0.1.11 SIGABRTs with a tvm::ffi TypeAttr double-registration). Adapter + merged at
@@ -301,16 +301,16 @@ teacher follows the student into the attractor — the prompt documents the call
 `interact_npc(..., accept_quest_offer=True)`, and the `<parameter=` wire dialect primes the
 assignment reading — even though it never emits the form generatively.
 
-**The defect is the teacher's in-context copy-prior, faithfully distilled in round 1, and dense
-reverse-KL cannot self-correct it on r1's own rollouts** (the per-token signal points the wrong
-way). General lesson: on-policy distillation transfers teacher failure modes that only manifest
-under teacher-forcing; a generative check (the 4B emits the correct form in its own runs) does
-not certify the teacher as a per-token grader. Impact is bounded: stage *turn-ins* advance via
+**The historical probe motivates an in-context copy-prior hypothesis.** It reports positive
+teacher-over-student advantage for one malformed continuation, but does not score canonical and
+malformed candidates in the same context. The paired artifact needed to establish wrong-signed
+teacher preference is absent. A generative check (the 4B emits the correct form in its own runs)
+still does not by itself certify the teacher as a per-token grader. Impact is bounded: stage *turn-ins* advance via
 plain `interact_npc` with items in inventory (server-side consume) — the parameter only gates
 initial accepts. The defect's arc across rounds: round 2 masks advantages on the malformed
 spans (containment, no cure), round 3 grades them under a canonicalized teacher context
-(regresses the emission), and a harness recovery affordance finally cures it at generation
-time (see round 3).
+(regresses the emission in the reported run), and a harness recovery affordance executes the
+dropped call at generation time (see round 3).
 
 ### Qualitative deep-read: six readers over r1 + base logs
 
@@ -365,16 +365,14 @@ no-precedent elements that are ours to write up:
   [2603.25562](https://arxiv.org/abs/2603.25562); TA-OPD
   ([2605.26844](https://arxiv.org/abs/2605.26844)) trains on the teachable ~5% only.
   DistIL ([2606.05152](https://arxiv.org/abs/2606.05152)) supplies the theory: reverse-KL
-  objectives can *increase* probability on worse actions — so abstention (zero), not
-  down-weighting, is correct where the grader is provably wrong-direction.
+  objectives can *increase* probability on worse actions. The present historical probe does not
+  establish a wrong-direction candidate preference, so it cannot choose abstention over weighting.
 - **Our defect's nearest named relative** is KAT's "KL agreement trap"
   ([2606.09471](https://arxiv.org/abs/2606.09471), June 8): the teacher locally agrees
   with degraded student prefixes, yielding no corrective signal. Our case is the sharper
-  variant — the teacher actively *prefers* the malformed continuation (~85%) it never
-  emits generatively. **The teacher-forcing copy-prior mechanism (ICL copy bias / induction
-  heads surfacing inside the grader: [2410.01288](https://arxiv.org/abs/2410.01288),
-  [2505.13514](https://arxiv.org/abs/2505.13514)) has no precedent in the distillation
-  literature — novel observation.** Related framings: the OPD survey's "flawed prefix
+  candidate only if a paired study shows that the teacher prefers the malformed continuation over
+  the canonical one. The present notes report positive teacher-over-student advantage for the
+  malformed candidate, not preference reversal. Related framings include CCOPD, SOD, KAT, the OPD survey's "flawed prefix
   trap" ([2604.00626](https://arxiv.org/abs/2604.00626)), SKD's "inaccurate teacher
   feedback" ([2410.11325](https://arxiv.org/abs/2410.11325)), SG-OPD's verifier-teacher
   sign-gating ([2606.09304](https://arxiv.org/abs/2606.09304)).
@@ -518,7 +516,7 @@ drops a malformed call, `play_qwen` recovers the executable call (`canonicalize.
 99.5% coverage on real specimens), **rewrites history to a clean canonical assistant turn**
 (severing the in-context copy prior at its source), executes it, and returns a loud `[format]`
 correction note. The rerun (`run_20260613_112422`) with recovery on solved the paralysis
-completely (3.3% recovery rate, **self-correcting** — see below).
+at runtime (reported 3.3% recovery rate; source logs are not packaged).
 
 ### Results: 18/30, and the Herbalist stage-2 wall broke
 
@@ -547,29 +545,25 @@ All three completed Herbalist 3/3 (2.7–4.0h, sessions ~181–205) — r2 had *
   positions in 1–2 turns not 16). Gathered paprika **survives death**, so dying in the L45–54
   zone (10/7/10 deaths during the grind) didn't reset progress.
 
-### Decomposing the gains: weights are the competence engine over base
+### Descriptive cross-run comparison; no causal decomposition
 
-The full **+6 over base (12→18)** decomposes into **+3 from weights alone** (round 2,
-12→15, run *without* the recovery affordance — the Herbalist wall falls 3/3 unseeded), **+2 from
-the harness recovery affordance**, and a residual **+1 from the r3 weight update that sits within
-the n=1 noise band** (it may be ~0 stages; the r3 update's reliable payoff is speed, not stages).
-So over base, weights contributed ~+3–4 of the +6 and the harness +2 — **weights are the larger
-cumulative lever, and
-they are what makes the 2B better than base** (the wall, visible with seeding off at eval).
+The historical reports give base 12/30, round 2 at 15/30 without recovery, round-2 weights with
+recovery at 17/30, and round-3 weights with recovery at 18/30. These are one unmatched run per
+cell. Their raw bundles, exact checkpoint/render parity, gameplay seeds, and immutable
+configuration manifests are absent, so subtracting the scores does **not** identify weights,
+recovery, or interaction effects. In the reported recovery-off round-2 run, the Herbalist wall
+fell 3/3 across clustered prompt variants; that is the strongest descriptive observation, not
+three independent replications or a pure-weights estimate.
 
-We isolate the harness/weights split *at the r2→r3 step* with the controlled ablation —
-**round-2 weights with the recovery affordance on**, otherwise the identical 6h protocol
-(`run_20260613_214956`). It scored **17/30** (grinder 6, completionist 6, explorer 5). So of the
-three stages between r2 and r3, the harness affordance contributes **~2** and the r3 weight update
-**~1** (within the n=1 band). The r3 weight update's distinct payoff is **speed**, not stages:
-r3 reaches Herbalist stage 2 in **~2.0h vs r2's ~4.5h (~2× faster)** and runs **~40% more turns
-per hour (511 vs 366)** — the dividend of its much shorter reasoning (below) and fewer nav stalls.
+The project also reports **round-2 weights with the recovery affordance on**
+(`run_20260613_214956`) at **17/30** (grinder 6, completionist 6, explorer 5). The notes also
+report that r3 reached Herbalist stage 2 in **~2.0h vs r2's ~4.5h** and produced
+**~40% more turns per hour (511 vs 366)**. Without the underlying bundles and matched replicated
+runs, neither the score differences nor the throughput difference can be attributed to a single
+lever.
 
-So **harness → stages, weights → speed describes the r2→r3 step only**; over base the order
-reverses — weights instilled the competence, the harness unblocked a defect that was suppressing
-it. We label 18/30 a **weights-plus-interface** result and rest the competence claim on round 2's
-pure-weights wall passage, not on nominally edging the 4B teacher (18 vs 17, with a recovery fix
-the teacher lacked).
+We therefore label 18/30 a **weights-plus-interface** result. The recovery-off round-2 passage is
+the least-confounded historical comparison, but it is not a pure-weights effect estimate.
 
 ### Rick's Roll: 0/4 — a three-link execution failure, not missing intent
 
@@ -601,15 +595,12 @@ Arc: base (tool-spam, no grounding) → r1 (maximal verbose churn) → r2 (still
 → **r3 (concise, halved churn, grounding preserved)**. Brevity is overhead removal, and it
 bought both more progress and ~2× the speed to the wall.
 
-### Self-correction via harness recovery — the key mechanism, confirmed
+### Historical recovery behavior (source logs not packaged)
 
-405 sessions emitted a `[format]` note; **every one has exactly ONE note, zero relapse, 98.5%
-clean afterward**; 90% fire at turn 2 (first call after the opening observe) and never again.
-The malformation is a *session-opening artifact*, and the note — by rewriting history to clean
-canonical exemplars + the correction text — durably fixes it. This is context-canonicalization
-working as designed: deny the copy prior its malformed exemplars and the model stops copying.
-The recovery also breaks the *compounding* (335 emissions vs r2's 685): without feedback,
-malformed begets malformed; with it, the model self-corrects and the total stays bounded.
+Historical notes report 405 rewritten sessions with one `[format]` marker and no later marker;
+90% reportedly fire at turn 2. The source logs and raw pre-rewrite emissions are absent, so this
+cannot establish model self-correction, zero relapse, or the true malformation denominator. The
+reported 335 malformed emissions and 405 markers use different units.
 
 ### What round 3 established (the clean separation)
 
@@ -625,10 +616,11 @@ malformed begets malformed; with it, the model self-corrects and the total stays
   weak seeded-state grades → 0 cook transfer, exactly as the pre-training diagnostic predicted).
 
 **Framing:** the r3 18/30 is a **weights + harness recovery** arm — env-changed, not
-pure-weights like base/r1/r2 — so we label it as such. The *better-than-base* claim doesn't rest
-on it: round 2's 15/30 is pure-weights (no affordance). For the r3 arm specifically, the binding
+pure-weights like base/r1/r2 — so we label it as such. The recovery-off round-2 report is the
+least-confounded historical comparison, but exact parity is unavailable. For the r3 arm specifically, the binding
 constraint on the last stages was the format defect — a model–environment interface failure
-weights-only fixes provably could not reach — which is why 18/30 is honestly weights-plus-interface.
+three attempted weights-side interventions had not reached in the reported runs — which is why
+18/30 is honestly weights-plus-interface.
 
 ### Costs (billing-verified, `modal billing report`)
 
@@ -657,7 +649,7 @@ the 4B→2B pair but is not part of the rounds cost a further ~$138 (size-ladder
 4B candidate evals $19, parked 9B OPD lane $18, r10-era 9B serving $30, a separate cold-start 2B
 SFT lane $53) — so total Modal spend across the June 6–14 OPD work window was ~$298.
 
-### Round 4 (evidenced, not yet run)
+### Proposed Round 4 (not yet run)
 
 1. **Privileged-context grading (Plan B)** for Rick's — Claude's successful cook/door trajectory
    in the *teacher's* grading context (OPSD/π-Distill, published), since the same-family teacher
@@ -667,7 +659,7 @@ SFT lane $53) — so total Modal spend across the June 6–14 OPD work window wa
 3. **Promote tool-recovery to a permanent affordance** (it is that load-bearing), tracking the
    pure-weights defect rate separately.
 
-*Counter provenance: 405 is the authoritative recovery count (`[format]` result markers);
+*Counter provenance: the historical notes report 405 recovery markers (`[format]` results);
 `n_malformed_emit` (335) is a lower bound — the harness rewrites assistant content to canonical
 before logging, so it counts only malformed text that survived recovery. The analyzer
 (`scripts/log_analysis/`) decodes the `[format]` result prefix, detects plain-string validation

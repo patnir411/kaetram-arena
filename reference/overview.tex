@@ -11,7 +11,7 @@
 \title{From Imitation Collapse to Visitation-Corrected Distillation:\\
 Training a 2B-Parameter MMORPG Tool-Use Agent\\
 \large A three-round on-policy distillation case study (Kaetram)}
-\author{Kaetram Agent Project\\ \small Technical report, June 14, 2026 --- single-codebase case study}
+\author{Kaetram Agent Project\\ \small Technical report, revised July 19, 2026 --- single-codebase case study}
 \date{}
 
 \newcommand{\opd}{\textsc{opd}}
@@ -21,42 +21,23 @@ Training a 2B-Parameter MMORPG Tool-Use Agent\\
 \maketitle
 
 \begin{abstract}
-We report an end-to-end case study of post-training a small language model (Qwen3.5-2B) to play
-Kaetram, an open-source MMORPG, through a typed tool-call interface (17 MCP tools, OODA loop,
-16K context). \textbf{The headline: on-policy distillation makes the 2B better than it started}
---- it clears a quest wall the base model never passes and finishes at $\mathbf{18/30}$, up from
-base's $12$, completing two of the three quest chains unseeded where base completes one. The
-cleanest piece is weights-only: on the same harness, the distilled student passes that wall $3/3$
-where base passes it $0/3$. What follows is the honest accounting of which lever did what. Across
-eleven training rounds we traversed three regimes. (1)~\textbf{Cross-vocabulary
-SFT on frontier-teacher trajectories regresses the student} ($3.5\times$ drop on our Core-3 quest
-benchmark; Mann-Whitney exact $p{=}0.029$): uniform cross-entropy imprints the corpus's
-\emph{action marginal} rather than its policy. (2)~\textbf{Harness/state-contract engineering
-dominates capacity}: a scaffold worth $+12$ benchmark stages (base-9B $7 \rightarrow 19$ on matched
-full runs) transfers from 9B down to 2B, while scaling to 27B adds nothing. (3)~\textbf{Reverse-KL on-policy distillation} (4B teacher
-$\rightarrow$ 2B student) transfers \emph{style without competence} in one round --- the student
-exactly matches the teacher's tempo and tool mix yet gains zero task stages --- and we show why:
-the loss is an expectation over the \emph{student's} visitation distribution, which never reaches
-the states where the teacher's competence lives. Round two corrects visitation by
-\textbf{seeding the environment database} at the failure state (a reverse-curriculum state reset,
-here a write of persistent typed environment state for distillation rather than reward-RL), and
-the student passes the wall it had never passed: $12/30 \rightarrow 15/30$, with all
-three eval agents clearing the gating quest stage unseeded ($0/3$, $0/3$, $3/3$ across arms).
-Round three reaches the program-best $\mathbf{18/30}$ by breaking the next wall, but a controlled
-ablation attributes most of that round-two-to-three step to a harness recovery affordance --- the
-round-three weight update's reliable payoff is $\sim$2$\times$ faster progression, not stages ---
-so we label $18/30$ a weights-plus-interface result and do not lean on nominally edging the 4B
-teacher ($18$ vs $17$, with a recovery fix it lacked). We document a failure mode we believe
-is novel: under teacher forcing the \textbf{teacher prefers the student's malformed tool syntax}
-($\approx85\%$ probability on a continuation it never emits generatively) --- an in-context copy
-prior surfacing inside the grader --- which dense reverse-KL distills. Suppressing the teacher's
-endorsement of the defect in the grading context does not suppress the student's generation of it;
-a small harness recovery affordance with in-context correction does ($98.5\%$ self-correction,
-zero relapse). The program's ceiling is over-determined: Rick's Roll stays $0/4$ gated at link 1 by
-a displaced fishing tool (cooking is never reached), behind which the cook-incompetent same-family
-teacher transfers \emph{zero} cook behavior --- a teacher cannot grade in what it cannot do, one of
-several blockers. Every arm is $n{=}1$ across three personality-variant agents;
-we report the limits alongside the results.
+We audit an end-to-end effort to post-train Qwen3.5-2B for long-horizon play in Kaetram, an
+open-source MMORPG exposed through 17 typed tools. Project notes report three relevant patterns.
+First, a cross-vocabulary SFT lane fell below the reported base runs while aggregate tool use moved
+toward the training-corpus marginal. Second, one natural-visitation reverse-KL OPD run changed tool
+mix and interaction tempo without changing its 12/30 Core-3 score. Third, a later round that added
+hand-selected persistent player-state starts was followed by a recovery-off 15/30 run and wall
+passage across three clustered prompt variants; a subsequent weights-plus-recovery system run
+reported 18/30. These are descriptive observations, not causal effects: there is one unmatched run
+per cell, prompt variants are not independent seeds, and the June raw bundles, gameplay seeds,
+checkpoint/configuration digests, and exact render contracts are absent. A historical probe also
+reports positive teacher-over-student advantage for one malformed continuation, but it does not
+score both canonical and malformed candidates in the same matched context and therefore does not
+establish preference reversal. This report preserves the engineering history while explicitly
+separating what was observed from what remains to be tested: matched fresh-student state-source
+arms, training-level replication, a weights-by-recovery factorial, state-by-history controls,
+held-out transfer, reset attestations, and immutable artifacts. The result is an audited case study
+and confirmatory agenda, not an established method claim.
 \end{abstract}
 
 \section{Introduction}
@@ -74,47 +55,29 @@ three personality-variant agents (\emph{stages}/30). The arc:
 \item \textbf{r1--r9 (SFT iteration).} Nine rounds of supervised fine-tuning of Qwen3.5-9B on
 Claude-teacher trajectories established methodology (loss masking, prompt parity,
 truncation gates, a $\sqrt{r}$ LoRA trap) but never beat the base model.
-\item \textbf{r10 (the clean negative).} A rigorously controlled SFT round \emph{regressed} the
-student $3.5\times$ below base with a measurable mechanism: the trained policy's tool-call
-distribution matches the \emph{training-corpus marginal} within $\sim$1pp on decision verbs ---
-corpus prior becomes inference prior.
-\item \textbf{r11a (the scaffold reframe).} Harness and state-contract engineering --- not prompt
-wording, not parameters --- moved base models from 4/30 to 19/30. The scaffold transfers across
-model sizes (27B/9B/4B/2B), the walls are identical at every size, and 27B buys nothing:
-capacity is not the lever.
+\item \textbf{r10 (exploratory negative).} All four reported base runs exceed all three reported
+SFT runs. Aggregate decision-verb frequencies are consistent with marginal imitation, but raw
+artifacts and matched-state probabilities are absent.
+\item \textbf{r11a (scaffold scouting).} Reported harness and state-contract changes coincide with
+large score movement across a small, duration-mismatched model-size sweep. The non-monotone sizes
+motivate a harness hypothesis; they do not establish that capacity is irrelevant.
 \item \textbf{r11b (this study's focus): three rounds of on-policy distillation}, scaffolded
 Qwen3.5-4B (17/30) $\rightarrow$ base Qwen3.5-2B (12/30). Round one transferred the teacher's
-\emph{behavioral distribution} with striking precision and zero task gain. Round two, after
-correcting the visitation distribution with environment-state seeding, produced the first
-weights-driven benchmark lift: $15/30$, unanimous unseeded passage of the previously-unpassed
-quest wall. Round three reached $18/30$ --- the project best --- by breaking the next wall, but
-required a \emph{harness} affordance to fix a format defect that weights-side fixes
-could not, and hit a hard ceiling on Rick's Roll ($0/4$) where the same-family teacher is itself
-incompetent. The trajectory is monotone ($12 \rightarrow 12 \rightarrow 15 \rightarrow 18$) but
-each gain came from a \emph{different} lever, and we are explicit about which.
+\emph{behavioral distribution} while its reported score remains 12/30. A later state-augmented
+round is followed by a recovery-off 15/30 run and wall passage across three clustered prompts.
+Round three combines new weights and a recovery affordance and reports 18/30. Missing raw bundles,
+exact parity, and gameplay seeds prevent causal attribution of the monotone descriptive sequence
+$12 \rightarrow 12 \rightarrow 15 \rightarrow 18$.
 \end{enumerate}
 
-\textbf{Contributions.} (i) A documented instance of \emph{style-without-competence} transfer
-under reverse-KL \opd{}, with a per-verb KL$\times$behavior cross-table showing sign-consistent
-coupling, including a double-sided mode-seeking overshoot. (ii) \textbf{Environment-state seeding
-for agentic distillation}: shifting the student's visitation distribution $d^{\pi_S}$ by seeding
-the game database at teacher-demonstrated failure states, while leaving the loss untouched. This
-is a reverse-curriculum state reset --- the RL lineage~\cite{salchen,backplay,goexplore} and the
-LLM text-prefix analogues~\cite{bread,trb} are the relatives; our instantiation (a write of
-persistent typed environment state, for on-policy distillation not reward-RL) is the new part,
-causally validated here (seed $\rightarrow$ wall-state data $\rightarrow$ unseeded passage). (iii) The \textbf{teacher-forcing copy-prior} failure mode:
-a generatively-clean teacher that assigns $\approx$85\% to continuing the student's malformed
-tool syntax in-context, which dense \opd{} therefore distills; we measure it, mask it, and track
-its mutation across rounds, and show that \emph{grading-context} fixes (counterfactual
-canonicalization), though they verifiably suppress the teacher's endorsement, do not transfer to
-the student's \emph{generation} --- only a harness recovery affordance with in-context correction
-cures it. (iv) A \textbf{clean separation of levers}, quantified by a controlled ablation: over base, the
-\emph{weights} instill the competence (the wall passes $3/3$ unseeded, a weights-only result); an
-interface affordance dissolves a defect no weights update reaches (it carries most of the
-round-two-to-three \emph{step}, while the round-three weight update buys speed); and a same-family
-teacher transfers \emph{zero} of a behavior it never performs (cook $= 0$) --- one of the
-over-determined walls behind Rick's $0/4$, where a displaced tool already gates link 1. The
-harness$+$weights co-evolution thesis, made concrete.
+\textbf{Contributions.} (i) An evidence audit that separates descriptive behavior movement from
+unsupported competence and mechanism claims. (ii) A prospective, falsifiable protocol for direct
+persistent-player-state initialization, with matched reset/prefix baselines and a state-by-history
+ablation; no method effect is currently claimed. (iii) A bounded tool-interface diagnostic:
+historical notes report positive teacher-over-student advantage for one malformed continuation,
+which motivates a paired copy-prior test but does not establish preference reversal. (iv) A
+weights-by-recovery factorial and immutable-artifact contract designed to prevent the confounding
+present in the historical 18/30 system result.
 
 \section{System}
 
@@ -174,33 +137,33 @@ chat-template CoT preservation; byte-identical train/eval prompt parity; strict 
 gates; and the rsLoRA trap ($\alpha{=}r$ under rsLoRA is an $8\times$ effective-LR error that
 diverged r7). r9 still lost to base.
 
-\textbf{r10} made the comparison airtight and the result negative. Corpus: 8{,}510 train records
-from 15 archetype-diverse Claude runs, quality-gated. Result: base scored $7/30$ in \emph{all
+\textbf{r10} is a motivating negative result whose raw artifact bundle is absent. Project notes
+describe 8{,}510 training records from 15 Claude runs. They report base $7/30$ in \emph{all
 four} eval runs (zero variance); r10-SFT scored $\{3,1,2\}$, mean $2.0/30$ --- a $3.5\times$
 regression (Mann-Whitney exact, one-sided, $p{=}0.029$; Fisher's exact on Foresting completion
-$p{=}0.016$, OR$=16$). The mechanism is legible in the tool mix: at inference the SFT policy's
+$p{=}0.016$, OR$=16$). The agent-level Fisher analysis is pseudo-replicated, and neither result is
+independently regenerable from this clone. Aggregate tool mix is consistent with a hypothesis: the SFT policy's
 decision-verb frequencies match the \emph{training-target} distribution within $\sim$1pp
 (\texttt{interact\_npc} corpus 2.4\% $\leftrightarrow$ SFT 2.1\% vs base 10.8\%;
 \texttt{query\_quest} 2.2 $\leftrightarrow$ 2.5 vs 11.2; \texttt{navigate} 27.7 $\leftrightarrow$
 26.4 vs 5.5). Credit analysis showed why that marginal is poison: 52\% of source sessions advance
 no quest; \texttt{interact\_npc} carries the highest near-term credit (36\% of uses precede an
 advance within 5 turns) yet is 3.8\% of the corpus, while \texttt{attack} is 25.5\% of corpus
-with $\approx$0\% credit. Uniform cross-entropy imitated the wrong marginal --- \emph{corpus
-prior becomes inference prior}. Diagnosis mapped to four known mechanisms: compounding
+with $\approx$0\% credit. These aggregates motivate a corpus-prior hypothesis rather than a
+matched-state mechanism result. Possible explanations include compounding
 off-policy error (DAgger's $O(\epsilon T^2)$), capacity-gap marginal-fitting, CE diversity
 collapse, and capability suppression.
 
-\section{The scaffold reframe (r11a): the harness is the lever}
+\section{The scaffold reframe (r11a): harness scouting}
 
 Before more training, we asked what a \emph{frozen} model could do with a better
-model--environment contract. Over eight days the base-9B Core-3 best-run envelope went
-$4 \rightarrow 9$--$10 \rightarrow 12 \rightarrow 15 \rightarrow 19$/30 --- every causal jump
-attributable to harness/state-contract changes (quest-list normalization, canonical
-\texttt{current\_step} facts, navigation hardening), none to prompt wording (four survival-rule
-rewrites moved nothing). The $4$ is the short, pre-\texttt{current\_step} development floor; on
-matched full runs the clean baseline is $7$ (Table~\ref{tab:compare-progress}), so the controlled
-scaffold lift is $7 \rightarrow 19$ ($+12$). The knowing-doing gap localizes precisely at the advisory/enforced
-boundary: every affordance that works is \emph{enforced} (auto-loot, BFS navigate); every
+model--environment contract. Over eight days the base-9B Core-3 best-run envelope rose through
+$4$, $9$--$10$, $12$, $15$, and $19/30$ while harness/state-contract changes accumulated
+(quest-list normalization, canonical \texttt{current\_step} facts, navigation hardening).
+Durations and configurations differ, so the sequence does not identify each change's effect. The
+reported full-run comparison is $7 \rightarrow 19$ (Table~\ref{tab:compare-progress}). It motivates
+a possible knowing--doing gap at the boundary
+between advisory and enforced behavior: every affordance that works is \emph{enforced} (auto-loot, BFS navigate); every
 remaining blocker is \emph{advisory} (survival rules the model quotes and ignores).
 
 The scaffold transfers across capacity. With identical scaffold and prompts:
@@ -209,8 +172,8 @@ The scaffold transfers across capacity. With identical scaffold and prompts:
 essentially untouched at every size (only the 9B's best run reaches Rick's stage 1); the
 \emph{Herbalist wall} is where capacity shows --- the 2B stalls at stage 1 while 4B, 9B, and 27B
 all clear it (the 27B also gained a tool-result confabulation failure mode). Above the 2B,
-capacity barely moves the score --- the 27B's 15 sits inside the 9B's $12$--$19$, so scaling up
-buys nothing --- but the gap that matters is the 4B's 17 vs the 2B's 12, which sets up the
+the observed scores are not monotone in capacity --- the 27B's 15 sits inside the 9B's
+$12$--$19$ --- but durations and $n$ differ. The reported 4B 17 vs 2B 12 gap motivates the
 distillation experiment: \textbf{teacher = scaffolded 4B, student =
 base 2B} --- a real, same-family competence gap, an order of magnitude cheaper per round than the
 9B lane. (Reference ceiling, on the pre-R11 Claude Code harness: in its best run $2/3$ of the
@@ -313,7 +276,8 @@ REINFORCE on a fixed batch's majority-negative advantages pays the optimizer to 
 logprobs to $-\infty$ and degenerates the policy to an \texttt{observe} loop --- a collapse we
 hit and the clip prevents. Because each round's init equals the rollout-generating policy
 (fresh LoRA over the previous round's merged checkpoint), the importance ratio is $\approx 1$ at
-step 0 and the clip doubles as a KL trust region around behavior; a step-0 calibration probe
+step 0. The clipped objective discourages large local ratios but does not hard-bound probability
+movement under shared-parameter updates; a step-0 calibration probe
 verifies the serving-vs-training numeric gap (round 2: median $|{\Delta}\log p| = 0.0005$, clip
 fraction $0.000$). LR $5\times10^{-5}$, one epoch, effective batch 32, H100; the LM head is
 applied only at action positions (a full-vocab forward at $16\mathrm{K}\times 248\mathrm{K}$
@@ -329,17 +293,18 @@ demonstrates the failure; rounds 2--3 demonstrate the repair: change the \emph{s
 distribution}, not the loss. Concretely we mix the student's natural visitation with rollouts of
 $\pi_S$ launched from DB-seeded milestone states --- player rows written directly into the game's
 MongoDB at e2e-verified mid-quest configurations (quest stage, skills, inventory, position),
-$\sim$30\% of records by count. Crucially the loss, the teacher, and the on-policy character of
-the data are untouched --- only the \emph{state source} changes, which keeps the causal
-attribution clean. Resetting to hard or intermediate states to get learning signal there is a
+$\sim$30\% of records by count. In the proposed matched experiment only the state source changes.
+The historical rounds do not meet that condition: checkpoint initialization, collected policy,
+record count, and data batch also differ. Resetting to hard or intermediate states to get learning signal there is a
 well-trodden idea in RL --- reset along a demonstration~\cite{salchen}, Backplay's reverse
 curriculum~\cite{backplay}, Go-Explore's restore-then-explore~\cite{goexplore}, and expert-state
 reset mixtures for LLM agents~\cite{reset5050}; the LLM-side analogues operate in text-prefix or
 policy space (branched expert anchors~\cite{bread}, behavior-policy blending~\cite{trb}). Our
-narrow contribution is the \emph{setting and mechanism}: a reverse-curriculum state reset
+narrow candidate contribution is a reverse-curriculum state reset
 instantiated as a \emph{write of persistent, typed environment state} (a DB row), used for
-on-policy \emph{distillation} rather than reward-RL --- ``Backplay for LLM tool-use
-distillation,'' which we have not seen done.
+on-policy \emph{distillation}. TCOD, Guided-OPD, ReOPD, SCoRe, Backplay, and TRB make a broad
+state-curriculum claim unavailable; only a matched direct-player-state result could support the
+narrower distinction.
 
 \subsection{Data construction: the prefix property}
 \label{sec:prefix}
@@ -404,7 +369,7 @@ eat-inedible halved; phantom-target re-attacks replaced by re-grounding observes
 mode-seeking signatures: exact convergence on the teacher's high-frequency modes and
 amplification \emph{past} the teacher on its preferences.
 
-\subsection{The KL$\times$behavior cross-table}
+\subsection{The \texorpdfstring{KL$\times$behavior}{KL-times-behavior} cross-table}
 \label{sec:crosstable}
 The held-out gate moved only $+10.9\%$ (a formal FAIL against its 30\% bar) while behavior moved
 dramatically --- and the per-verb \emph{signs} line up: every verb whose rKL dropped (attack
@@ -431,20 +396,14 @@ the \emph{shape} of reasoning, not its substance --- and the round-3 compression
 Round 1 introduced a defect: 8.3\% of argument-requiring calls arrived with empty input,
 dominated by one span family --- the model writes the boolean kwarg into the parameter
 \emph{key}, \texttt{<parameter=accept\_quest\_offer=True>} (154 malformed vs 18 correct in the
-r1 eval; 0 vs 182 in baseline), which the parser drops, silently no-op-ing quest accepts. Three
-candidate mechanisms were refuted by direct measurement (the training records carried only the
-correct form; the teacher prefers the correct delimiter $+0.74$ nats in base-rollout contexts;
-no reasoning-priming association). The live probe settles it: \textbf{on the student's own
-malformed prefix, the 4B teacher assigns $-0.161$ nats ($\approx$85\%) to continuing the
-malformation} vs the student's $-0.253$ --- advantage $+0.09$ \emph{toward} the defect ---
-while at correct-form states it grades $+0.39$ toward the correct token. The teacher's grading
-flips with context: an in-context copy/induction prior surfaces inside the grader under teacher
-forcing, even though the teacher never emits the form generatively. Dense reverse-KL therefore
-faithfully distills the defect and cannot self-correct it on the student's own rollouts. We find
-no precedent for this mechanism in the distillation literature (nearest relatives: the ``KL
-agreement trap''~\cite{kat}, the survey's flawed-prefix trap~\cite{survey}, SKD's inaccurate
-teacher feedback~\cite{skd}); the mechanistic substrate is the ICL copy bias / induction-head
-literature~\cite{copybias}.
+r1 eval; 0 vs 182 in baseline), which the parser drops. Historical notes report teacher log
+probability $-0.161$ for continuing that malformed candidate after malformed history, versus
+$-0.253$ under the student. This is positive teacher-over-student distillation advantage for one
+candidate, not evidence that the teacher prefers it over the canonical candidate. The reported
+correct-form observation uses a different state, and the raw probe artifact is absent. A paired
+clean/malformed-history by canonical/malformed-candidate experiment is therefore required. CCOPD,
+SOD, KAT, and per-context OPD diagnostics also preempt a broad degraded-context novelty claim; the
+remaining copy-prior framing is a hypothesis.
 
 \section{Round 2: visitation-corrected distillation}
 
@@ -454,8 +413,8 @@ base-2B rollouts essentially never visit lily-bush-at-Foraging$\ge$5 states (20 
 in 6{,}183 calls). We therefore seeded the \emph{environment database}: player rows written
 mid-quest (Herbalist stage 1 accepted, Foraging XP 450 $=$ level 5 on the game's XP curve,
 starter kit, spawn at the e2e-verified walkable tile beside the lily cluster), then a 2.5h
-collection run of the r1 policy from those states. This changes $d^{\pi_S}$ only --- the loss,
-the teacher, and the on-policy character of the data are untouched. In the seeded rollouts all
+collection run of the r1 policy from those states. The intended control point is $d^{\pi_S}$, but
+the historical round differs in more than state source. In the seeded rollouts all
 three agents passed the wall (the first 2B passages ever observed), producing both
 student-authored success trajectories and dense teacher grades at decision states. This is a
 reverse-curriculum state reset --- the RL lineage (reset-along-a-demo~\cite{salchen},
@@ -527,15 +486,14 @@ masked --- corrective grading replaced abstention). Gate PASS ($+6.4\%$ rKL, eve
 counterfactual grading did \emph{not} suppress the malformed \emph{emission} --- it regressed it,
 paralyzing two of three agents (57--76\% of their actions were malformed calls the server drops,
 which fall to text, never execute, and the model re-emits in a spam loop).
-\textbf{Grader-endorsement-suppression, flip-probe-verified, did not transfer to
-student-emission-suppression after training} --- the defect lives in generation, and a
-grading-context fix cannot reach it. The cure was a \emph{harness affordance}: when the server
+Historical notes say the grading-context intervention did not suppress student emissions in this
+stopped run. A \emph{harness affordance} then supplied a runtime workaround: when the server
 drops a malformed call, the harness recovers the executable call (99.5\% coverage), rewrites
 history to a clean canonical turn (severing the in-context copy prior at its source), executes
 it, and returns a loud format-correction note.
 
-\textbf{Result: $\mathbf{18/30}$ --- the program's best, $6/10$ for every agent, and a clear
-step beyond base.} Every agent now completes two Core-3 chains unseeded --- Foresting \emph{and}
+\textbf{Reported result: $\mathbf{18/30}$ for the weights-plus-recovery system, $6/10$ per prompt
+variant.} Every agent now completes two Core-3 chains unseeded --- Foresting \emph{and}
 Herbalist --- where base completes one (Foresting, then stalls at the Herbalist wall). All three
 completed Herbalist 3/3 unseeded (round 2 had zero), breaking the stage-2 wall via three
 concrete differences from r2's stuck behavior: navigating to the \emph{actual} paprika bush
@@ -543,31 +501,24 @@ concrete differences from r2's stuck behavior: navigating to the \emph{actual} p
 navigation stall by re-targeting an adjacent tile (where r2 looped identically $\sim$16 times);
 and a tighter observe--act loop (half-length reasoning re-observes often enough to notice a
 frozen position) --- with gathered items surviving death. The harness recovery worked and
-\emph{self-corrected}: of 405 sessions that emitted a format note, every one has exactly one note
-and zero relapse ($98.5\%$ clean afterward); the malformation is a session-opening artifact the
-note durably fixes. Validation/format errors halved ($10.7\% \rightarrow 5.1\%$); malformed
-emissions stayed bounded (335 vs r2's 685 --- feedback breaks the compounding spiral). Reasoning
+historical notes describe as repeated-marker-free: 405 rewritten sessions are reported to contain
+one format note and no later marker. The source logs and raw pre-rewrite emissions are not
+packaged, so this cannot establish model correction or relapse prevention. The same notes report
+validation/format errors halving ($10.7\% \rightarrow 5.1\%$); malformed
+emissions numbered 335 versus r2's reported 685. Reasoning
 compressed sharply against round 2: non-empty median 243 chars vs r2's 558, $\sim$30\% near-empty
 turns (r2: $0\%$), revision-churn down ($59\% \rightarrow 30\%$), and the
 dangling-\texttt{</think>} dialect abandoned ($99\% \rightarrow 12\%$), with grounding preserved.
 
-\textbf{Decomposing the gains: weights are the competence engine over base.} The full $+6$ over
-base (12$\rightarrow$18) decomposes into \textbf{$+3$ from weights alone} (round two,
-12$\rightarrow$15, run \emph{without} the harness affordance --- the Herbalist wall falls $3/3$
-unseeded), \textbf{$+2$ from the harness recovery affordance}, and a residual \textbf{$+1$ from the
-round-three weight update that sits within the $n{=}1$ noise band} --- it may be $\approx\!0$
-stages; the round-three update's \emph{reliable} payoff is speed, not stages. We isolate the
-harness/weights split \emph{at the round-two-to-three step} with a controlled ablation: round-2 weights running with the recovery affordance on
-(otherwise the identical 6h protocol) already scores $\mathbf{17/30}$ (grinder 6, completionist 6,
-explorer 5) --- so of the three stages from r2 to r3, $\sim$2 are the affordance and $\sim$1 the
-weight update (within the $n{=}1$ band). The cumulative and marginal pictures point opposite ways,
-and both are true: \emph{over base, weights instilled the competence} (the $+3$ wall passage is
-weights-only, visible with seeding off at eval); \emph{within the final step}, the harness did the
-stage work and the weight update's distinct payoff is \emph{speed} --- r3 reaches Herbalist stage
-2 in $\sim$2.0h vs r2's $\sim$4.5h ($\sim$2$\times$ faster), $\sim$40\% more turns per hour (511 vs
-366), the dividend of its shorter reasoning and fewer stalls. The slogan \emph{harness
-$\rightarrow$ stages, weights $\rightarrow$ speed} describes the r2$\rightarrow$r3 step only; over
-base the order reverses.
+\textbf{The historical runs do not identify a causal decomposition.} The notes report base
+$12/30$, round two at $15/30$ without recovery, round-two weights with recovery at $17/30$, and
+round-three weights with recovery at $18/30$. Each cell contains one unmatched run; raw bundles,
+exact checkpoint and render parity, gameplay seeds, and immutable manifests are absent. Score
+subtraction therefore cannot identify weights, recovery, or their interaction. The recovery-off
+round-two wall passage across three clustered prompts is the strongest historical observation,
+but it is neither three independent replications nor a pure-weights estimate. The reported
+throughput contrast ($\sim$40\% more turns per hour) is likewise descriptive until reproduced
+under matched runs.
 
 \textbf{Rick's Roll stayed $0/4$ --- a three-link execution failure, not missing intent.} The
 agents understood and attempted the full chain (52 navigations to Rick, 5 NPC-interaction
@@ -575,49 +526,45 @@ attempts, 12 door attempts, all quoting the walkthrough). The chain dies at link
 pole is never re-equipped (Foresting's logs displaced it), so every shrimp gather returns nothing
 and cook/door/Rick never become reachable; \texttt{craft\_item} was called \emph{zero} times in
 all post-Herbalist sessions --- exactly the cook-incompetent-teacher prediction (the 4B never
-cooks, so its seeded-state grades there were the flat KAT-agreement-trap signal). Seeded-state
-grading instilled the \emph{declarative plan} but none of the \emph{procedural gates} a 2B
-cannot clear. This is the clean separation round 3 establishes: \textbf{visitation + a competent
-teacher transfers competence} (Herbalist stage 2 broke); \textbf{a harness affordance dissolves
-what weights-side fixes cannot reach} (the format defect, after r1 created it, r2's masking
-contained it, and r3's grading regressed it); and \textbf{a teacher cannot grade in what it
-cannot do} (Rick's). The 18/30 arm is a weights + harness-recovery configuration, not pure
-weights --- the data argues that is the correct framing, because the binding constraint was a
-model--environment interface failure.
+cooks, so its seeded-state grades there were weak). Historical notes therefore motivate three
+separate hypotheses: visitation can expose teacher competence, recovery can address an interface
+failure, and an incompetent teacher cannot supply useful local supervision. The 18/30 arm is a
+weights-plus-recovery configuration, not a test that identifies any of those effects.
 
 \section{What is and is not valid}
 
-\textbf{Supported claims.} (a) The r10 SFT regression and its marginal-matching mechanism
-(adequately powered: zero-variance base across 4 runs; exact tests $p{=}0.029$ / $0.016$).
-(b) Scaffold dominance over capacity (monotone returns curve with causal attribution; 4-point
-size ladder with identical walls). (c) Round-1 style-without-competence transfer (three
+\textbf{Supported observations.} (a) The r10 SFT arm fell below base in every one of seven
+exploratory runs (base $[7,7,7,7]$, SFT $[3,1,2]$; unadjusted exact tests
+$p{=}0.029$ / $0.016$). The aggregate tool-frequency match is a mechanism hypothesis, not a
+matched-state causal result. (b) In a small, duration-mismatched capacity sweep, larger models did
+not monotonically improve Core-3 score; this is scouting evidence, not a scaling conclusion.
+(c) Round-1 style-without-competence transfer (three
 independent measurement families agree: tool mix, tempo, per-verb KL signs). (d) The copy-prior
-mechanism (direct two-sided probe; three alternatives refuted by measurement). (e) The round-2
-lift and its causal reading (pre-registered endpoint; unanimous across the only replicate
-structure we have). (f) The round-3 results: the Herbalist stage-2 break and its three-part
+mechanism hypothesis (an unpaired historical probe; alternatives remain open). (e) The round-2
+lift as a descriptive observation across clustered prompts, not a causal estimate. (f) The round-3 results: the Herbalist stage-2 break and its three-part
 mechanism (correct coordinate, stall-recovery, tight loop --- all read directly from the
-transition sessions); the harness-recovery self-correction ($405$ sessions, exactly one note
-each, zero relapse --- a counting fact, not an inference); the grader-vs-generation gap (the flip
+transition sessions); the reported harness-recovery marker count ($405$ rewritten sessions,
+with source logs not packaged); the grader-vs-generation gap (the flip
 probe verified $-1.21$ nats of endorsement suppression, yet the stopped run shows the emission
-\emph{regressed} --- a falsifying observation); and the cook null ($\texttt{craft\_item}=0$,
-pole-equipped $=0$, both across all agents --- ground truth).
+\emph{regressed} --- a reported falsifying observation); and the reported cook null
+($\texttt{craft\_item}=0$, pole-equipped $=0$ across all agents).
 
 \textbf{Faults and caveats, enumerated.}
 \emph{(1) The $18/30$ arm is not pure-weights.} It ran with the harness tool-recovery affordance
-on; base/r1/r2 did not. The ablation (round-2 weights $+$ recovery $= 17/30$) decomposes the
-round-2-to-round-3 gain as $\sim$2 stages from the affordance and $\sim$1 from the weight update,
-within the $n{=}1$ noise band; the round-three weight update's clean payoff is speed, not stages. A
-pure-weights $18/30$ is not demonstrated --- though the competence-over-base claim does not rest on
-it: round two's $15/30$ wall passage is pure-weights (no affordance) and is the cleaner evidence. \emph{(2) $n{=}1$ per arm}, agents are prompt
+on; base/r1/r2 did not. The unmatched round-2-weights-plus-recovery run reports $17/30$, but raw
+bundles, exact configuration parity, and gameplay seeds are absent. It cannot decompose the
+round-two-to-round-three difference. Round two's $15/30$ wall passage is recovery-off and the
+least-confounded historical observation, not a pure-weights effect. \emph{(2) $n{=}1$ per arm}, agents are prompt
 variants not independent seeds; direction-consistency is suggestive, not significant. Stage
 counts are coarse ($\pm 2$--$3/30$ historical band); error-rate and milestone analyses carry the
-statistical weight. The r10 negative is our only powered result; the beyond-base claim --- even
+most descriptive detail but no population inference. The r10 negative is the only historical
+comparison with multiple reported runs, but its raw bundle is absent; the beyond-base claim --- even
 at $3/3$ vs $0/3$ on the wall --- rests on prompt-variant arms that share a base policy and so
 are a partial (not independent) replicate, which is why we lean on the categorical wall passage
 rather than the stage delta. The obvious next validation is seed replication of the round-two
 passage, which we have not run. \emph{(3) The malformed-emission counter is a lower bound.} The harness
 rewrites assistant content to canonical before logging, so the counter catches only malformed text
-that survived recovery ($335$ logged vs the authoritative $405$ recovery-marker count); the true
+that survived recovery (historical notes report $335$ logged vs $405$ recovery markers); the true
 round-3 malformation count sits between the two. \emph{(4) The mixed-context advantage is a
 designed reward, not an unbiased KL estimate}: the teacher is scored under the canonicalized
 context while the student is scored under the real one. CCOPD~\cite{ccopd} uses the same move
@@ -647,26 +594,35 @@ it). No claim that masking cures teacher-shared defects (the attractor mutated $
 findings are conditional on a deliberately strong scaffold whose transfer is untested.
 
 \section{Related work}
-Reverse-KL on-policy distillation for LLMs was popularized by GKD and the Thinking Machines
-recipe~\cite{tml}; the 2026 wave maps its failure modes: trust-region restriction of unreliable
+\textbf{Game-agent systems.} Orak uses MCP as a plug-and-play interface across twelve games and
+includes a gameplay fine-tuning dataset~\cite{orak}; MCP and structured game actions are therefore
+infrastructure here, not a novelty claim. BALROG evaluates long-horizon language and
+vision-language agents across games and documents a knowing--doing gap~\cite{balrog}, while
+lmgame-Bench studies modular gaming harnesses and transfer from single-game training to unseen
+games and external planning tasks~\cite{lmgame}. Unlike these benchmark-centered systems, our
+question is how a small policy's persistent environment-state visitation controls what dense
+teacher grading can transfer.
+
+\textbf{On-policy distillation.} Reverse-KL on-policy distillation for LLMs was established by
+GKD~\cite{gkd} and popularized as a post-training recipe by Thinking Machines~\cite{tml}; the 2026 wave maps its failure modes: trust-region restriction of unreliable
 teacher tokens~\cite{tropd}, token-subset selection~\cite{tip,teachability}, structural-token
 masking~\cite{simplefixes,rocktokens}, verifier-gated sign-consistency~\cite{sgopd},
 trajectory-filter-then-soft-reweight~\cite{fire}, and the KL agreement trap, where low per-token
 KL on degraded prefixes is the failure signature~\cite{kat}; DistIL proves reverse-KL-family
-objectives can raise probability on worse actions~\cite{distil}. Our copy-prior finding is the
-adversarial sharpening of these: not absent corrective signal but a wrong-signed one, measured
-in a deployed agent. The visitation-coupling lens is formalized in States-not-Tokens~\cite{snt},
+objectives can raise probability on worse actions~\cite{distil}. Our historical copy-prior probe
+does not yet establish a wrong-signed preference; that requires the paired candidate study. The
+visitation-coupling lens is formalized in States-not-Tokens~\cite{snt},
 and our round-1 outcome --- style-level convergence without capability gain --- is its documented
 failure mode when the teacher's edge lies outside the student's visited states~\cite{rethinking};
 state-distribution control by resetting to hard/intermediate states is well-trodden in RL
 (reset-along-a-demo~\cite{salchen}, Backplay~\cite{backplay}, Go-Explore~\cite{goexplore}) and
 appears LLM-side as branched rollouts from expert anchors~\cite{bread}, expert-state reset
 mixtures~\cite{reset5050}, resume-from-verified-prefix~\cite{score}, and behavior-policy
-blending~\cite{trb} --- our contribution lifts this reverse curriculum into persistent typed
-environment state for on-policy distillation. Multi-turn agentic \opd{} at small scale documents per-turn KL
+blending~\cite{trb}. Our prospective distinction is persistent typed player state independent of a
+successful prefix. Multi-turn agentic \opd{} at small scale documents per-turn KL
 escalation and curricula~\cite{tcod}; iterated rounds are the DAgger loop~\cite{dagger,survey}.
-The harness-over-capacity finding aligns with the 2026 system-scaling literature (interface
-adaptation over weights)~\cite{lifeharness}. The r10 mechanism connects to imitation
+The harness-scouting hypothesis aligns with the 2026 system-scaling literature (interface
+adaptation over weights)~\cite{lifeharness,systemscaling}. The r10 observation connects to imitation
 collapse / capability-suppression results in SFT~\cite{gem}.
 
 \textbf{Grading-context engineering (round 3).} Scoring student tokens under a teacher context
@@ -674,10 +630,10 @@ that differs from the generative context is an emerging family: CCOPD grades und
 \emph{canonical} clean context to fight self-anchored drift~\cite{ccopd}; OPCD conditions the
 teacher on internalized context~\cite{opcd}; MixSD switches grading context per token~\cite{mixsd};
 CoD combines original and counterfactually-perturbed teacher contexts off-policy~\cite{cod}. Our
-canonicalization of the teacher's grading context (the system-prompt tool-doc literals), and the
-finding that it suppresses \emph{endorsement} without suppressing \emph{generation}, are
-to our knowledge new; the mixed-context bias is uncharacterized in this family and we inherit that
-gap. \textbf{Privileged-information distillation} is the published route for Rick's Roll, where
+canonicalization of the teacher's grading context (the system-prompt tool-doc literals) is a
+historical intervention whose effect on generation is not established. CCOPD preempts broad
+clean-context novelty; a matched tool-candidate probe is required for any narrower claim.
+\textbf{Privileged-information distillation} is a relevant route for Rick's Roll, where
 the same-family teacher is incompetent: a PI-conditioned teacher (verified or frontier-model
 trajectories in its context) scores the student's rollouts token-by-token~\cite{pidistill,opsd},
 with evidence-masked updates~\cite{edgeopd}; this enters as prompt text and so sidesteps the
@@ -686,83 +642,75 @@ extends it to black-box teachers~\cite{omniopd}. On the negative-gradient questi
 unlikelihood reinforcement ineffective and prefers corrective distribution-matching~\cite{aopd}
 (supporting our corrective-grade-over-mask choice), while AntiSD demonstrates a sign-reversed
 self-distillation term under an entropy gate~\cite{antisd}. The copy-prior mechanism's substrate
-is in-context copy bias and induction-head dynamics~\cite{copybias}.
+is in-context copy bias and induction-head dynamics~\cite{copybias,repetitioncurse}.
 
 \section{Discussion and future work}
-Round 3 confirmed the predictions of round 2's failure analysis and sharpened the open agenda.
-What worked: full-ladder seeding broke the next teacher-competent wall (Herbalist stage 2,
-$18/30$), and a harness recovery affordance with in-context correction dissolved the format defect
-that weights-side fixes (masking, then counterfactual grading) could not. What did not: a same-family teacher transferred zero
-of a behavior it never performs (cook) --- though Rick's $0/4$ is over-determined, gated at link 1
-by a displaced fishing tool before the cook step is even reached. The round-4 agenda is now \emph{evidenced}, not speculative: (i)~\textbf{privileged-context
-grading} for Rick's --- a Claude cook/door trajectory in the \emph{teacher's} grading context
-(\cite{pidistill,opsd}), the only published route that exploits cross-vocabulary trajectories
-without the token-level distillation that sank our SFT line; (ii)~\textbf{two cheap harness fixes
-the logs demand} --- auto-re-equip the displaced fishing pole (the link-1 gate) and a session note
-that carries route-progress for un-accepted target quests (the traverse-budget gate);
-(iii)~promote tool-recovery to a \emph{permanent} affordance (it is that load-bearing) while
-tracking the pure-weights defect rate separately, so the weights vs harness contributions stay
-disentangled. Methodologically, the round's sharpest lesson is that a verified \emph{grading-side}
-probe is a hypothesis about \emph{generation}, not a guarantee: the teacher's endorsement of
-malformed syntax dropped $-1.21$ nats under canonicalized grading, yet training on that signal
-regressed the emission rather than suppressing it. Endorsement-in-grading and
-suppression-in-generation are different quantities, and only an interface affordance acting at
-generation time closed the gap.
+The historical sequence sharpens the open agenda but does not confirm a mechanism. Full-ladder
+seeding, new weights, and recovery coincide in the later rounds; their contributions remain
+unidentified. Rick's $0/4$ is likewise multi-causal: a displaced fishing tool gates link one,
+the traverse exceeds a session budget, and cooking is never reached. The next useful work is
+therefore controlled rather than another narrative round: (i) train fresh matched students across
+natural OPD, direct player-state resets, generic resets, TCOD-style prefixes, and faithful
+Guided-OPD; (ii) cross weights with recovery while preserving raw emissions; (iii) test privileged
+context at matched cost and on a held-out quest; and (iv) score canonical and malformed candidates
+under paired histories. The grading-side probe is a hypothesis about generation, not a guarantee.
 
 \section{Conclusion}
-A 2B model could not be \emph{imitated} into competence (r10: $3.5\times$ regression); could be
-\emph{scaffolded} to its family's frontier (12/30); moved onto its teacher's distribution without
-gaining a single stage (round 1: 12/30); \emph{gained} competence when --- and only when --- the
-training distribution was made to visit the states where the teacher is competent (round 2: 15/30,
-the wall passed $3/3$ unseeded where base passed $0/3$); and reached the project's best, $18/30$,
-completing two quest chains unseeded where base completes one (round 3). The clean claim is
-\emph{better than base}: across the three rounds the 2B gained two walls base never clears, and the
-cleanest evidence is the weights-only round-two passage --- we do not lean on nominally edging the
-4B teacher ($18$ vs $17$), since the $18/30$ ran a recovery affordance the teacher did not. Three
-rounds, three levers, one monotone curve: \emph{weights instilled the competence over base} (the
-walls fell on training, visible unseeded), a harness affordance dissolved a defect no weights
-update could reach, and the round-three weight refinement bought speed. And the ceiling is honest:
-Rick's $0/4$ is over-determined --- a displaced tool gates link 1, a multi-session traverse exceeds
-the budget, and a teacher cannot grade the cooking behind them --- so it waits on cheap harness
-fixes \emph{and} a teacher that can cook, not a fourth round of the same one.
+The historical record motivates three hypotheses rather than establishing three effects. First,
+the reported natural-OPD round changes tool use and tempo while its score remains 12/30. Second,
+a later state-augmented, recovery-off round is followed by 15/30 and wall passage across three
+clustered prompts. Third, a weights-plus-recovery run reports 18/30, while Rick's Roll remains
+$0/4$. One unmatched run per cell, missing June raw bundles, absent gameplay seeds, and incomplete
+configuration provenance prevent causal attribution or population inference. The durable result
+of this report is therefore an audited failure analysis and a matched confirmatory design. Fresh
+training replicates, reset attestations, a weights-by-recovery factorial, prefix/reset baselines,
+held-out quests, and paired copy-prior artifacts must decide whether the proposed mechanisms
+survive.
 
-\begin{thebibliography}{99}\small
-\bibitem{tml} Thinking Machines Lab. \emph{On-Policy Distillation}. Blog, 2025.
-\bibitem{survey} \emph{A Survey of On-Policy Distillation for Large Language Models}. arXiv:2604.00626, 2026.
-\bibitem{kat} \emph{KAT: Escaping the KL Agreement Trap in On-Policy Distillation}. arXiv:2606.09471, 2026.
-\bibitem{tropd} \emph{TrOPD: Trust-Region On-Policy Distillation}. arXiv:2606.01249, 2026.
-\bibitem{distil} \emph{Reinforcement Learning from Rich Feedback with Distributional DAgger}. arXiv:2606.05152, 2026.
-\bibitem{tip} \emph{TIP: Token Importance for On-Policy Distillation}. arXiv:2604.14084, 2026.
-\bibitem{teachability} \emph{Not All Disagreement Is Learnable: Token Teachability in On-Policy Distillation}. arXiv:2605.26844, 2026.
-\bibitem{simplefixes} \emph{Revisiting On-Policy Distillation: Empirical Failure Modes and Simple Fixes}. arXiv:2603.25562, 2026.
-\bibitem{rocktokens} \emph{Rock Tokens: Persistent High-Loss Residuals in Distillation}. arXiv:2605.09253, 2026.
-\bibitem{sgopd} \emph{SG-OPD: Sign-Consistency Gated On-Policy Distillation}. arXiv:2606.09304, 2026.
-\bibitem{fire} \emph{FiRe-OPD: Filter and Reweight for On-Policy Distillation}. arXiv:2606.02684, 2026.
-\bibitem{skd} \emph{Speculative Knowledge Distillation}. arXiv:2410.11325, 2024.
-\bibitem{snt} \emph{Post-Training is About States, Not Tokens}. arXiv:2605.22731, 2026.
-\bibitem{bread} \emph{BREAD: Branched Rollouts from Expert Anchors}. arXiv:2506.17211, 2025.
+\begin{thebibliography}{99}\small\raggedright
+\setlength{\itemsep}{0.15em}
+\bibitem{gkd} Agarwal et al. \emph{On-Policy Distillation of Language Models: Learning from Self-Generated Mistakes}. ICLR, 2024.
+\bibitem{orak} Park et al. \emph{Orak: A Foundational Benchmark for Training and Evaluating LLM Agents on Diverse Video Games}. ICLR, 2026.
+\bibitem{balrog} Paglieri et al. \emph{BALROG: Benchmarking Agentic LLM and VLM Reasoning on Games}. ICLR, 2025.
+\bibitem{lmgame} Hu et al. \emph{lmgame-Bench: How Good are LLMs at Playing Games?}. ICLR, 2026.
+\bibitem{tml} Lu and Thinking Machines Lab. \emph{On-Policy Distillation}. Connectionism, 2025.
+\bibitem{survey} Song and Zheng. \emph{A Survey of On-Policy Distillation for Large Language Models}. arXiv:2604.00626, 2026.
+\bibitem{kat} Xin et al. \emph{Escaping the KL Agreement Trap in On-Policy Distillation}. arXiv:2606.09471, 2026.
+\bibitem{tropd} Xing et al. \emph{Trust Region On-Policy Distillation}. arXiv:2606.01249, 2026.
+\bibitem{distil} Agrawal et al. \emph{Reinforcement Learning from Rich Feedback with Distributional DAgger}. arXiv:2606.05152, 2026.
+\bibitem{tip} Xu et al. \emph{TIP: Token Importance in On-Policy Distillation}. arXiv:2604.14084, 2026.
+\bibitem{teachability} Wang et al. \emph{Not All Disagreement Is Learnable: Token Teachability in On-Policy Distillation}. arXiv:2605.26844, 2026.
+\bibitem{simplefixes} Fu et al. \emph{Revisiting On-Policy Distillation: Empirical Failure Modes and Simple Fixes}. arXiv:2603.25562, 2026.
+\bibitem{rocktokens} Jiang et al. \emph{Cornerstones or Stumbling Blocks? Deciphering the Rock Tokens in On-Policy Distillation}. arXiv:2605.09253, 2026.
+\bibitem{sgopd} Xu et al. \emph{SG-OPD: Sign-Gated On-Policy Distillation via Sign-Consistency Gating and Phased Teacher Sampling}. arXiv:2606.09304, 2026.
+\bibitem{fire} Li et al. \emph{Filter, Then Reweight: Rethinking Optimization Granularity in On-Policy Distillation}. arXiv:2606.02684, 2026.
+\bibitem{skd} Xu et al. \emph{Speculative Knowledge Distillation: Bridging the Teacher-Student Gap Through Interleaved Sampling}. arXiv:2410.11325, 2024.
+\bibitem{snt} Nie. \emph{Post-Training is About States, Not Tokens: A State Distribution View of SFT, RL, and On-Policy Distillation}. arXiv:2605.22731, 2026.
+\bibitem{bread} Zhang et al. \emph{BREAD: Branched Rollouts from Expert Anchors Bridge SFT \& RL for Reasoning}. arXiv:2506.17211, 2025.
 \bibitem{salchen} Salimans, Chen. \emph{Learning Montezuma's Revenge from a Single Demonstration}. arXiv:1812.03381, 2018.
 \bibitem{backplay} Resnick et al. \emph{Backplay: ``Man muss immer umkehren''}. arXiv:1807.06919, 2018.
 \bibitem{goexplore} Ecoffet et al. \emph{Go-Explore: a New Approach for Hard-Exploration Problems}. arXiv:1901.10995, 2019; \emph{First return, then explore}. Nature, 2021.
-\bibitem{reset5050} \emph{Process Reward Models for LLM Agents}. arXiv:2502.10325, 2025.
-\bibitem{score} \emph{From Correction to Mastery (SCoRe)}. arXiv:2509.14257, 2025.
-\bibitem{trb} \emph{Trust-Region Behavior Blending for On-Policy Distillation}. arXiv:2605.31159, 2026.
-\bibitem{tcod} \emph{TCOD: Multi-Turn On-Policy Distillation for Autonomous Agents}. arXiv:2604.24005, 2026.
+\bibitem{reset5050} Choudhury. \emph{Process Reward Models for LLM Agents: Practical Framework and Directions}. arXiv:2502.10325, 2025.
+\bibitem{score} Lyu et al. \emph{From Correction to Mastery: Reinforced Distillation of Large Language Model Agents}. arXiv:2509.14257, 2025.
+\bibitem{trb} Plyusov et al. \emph{Trust-Region Behavior Blending for On-Policy Distillation}. arXiv:2605.31159, 2026.
+\bibitem{tcod} Wang et al. \emph{TCOD: Exploring Temporal Curriculum in On-Policy Distillation for Multi-turn Autonomous Agents}. arXiv:2604.24005, 2026.
 \bibitem{dagger} Ross, Gordon, Bagnell. \emph{A Reduction of Imitation Learning to No-Regret Online Learning (DAgger)}. arXiv:1011.0686, 2010.
-\bibitem{rethinking} \emph{Rethinking On-Policy Distillation}. arXiv:2604.13016, 2026.
-\bibitem{copybias} \emph{In-Context Copying Bias in LLMs}. arXiv:2410.01288, 2024; \emph{Induction Heads and the Repetition Curse}. arXiv:2505.13514, 2025.
-\bibitem{lifeharness} \emph{Adapting the Interface, Not the Model}. arXiv:2605.22166, 2026; \emph{From Model Scaling to System Scaling}. arXiv:2605.26112, 2026.
-\bibitem{gem} \emph{GEM: Diversity-Preserving Fine-Tuning}. arXiv:2408.16673, 2024.
-\bibitem{ccopd} \emph{Same Evidence, Different Answers: Canonical-Context On-Policy Distillation for Multi-Turn LMs}. arXiv:2605.30251, 2026.
-\bibitem{opcd} \emph{On-Policy Context Distillation}. arXiv:2602.12275, 2026.
-\bibitem{mixsd} \emph{MixSD: Mixture-Context Self-Distillation}. arXiv:2605.16865, 2026.
-\bibitem{cod} \emph{Counterfactual-Context Distillation}. arXiv:2510.21631, 2025.
-\bibitem{pidistill} \emph{Privileged Information Distillation for Language Models}. arXiv:2602.04942, 2026.
-\bibitem{opsd} \emph{On-Policy Self-Distillation with Privileged Context}. arXiv:2601.18734, 2026.
-\bibitem{edgeopd} \emph{EDGE-OPD: Evidence-Masked Privileged On-Policy Distillation}. arXiv:2605.23493, 2026.
-\bibitem{omniopd} \emph{OmniOPD: Logit-Free Chunk-Similarity Distillation from Black-Box Teachers}. arXiv:2606.01476, 2026.
-\bibitem{aopd} \emph{AOPD: Against Negative Reinforcement in On-Policy Distillation}. arXiv:2605.06387, 2026.
-\bibitem{antisd} \emph{AntiSD: Sign-Reversed Self-Distillation under an Entropy Gate}. arXiv:2605.11609, 2026.
+\bibitem{rethinking} Li et al. \emph{Rethinking On-Policy Distillation of Large Language Models: Phenomenology, Mechanism, and Recipe}. arXiv:2604.13016, 2026.
+\bibitem{copybias} Ali et al. \emph{Mitigating Copy Bias in In-Context Learning through Neuron Pruning}. arXiv:2410.01288, 2024.
+\bibitem{repetitioncurse} Wang et al. \emph{Induction Head Toxicity Mechanistically Explains Repetition Curse in Large Language Models}. arXiv:2505.13514, 2025.
+\bibitem{lifeharness} Xu et al. \emph{Adapting the Interface, Not the Model: Runtime Harness Adaptation for Deterministic LLM Agents}. arXiv:2605.22166, 2026.
+\bibitem{systemscaling} Gu. \emph{From Model Scaling to System Scaling: Scaling the Harness in Agentic AI}. arXiv:2605.26112, 2026.
+\bibitem{gem} Li et al. \emph{Preserving Diversity in Supervised Fine-Tuning of Large Language Models}. arXiv:2408.16673, 2024.
+\bibitem{ccopd} Lin et al. \emph{Same Evidence, Different Answers: Canonical-Context On-Policy Distillation for Multi-Turn Language Models}. arXiv:2605.30251, 2026.
+\bibitem{opcd} Ye et al. \emph{On-Policy Context Distillation for Language Models}. arXiv:2602.12275, 2026.
+\bibitem{mixsd} Liu et al. \emph{MixSD: Mixed Contextual Self-Distillation for Knowledge Injection}. arXiv:2605.16865, 2026.
+\bibitem{cod} Hamman et al. \emph{Few-Shot Knowledge Distillation of LLMs With Counterfactual Explanations}. arXiv:2510.21631, 2025.
+\bibitem{pidistill} Penaloza et al. \emph{Privileged Information Distillation for Language Models}. arXiv:2602.04942, 2026.
+\bibitem{opsd} Zhao et al. \emph{Self-Distilled Reasoner: On-Policy Self-Distillation for Large Language Models}. arXiv:2601.18734, 2026.
+\bibitem{edgeopd} Lazaridis et al. \emph{EDGE-OPD: Internalizing Privileged Context with Evidence Guided On-Policy Distillation}. arXiv:2605.23493, 2026.
+\bibitem{omniopd} Zhou et al. \emph{OmniOPD: Logit-Free On-Policy Distillation via Speculative Verification}. arXiv:2606.01476, 2026.
+\bibitem{aopd} Jia et al. \emph{Asymmetric On-Policy Distillation: Bridging Exploitation and Imitation at the Token Level}. arXiv:2605.06387, 2026.
+\bibitem{antisd} Shen et al. \emph{Anti-Self-Distillation for Reasoning RL via Pointwise Mutual Information}. arXiv:2605.11609, 2026.
 \end{thebibliography}
 
 \end{document}
