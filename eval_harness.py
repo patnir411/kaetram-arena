@@ -84,7 +84,7 @@ SCENARIOS = {
 }
 
 MONGO_CONTAINER = "kaetram-mongo"
-MONGO_DB = "kaetram_devlopment"
+MONGO_DB = os.environ.get("KAETRAM_MONGO_DB", "kaetram_devlopment")
 MONGO_COLLECTIONS = [
     "player_info", "player_skills", "player_equipment",
     "player_inventory", "player_bank", "player_quests",
@@ -99,9 +99,9 @@ MONGO_COLLECTIONS = [
 def reset_player_db(username: str) -> bool:
     """Delete all MongoDB records for a specific player username."""
     # Kaetram stores usernames lowercase
-    username_lower = username.lower()
+    username_json = json.dumps(username.lower())
     js_parts = [
-        f"db.{c}.deleteMany({{username: '{username_lower}'}})"
+        f"db.{c}.deleteMany({{username: {username_json}}})"
         for c in MONGO_COLLECTIONS
     ]
     js = "; ".join(js_parts) + "; print('reset_ok');"
@@ -111,10 +111,31 @@ def reset_player_db(username: str) -> bool:
              "--quiet", "--eval", js],
             capture_output=True, text=True, timeout=15,
         )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            print(f"  Warning: MongoDB reset command failed ({result.returncode}): {detail}")
+            return False
         return "reset_ok" in result.stdout
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         print(f"  Warning: MongoDB reset failed: {e}")
         return False
+
+
+def require_player_db_reset(
+    username: str, *, attempts: int = 3, retry_delay_seconds: float = 1.0,
+) -> None:
+    """Confirm a reset with bounded retries or abort before the episode starts."""
+    if attempts < 1:
+        raise ValueError("reset attempts must be positive")
+    for attempt in range(1, attempts + 1):
+        if reset_player_db(username):
+            return
+        if attempt < attempts:
+            time.sleep(retry_delay_seconds)
+    raise RuntimeError(
+        f"MongoDB reset was not confirmed for {username!r} in {MONGO_DB!r} "
+        f"after {attempts} attempts"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -811,8 +832,7 @@ def run_model_eval(
 
         # 1. Reset player data
         print(f"  Resetting MongoDB for {username}...")
-        if not reset_player_db(username):
-            print(f"  Warning: DB reset may have failed, continuing anyway")
+        require_player_db_reset(username)
         db_before = _read_player_db_snapshot(username)
         qa_before = _read_quest_achievement_snapshot(username)
 
@@ -1129,6 +1149,7 @@ Examples:
     print(f"  Models:   {', '.join(models.keys())}")
     print(f"  Parallel: {args.parallel}")
     print(f"  Output:   {args.output_dir}")
+    print(f"  MongoDB:  {MONGO_DB}")
 
     # Check MongoDB
     try:
