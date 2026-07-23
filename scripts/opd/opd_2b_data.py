@@ -75,7 +75,7 @@ EARLY_WEIGHT = 1.5        # step_weight for the first third of each session
 # <parameter=accept_quest_offer=True>) — advantages on these spans are masked.
 MALFORMED_PARAM_RE = re.compile(r"<parameter=[^>\n]*=[^>\n]*>")
 PER_EP_CONCURRENCY = 6    # per-endpoint in-flight cap (server max_running_requests=8)
-CHUNK = 200               # states scored per submission wave
+CHUNK = int(os.environ.get("OPD_BUILD_CHUNK", "200"))  # states per submission wave; records flush per wave, so smaller = more frequent progress/failure visibility on slow (16K-context) tails
 SCORE_TIMEOUT = 240.0
 SCORE_RETRIES = 3
 
@@ -167,11 +167,27 @@ def collect_action_states(run_ids):
     return states
 
 
+_BUILD_TOOLS = None
+if os.environ.get("OPD_BUILD_TOOLS_JSON"):
+    # Serving-context parity (Seam-1 repair): rollouts are generated and evals
+    # served WITH the native tools= block (play_qwen sends it; the chat template
+    # renders the canonical-format reminder). The historical builds rendered
+    # build/score contexts WITHOUT it, so every gradient was computed on a
+    # context missing that reminder — the environment where even base leaks
+    # Python-call forms at 7–9% (defect-origin probe, 2026-07-16). Passing the
+    # snapshot restores byte-parity between the gradient context and serving.
+    with open(os.environ["OPD_BUILD_TOOLS_JSON"]) as _f:
+        _d = json.load(_f)
+        _BUILD_TOOLS = _d if isinstance(_d, list) else _d.get("tools")
+    print(f"serving-context parity ON: rendering with {len(_BUILD_TOOLS)} tool specs")
+
+
 def _render(tok, msgs, emission):
     """Synchronous template render + encode — runs in a worker thread.
     ctx = the exact serving prompt; full = ctx + the raw emission, so the
     prefix property holds by construction (see _emission_text)."""
-    ctx_text = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+    ctx_text = tok.apply_chat_template(
+        msgs, tools=_BUILD_TOOLS, tokenize=False, add_generation_prompt=True)
     full_text = ctx_text + emission
     ctx_ids = tok.encode(ctx_text, add_special_tokens=False)
     return ctx_text, full_text, ctx_ids
@@ -207,7 +223,11 @@ async def build_record(client, tok, st, sem_s, sem_t):
     # advantage on the malformed tokens (median -1.21 nats, 86% of states)
     # instead of the +0.09 copy-prior endorsement. Student/behavior scoring
     # always uses the real context.
-    counterfactual = is_malformed(st["emission"])
+    # OPD_BUILD_NO_CF=1 forces the round-2 recipe (abstention masking, no
+    # counterfactual grading) — required for arm parity in ablation builds
+    # whose comparison arm was built pre-round-3 (e.g. the ±seeding ablation
+    # against the round-2 corpus).
+    counterfactual = (not os.environ.get("OPD_BUILD_NO_CF")) and is_malformed(st["emission"])
     if counterfactual:
         cf_msgs = [{**st["messages"][0],
                     "content": docify_system_prompt(st["messages"][0]["content"])}] \
