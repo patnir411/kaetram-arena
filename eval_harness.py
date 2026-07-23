@@ -4,7 +4,7 @@ eval_harness.py — Standardized evaluation harness for Kaetram AI agents.
 
 Runs N episodes per model with controlled conditions:
 1. Resets MongoDB player data between episodes (fresh Level 1)
-2. Runs play_qwen.py with fixed max turns
+2. Runs play_qwen.py with a fixed wall-clock budget
 3. Parses session logs for per-episode metrics
 4. Outputs aggregated results JSON for eval_compare.py
 
@@ -22,6 +22,7 @@ import math
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from collections import Counter
 from datetime import datetime
@@ -984,7 +985,7 @@ def _save_results(path: Path, model_name: str, endpoint: str, scenario: str,
             "endpoint": endpoint,
             "scenario": scenario,
             "scenario_name": SCENARIOS[scenario]["name"],
-            "max_turns": SCENARIOS[scenario]["max_turns"],
+            "duration_minutes": SCENARIOS[scenario]["duration_minutes"],
             "total_episodes": len(episodes),
             "ok_episodes": len(ok_episodes),
             "timestamp": datetime.now().isoformat(),
@@ -995,8 +996,30 @@ def _save_results(path: Path, model_name: str, endpoint: str, scenario: str,
     }
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(results, f, indent=2)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
+            json.dump(results, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        temp_path = None
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
     print(f"  Results saved: {path}")
     return results
 
