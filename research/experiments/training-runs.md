@@ -21,7 +21,7 @@ History of the Qwen3.5 finetuning runs: the 9B SFT era (r1–r10) and the r11 er
 | r11-scaffold | May 28–Jun 4 | harness (no training) | — | R11 scaffold/state-contract reframe across model sizes | base-9B Core-3 4→19/30; scaffold transfers down the size ladder (27B 15, 4B 17, 2B 12) — capacity isn't the lever. See `opd-2b.md`, `r11-direction.md`. |
 | opd-r1 | Jun 10 | OPD | 5,564 / 574 | 4B teacher → base-2B student, clipped-IS reverse-KL (init==generator) | Core-3 **12/30** — style transferred, competence didn't (visitation coupling + teacher-forcing copy-prior). |
 | opd-r2 | Jun 12 | OPD | 7,024 / 825 | + env-state seeding at the Herbalist wall (bucket-B) | **15/30** — first weights-driven lift; Herbalist stage-1 passed 3/3 unseeded. |
-| opd-r3 | Jun 13 | OPD | 8,856 / 1,040 | + counterfactual-canonicalized grading + full-ladder seeding + harness recovery | **18/30** — program best, past the 4B teacher (17); Herbalist stage-2 broke; Rick's 0/4 (cook-incompetent teacher). |
+| opd-r3 | Jun 13 | OPD | 8,856 / 1,040 | + counterfactual-canonicalized grading + full-ladder seeding + harness recovery | **18/30** — program best, past the 4B teacher (17); Herbalist stage-2 broke; Rick's 0/4 (4 seeding/harness bugs, not cooking incompetence — see opd-2b.md "Live seeded Rick's-Roll probe" 2026-07-17). |
 
 ---
 
@@ -254,7 +254,7 @@ After r10's negative result the program pivoted twice. First a **scaffold refram
 | base-2B | 12 | — | scaffold floor |
 | opd-r1 | 12 | reverse-KL OPD | style transferred, competence didn't (visitation coupling; teacher-forcing copy-prior) |
 | opd-r2 | **15** | + env-state seeding at the Herbalist wall | first weights-driven lift; stage-1 passed 3/3 unseeded |
-| opd-r3 | **18** | + counterfactual grading + full-ladder seeding + harness recovery | program best, past the 4B teacher; Herbalist stage-2 broke; Rick's 0/4 (cook-incompetent teacher) |
+| opd-r3 | **18** | + counterfactual grading + full-ladder seeding + harness recovery | program best, past the 4B teacher; Herbalist stage-2 broke; Rick's 0/4 (4 seeding/harness bugs, not cooking incompetence — 2026-07-17 probe) |
 
 A controlled ablation (r2 weights + harness recovery = 17/30) decomposes r2→r3 as **harness → stages, weights → speed**. Full method, results, and literature alignment: **`research/experiments/opd-2b.md`**; paper: **`reference/overview.pdf`**. Trainer: `finetune/train_opd_2b.py` (round-parametrized). The 9B OPD lane (`train_opd_modal.py`) was parked with round-1 data built but never trained.
 

@@ -42,6 +42,7 @@ dataset/session*/
 dataset/_archive/
 dataset/opd_probe/
 dataset/opd_2b/round*/*
+dataset/opd_2b/m2_teacherfree/
 dataset/opd_r11/
 
 # Exception: track the active SFT build's README so provenance docs land in git
@@ -62,3 +63,14 @@ state/
 
 # Kaetram Learn (separate repo)
 kaetram-learn/
+
+# LaTeX build byproducts (paper source .tex/.pdf are tracked; these are not)
+reference/*.aux
+reference/*.log
+reference/*.out
+
+# Personal / non-deliverable assets
+reference/people/
+
+# Generated dashboard index cache
+dashboard/.logs_index_cache.json
