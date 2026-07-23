@@ -143,6 +143,13 @@ Each agent gets its own server port (9001, 9011, 9021), log directory, capabilit
 
 The current method is **on-policy distillation (OPD)** (r11); the SFT pipeline below is the historical r1–r10 lane.
 
+The prospective matched six-arm causal training protocol (plus four separate
+mechanism/baseline arms plus a separately reported four-condition history ablation) is documented in
+[`research/experiments/opd-matched-training.md`](research/experiments/opd-matched-training.md).
+Its checked-in manifest is dry-run-only and intentionally blocks compute until
+all immutable artifacts, exclusion/evidence records, and the backend adapter are
+resolved.
+
 ### On-policy distillation (r11 — current)
 
 The base Qwen3.5-2B student rolls out in-game; a scaffolded same-family teacher (Qwen3.5-4B) grades the student's *own* visited states token-by-token (reverse-KL), and the weights co-evolve with harness-affordance fixes rather than a frozen scaffold. Round 2 corrects the student's visitation by **seeding the game database** at the failure state, so it trains where the teacher's competence lives. Pipeline: `scripts/opd/` (data build, milestone seeding, gate, probes) → `finetune/train_opd_2b.py` (Modal H100) → `finetune/serve_modal_2b_opd*.py` (served **non-thinking** — see Gotchas). Full record: [`research/experiments/opd-2b.md`](research/experiments/opd-2b.md).

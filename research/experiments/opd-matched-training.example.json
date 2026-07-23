@@ -1,0 +1,310 @@
+{
+  "schema_version": 1,
+  "experiment_id": "opd-matched-ten-arm-v1",
+  "protocol": {
+    "protocol_id": "kaetram.opd-matched-training.v1",
+    "source_git_commit": "UNRESOLVED_FOR_REVIEWED_LIVE_MANIFEST",
+    "artifact_registry": {
+      "path": "research/experiments/opd-matched-training-artifacts.example.json",
+      "sha256": "6bc8df9f744b7eed78312db695112462a8eb8723560d887aca6872ac1ef3acb4"
+    }
+  },
+  "shared_inputs": {
+    "base_checkpoint_artifact_id": "base_checkpoint",
+    "teacher": {
+      "artifact_id": "teacher_model",
+      "endpoint_env": "KAETRAM_MATCHED_TRAINING_TEACHER_ENDPOINT"
+    },
+    "held_out_registration_artifact_id": "heldout_registration",
+    "frozen_interfaces": {
+      "contract_id": "kaetram-tool-render-contract-v1",
+      "files": [
+        {
+          "path": "prompts/system.md",
+          "sha256": "2bd299d38ee8d7f726d3d100463e1f5e2a0056c4ab3dca067527f88fb52cc15e"
+        },
+        {
+          "path": "prompts/game_knowledge.md",
+          "sha256": "ff8510797098cb870e5cf75958fd3344f5df14c3fe1c415d176860984370e8b9"
+        },
+        {
+          "path": "finetune/render.py",
+          "sha256": "137c6e92ba0830787a3e65132fdf7389294f59e54857180900a16fdb2669e03b"
+        }
+      ]
+    },
+    "optimizer": {
+      "name": "adamw_8bit",
+      "learning_rate": 0.00005,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "weight_decay": 0.0,
+      "scheduler": "cosine",
+      "warmup_ratio": 0.03,
+      "gradient_clip_norm": 1.0,
+      "effective_batch_size": 32,
+      "epochs": 1
+    },
+    "budgets": {
+      "action_tokens": 2000000,
+      "teacher_scoring_tokens": 50000000,
+      "environment_interactions": 600000
+    },
+    "training_seed_schedule": [
+      41001,
+      41002,
+      41003,
+      41004,
+      41005
+    ]
+  },
+  "arms": [
+    {
+      "arm_id": "natural_opd",
+      "role": "primary",
+      "objective": "opd",
+      "training_artifact_id": "natural_rollouts",
+      "recovery": "on",
+      "state_source": {
+        "kind": "canonical_natural_rollout",
+        "constructor": "fresh_canonical_world_online"
+      },
+      "history_constructor": {
+        "kind": "authentic_online_history",
+        "source": "same_rollout"
+      }
+    },
+    {
+      "arm_id": "targeted_persistent_state",
+      "role": "primary",
+      "objective": "opd",
+      "training_artifact_id": "targeted_snapshots",
+      "recovery": "on",
+      "state_source": {
+        "kind": "targeted_persistent_player_state",
+        "constructor": "hash_verified_database_snapshot_restore"
+      },
+      "history_constructor": {
+        "kind": "matched_reconstructed_history",
+        "source": "snapshot_visible_fields_only"
+      }
+    },
+    {
+      "arm_id": "random_valid_state",
+      "role": "primary",
+      "objective": "opd",
+      "training_artifact_id": "random_valid_snapshots",
+      "recovery": "on",
+      "state_source": {
+        "kind": "random_valid_persistent_player_state",
+        "constructor": "uniform_over_registered_valid_snapshot_pool"
+      },
+      "history_constructor": {
+        "kind": "matched_reconstructed_history",
+        "source": "snapshot_visible_fields_only"
+      }
+    },
+    {
+      "arm_id": "progress_matched_state",
+      "role": "primary",
+      "objective": "opd",
+      "training_artifact_id": "progress_matched_snapshots",
+      "recovery": "on",
+      "state_source": {
+        "kind": "progress_matched_persistent_player_state",
+        "constructor": "stratified_match_on_registered_progress_vector"
+      },
+      "history_constructor": {
+        "kind": "matched_reconstructed_history",
+        "source": "snapshot_visible_fields_only"
+      }
+    },
+    {
+      "arm_id": "tcod_b2f_prefixes",
+      "role": "primary",
+      "objective": "opd",
+      "training_artifact_id": "tcod_success_prefixes",
+      "recovery": "on",
+      "state_source": {
+        "kind": "teacher_success_prefix_state",
+        "constructor": "restore_state_at_registered_prefix_boundary"
+      },
+      "history_constructor": {
+        "kind": "authentic_teacher_success_prefix",
+        "source": "same_evidence_backed_teacher_trajectory"
+      },
+      "tcod_b2f": {
+        "schedule": "backward_from_success",
+        "initial_success_fraction": 0.9,
+        "final_success_fraction": 0.1,
+        "schedule_basis": "action_tokens"
+      }
+    },
+    {
+      "arm_id": "guided_opd",
+      "role": "primary",
+      "objective": "opd",
+      "training_artifact_id": "guided_live_rollouts",
+      "recovery": "on",
+      "state_source": {
+        "kind": "canonical_guided_rollout",
+        "constructor": "fresh_canonical_world_online"
+      },
+      "history_constructor": {
+        "kind": "guided_mixed_history",
+        "source": "same_live_mixed_rollout"
+      },
+      "guided_annealing": {
+        "schedule": "cosine",
+        "schedule_basis": "training_progress",
+        "start_teacher_turn_probability": 1.0,
+        "end_teacher_turn_probability": 0.0,
+        "curriculum_ratio": 0.8,
+        "trajectory_probability": "held_fixed_within_trajectory",
+        "total_training_steps": 250,
+        "student_turn_loss": "reverse_kl",
+        "teacher_turn_loss": "forward_kl"
+      }
+    },
+    {
+      "arm_id": "visitation_only",
+      "role": "mechanism_or_baseline",
+      "objective": "opd",
+      "training_artifact_id": "visitation_only_snapshots",
+      "recovery": "on",
+      "state_source": {
+        "kind": "visitation_only_persistent_player_state",
+        "constructor": "hash_verified_database_snapshot_restore"
+      },
+      "history_constructor": {
+        "kind": "matched_reconstructed_history",
+        "source": "snapshot_visible_fields_only"
+      }
+    },
+    {
+      "arm_id": "teacher_advantage_only",
+      "role": "mechanism_or_baseline",
+      "objective": "opd",
+      "training_artifact_id": "teacher_advantage_only_snapshots",
+      "recovery": "on",
+      "state_source": {
+        "kind": "teacher_advantage_only_persistent_player_state",
+        "constructor": "hash_verified_database_snapshot_restore"
+      },
+      "history_constructor": {
+        "kind": "matched_reconstructed_history",
+        "source": "snapshot_visible_fields_only"
+      }
+    },
+    {
+      "arm_id": "corrected_interface_sft",
+      "role": "mechanism_or_baseline",
+      "objective": "sft",
+      "training_artifact_id": "corrected_interface_sft_trajectories",
+      "recovery": "on",
+      "state_source": {
+        "kind": "corrected_interface_teacher_trajectory_state",
+        "constructor": "corrected_interface_teacher_trajectory_replay"
+      },
+      "history_constructor": {
+        "kind": "corrected_interface_teacher_history",
+        "source": "same_corrected_teacher_trajectory"
+      }
+    },
+    {
+      "arm_id": "score_first_error_prefixes",
+      "role": "mechanism_or_baseline",
+      "objective": "score",
+      "training_artifact_id": "score_first_error_prefixes",
+      "recovery": "on",
+      "state_source": {
+        "kind": "verified_first_error_prefix_state",
+        "constructor": "restore_verified_pre_error_state"
+      },
+      "history_constructor": {
+        "kind": "verified_pre_error_prefix",
+        "source": "same_verified_student_trajectory"
+      }
+    }
+  ],
+  "history_ablations": [
+    {
+      "ablation_id": "snapshot_minimal_history",
+      "role": "history_ablation",
+      "objective": "opd",
+      "training_artifact_id": "history_snapshot_minimal",
+      "recovery": "on",
+      "state_source": {
+        "kind": "targeted_persistent_player_state",
+        "constructor": "hash_verified_database_snapshot_restore"
+      },
+      "history_constructor": {
+        "kind": "minimal_model_visible_history",
+        "source": "single_post_restore_observation"
+      }
+    },
+    {
+      "ablation_id": "teacher_replay_authentic_prefix",
+      "role": "history_ablation",
+      "objective": "opd",
+      "training_artifact_id": "history_teacher_replay",
+      "recovery": "on",
+      "state_source": {
+        "kind": "teacher_replay_state",
+        "constructor": "replay_witness_trajectory_to_identical_state"
+      },
+      "history_constructor": {
+        "kind": "authentic_teacher_history",
+        "source": "same_witness_trajectory_prefix"
+      }
+    },
+    {
+      "ablation_id": "snapshot_matched_reconstructed_history",
+      "role": "history_ablation",
+      "objective": "opd",
+      "training_artifact_id": "history_snapshot_reconstructed",
+      "recovery": "on",
+      "state_source": {
+        "kind": "targeted_persistent_player_state",
+        "constructor": "hash_verified_database_snapshot_restore"
+      },
+      "history_constructor": {
+        "kind": "matched_reconstructed_history",
+        "source": "snapshot_visible_fields_only"
+      }
+    },
+    {
+      "ablation_id": "backplay_witness_annealing",
+      "role": "history_ablation",
+      "objective": "opd",
+      "training_artifact_id": "history_backplay_witness",
+      "recovery": "on",
+      "state_source": {
+        "kind": "backplay_witness_state",
+        "constructor": "restore_along_registered_witness_trajectory"
+      },
+      "history_constructor": {
+        "kind": "authentic_witness_history",
+        "source": "matching_witness_trajectory_prefix"
+      },
+      "backplay_annealing": {
+        "schedule": "backward_along_witness",
+        "schedule_basis": "action_tokens",
+        "start_distance_fraction": 0.0,
+        "end_distance_fraction": 1.0,
+        "anneal_action_tokens": 2000000
+      }
+    }
+  ],
+  "execution": {
+    "allow_launch": false,
+    "max_parallel": 1,
+    "output_root": "artifacts/opd-matched-training",
+    "backend_adapter": {
+      "path": "UNRESOLVED_FOR_BACKEND_ADAPTER",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}
