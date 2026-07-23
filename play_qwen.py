@@ -486,10 +486,25 @@ def _build_session_note(state_dir: Path, last_reason: str) -> str | None:
     targeting_ricks = active_name == "Rick's Roll" or (
         active_name is None and next_core3 == "Rick's Roll")
     if targeting_ricks:
-        cooked = sum(int(i.get("count", 0) or 0)
-                     for i in (gs.get("inventory") or [])
-                     if isinstance(i, dict) and "cookedshrimp" in str(i.get("key", "")).lower())
-        if cooked >= 5:
+        inv = gs.get("inventory") or []
+        def _held(key: str) -> int:
+            return sum(int(i.get("count", 0) or 0) for i in inv
+                       if isinstance(i, dict) and key in str(i.get("key", "")).lower())
+        cooked = _held("cookedshrimp")
+        has_roll = _held("seaweedroll") > 0
+        ricks_stage = (active[0].get("stage")
+                       if (active and isinstance(active[0], dict)) else None)
+        past_shrimp = has_roll or (isinstance(ricks_stage, int) and ricks_stage >= 2)
+        if past_shrimp:
+            # Stages 2-3: Rick already took the shrimp and gave you the seaweedroll.
+            # Do NOT re-fish — the only task left is delivering the roll to Lena,
+            # which means crossing the stage-2 quest door. The prior stage-1 note
+            # here sent stage-2 agents back to the fishing spots (run_20260717_172840).
+            parts.append("Rick's Roll: you already turned in the shrimp and hold the "
+                         "seaweedroll — do NOT fish or return to Rick. Navigate ONTO the "
+                         "stage-2 door tile (260,229) to teleport to (425,909), then "
+                         "navigate to Lena (455,924) and turn in the roll to finish")
+        elif cooked >= 5:
             parts.append("Rick's Roll: you hold 5 cooked shrimp — cross the door "
                          "(379,388) ONCE to Rick (1088,833) and turn in (the seaside "
                          "is L76+, bring food)")

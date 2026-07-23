@@ -308,8 +308,8 @@ PYEOF
       "$PROJECT_DIR/scripts/opd/seed_herbalist_wall.py"
   fi
 
-  # Opt-in milestone-ladder seeding (OPD round-3): per-personality milestones,
-  # lane set A or B — see scripts/opd/seed_milestones.py.
+  # Opt-in milestone-ladder seeding (OPD): per-personality milestones,
+  # lane set A, B, or C — see scripts/opd/seed_milestones.py.
   if [ -n "${KAETRAM_SEED_MILESTONES:-}" ]; then
     echo "Re-seeding Qwen agents at round-3 milestones (lane set $KAETRAM_SEED_MILESTONES)..."
     PYTHONPATH="$PROJECT_DIR" "$PROJECT_DIR/.venv/bin/python3" \

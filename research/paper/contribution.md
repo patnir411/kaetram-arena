@@ -1,5 +1,10 @@
 # Paper 1: Contribution & Framing
 
+> **SUPERSEDED (July 10, 2026):** this document is the May-era r10/KTO framing, kept for
+> history. The current novelty assessment, paper centering, venue strategy, and cleanup plan
+> live in [paper-readiness-2026-07-10.md](paper-readiness-2026-07-10.md); the current draft
+> is `reference/overview.tex`.
+
 Working notes for the ICLR 2027 submission (Paper 1 of the two-paper roadmap). This is a thinking document — not paper-ready prose.
 
 **Context:** This is Paper 1 (Kaetram distillation). Paper 2 (RuneScape adversarial multi-agent) is in [paper2-runescape-vision.md](paper2-runescape-vision.md). The two papers are fully independent — do not conflate them. Paper 1 proves the distillation infrastructure. Paper 2 is the agent safety contribution. Both publish under the arXiv.
