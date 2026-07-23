@@ -84,7 +84,7 @@ SCENARIOS = {
 }
 
 MONGO_CONTAINER = "kaetram-mongo"
-MONGO_DB = "kaetram_devlopment"
+MONGO_DB = os.environ.get("KAETRAM_MONGO_DB", "kaetram_devlopment")
 MONGO_COLLECTIONS = [
     "player_info", "player_skills", "player_equipment",
     "player_inventory", "player_bank", "player_quests",
