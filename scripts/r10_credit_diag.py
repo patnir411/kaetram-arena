@@ -11,16 +11,31 @@ import sys, bisect
 from pathlib import Path
 from collections import defaultdict
 
-sys.path.insert(0, str(Path("scripts/log_analysis")))
-from parse import (  # noqa: E402
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+from scripts.log_analysis.parse import (  # noqa: E402
     list_agent_dirs, list_runs, parse_run_sessions,
     progression_for_quests, quest_stage_counts,
+)
+from scripts.log_analysis.artifact_requirements import (  # noqa: E402
+    MissingEvidenceError,
+    require_agent_run_logs,
 )
 
 SOURCE_RUNS = {
     "run_20260504_140418", "run_20260504_172157", "run_20260504_221206",
     "run_20260505_150033", "run_20260505_214542",
 }
+try:
+    require_agent_run_logs(
+        "dataset/raw",
+        agents=("agent_0", "agent_1", "agent_2"),
+        run_ids=SOURCE_RUNS,
+        analysis="r10 hindsight-credit diagnostic",
+    )
+except MissingEvidenceError as exc:
+    print(f"ERROR: {exc}", file=sys.stderr)
+    raise SystemExit(2) from exc
 ALL_QUESTS = list(quest_stage_counts().keys())
 WINDOWS = [5, 10, 20]
 

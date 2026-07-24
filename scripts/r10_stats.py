@@ -23,9 +23,15 @@ Run:  python3 scripts/r10_stats.py
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path("scripts/log_analysis")))
-from parse import (  # noqa: E402
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+from scripts.log_analysis.parse import (  # noqa: E402
     list_agent_dirs, list_runs, parse_run_sessions, progression_for_quests,
+)
+from scripts.log_analysis.artifact_requirements import (  # noqa: E402
+    MissingEvidenceError,
+    require_agent_run_logs,
+    require_files,
 )
 
 try:
@@ -46,6 +52,19 @@ BASE_3H = ["run_20260510_173852", "run_20260519_223921", "run_20260520_143530"]
 CORPUS = ["run_20260504_140418", "run_20260504_172157", "run_20260504_221206",
           "run_20260505_150033", "run_20260505_214542"]
 TOOLS = ["observe", "navigate", "interact_npc", "query_quest", "attack", "gather"]
+
+
+def validate_inputs():
+    require_agent_run_logs(
+        "dataset/raw",
+        agents=AGENTS,
+        run_ids=[*BASE, *SFT],
+        analysis="r10 base-vs-SFT statistics",
+    )
+    require_files(
+        ["dataset/qwen_sft/train.json"],
+        analysis="r10 completionist tool-mix analysis",
+    )
 
 
 def run_stage_total_and_foresting(run_id):
@@ -107,6 +126,11 @@ def completionist_train_target_mix(path="dataset/qwen_sft/train.json"):
 
 
 def main():
+    try:
+        validate_inputs()
+    except MissingEvidenceError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
     base_stage = [run_stage_total_and_foresting(r)[0] for r in BASE]
     sft_stage = [run_stage_total_and_foresting(r)[0] for r in SFT]
     base_f = [b for r in BASE for b in run_stage_total_and_foresting(r)[1] if b is not None]
@@ -146,7 +170,8 @@ def main():
         print(f"  {t:<14}{corpus[t]:>7.1f}%{sft_mix[t]:>7.1f}%{base_mix[t]:>7.1f}%{d:>13.1f}")
     print("  (corpus = completionist training-target distribution; SFT inference"
           " tracks it within ~1pp on interact_npc/query_quest/navigate, NOT observe)")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
