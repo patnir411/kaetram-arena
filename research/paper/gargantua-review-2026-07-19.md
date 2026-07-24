@@ -42,9 +42,12 @@ Commit `2a1d8a5` introduced the mismatch on 2026-04-25. `scripts/run-eval.sh` re
 that dedicated lane after 2026-04-25 must be quarantined until a deployed fix produces an
 attested clean run.
 
-This does **not directly implicate** E3-prime (`run_20260612_044933`), E4
-(`run_20260613_112422`), or Arm-C (`run_20260613_214956`): the historical notes map them to the
-orchestrator lane on ports 9001/9011/9021 using the development database. The subsequently
+This does **not directly implicate** E3-prime (`run_20260713_084905`), E4
+(`run_20260711_153427`), or Arm-C (`run_20260713_191230`) — nor the June arms r2
+(`run_20260612_044933`), r3+recovery (`run_20260613_112422`), or r2+recovery
+(`run_20260613_214956`) [run-id labels corrected 2026-07-24 to match
+`research/audits/july-mechanism-results.json` and `scripts/arm_stats.py`]: the historical notes
+map them to the orchestrator lane on ports 9001/9011/9021 using the development database. The subsequently
 recovered raw bundles strengthen that conclusion: all 15 OPD agent-runs begin with `observe` as
 the first recorded action and expose the exact canonical level-1 starter state. The derived audit
 is `research/audits/historical-initial-state.json`, bound to the recovered source inventory by

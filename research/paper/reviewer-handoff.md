@@ -1,6 +1,6 @@
 # Paper 1 reviewer handoff
 
-Updated: July 19, 2026
+Updated: July 23, 2026
 
 ## The short version
 
