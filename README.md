@@ -12,6 +12,7 @@
 The agent calls 17 structured tools (observe, attack, navigate, interact_npc, gather, craft_item, …) — never writes JavaScript or clicks pixels. Sessions across **4 frontier-LLM harnesses** (Claude / Codex / Gemini / OpenCode) are collected as gameplay trajectories (Claude is the primary corpus, the others are cross-harness comparisons), with OpenCode multiplexing across xAI Grok, NVIDIA Qwen3.5, and DeepSeek V4 via `--opencode-model`. Progress is measured against the **Core 3 quest benchmark** (see below).
 
 > **For developers:** see [`CLAUDE.md`](CLAUDE.md) for the full developer reference and [`session_log.md`](session_log.md) for the most recent decisions.
+> For confirmatory experiments, see [`docs/reproducible-runs.md`](docs/reproducible-runs.md) for immutable manifests, artifact hashes, and clean-clone preflight.
 
 ## What it does
 
