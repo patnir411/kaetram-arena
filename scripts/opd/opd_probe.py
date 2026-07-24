@@ -71,7 +71,12 @@ def _short_name(full: str) -> str:
     return full.split("__")[-1] if "__" in full else full
 
 
-def reconstruct_session(log_path: Path) -> tuple[list[dict], list[tuple[AssistantTurn, list[ToolResult]]]]:
+def reconstruct_session(
+    log_path: Path,
+    *,
+    source_repo: Path | None = None,
+    render_project_dir: Path | None = None,
+) -> tuple[list[dict], list[tuple[AssistantTurn, list[ToolResult]]]]:
     """Walk a session log and return (system_bootstrap_messages, turns).
 
     System + bootstrap are rebuilt via the canonical helpers so the prefix is
@@ -85,7 +90,18 @@ def reconstruct_session(log_path: Path) -> tuple[list[dict], list[tuple[Assistan
     username = meta.get("username") or "evalbotR10"
     session_n = int(meta.get("session", 1))
 
-    system_prompt = resolve_system_prompt(str(REPO), username=username, personality=personality)
+    prompt_root = source_repo.resolve() if source_repo is not None else REPO
+    rendered_project = (
+        render_project_dir.resolve()
+        if render_project_dir is not None
+        else REPO
+    )
+    system_prompt = resolve_system_prompt(
+        str(rendered_project),
+        username=username,
+        personality=personality,
+        prompt_assets_dir=str(prompt_root),
+    )
     bootstrap_text = build_orchestrate_bootstrap(personality, session_n)
     base_messages = [
         {"role": "system", "content": system_prompt},

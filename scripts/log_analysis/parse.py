@@ -40,8 +40,10 @@ _EST = timezone(timedelta(hours=-4))
 
 # ── Discovery ────────────────────────────────────────────────────────────────
 
-def list_agent_dirs() -> list[Path]:
-    return sorted(p for p in RAW_DIR.glob("agent_*") if p.is_dir())
+def list_agent_dirs(raw_dir: str | Path = RAW_DIR) -> list[Path]:
+    """Return agent directories under the selected raw-artifact root."""
+    root = Path(raw_dir)
+    return sorted(p for p in root.glob("agent_*") if p.is_dir())
 
 
 def list_runs(agent_dir: Path) -> list[Path]:
@@ -248,7 +250,8 @@ class ToolCall:
         # ("Error executing tool gather: 1 validation error ..."), not JSON —
         # without this branch the largest qwen failure class is invisible.
         if isinstance(self.result_payload, str) and self.result_payload.startswith(
-                "Error executing tool"):
+            ("Error executing tool", "Error:")
+        ):
             return True
         return False
 
@@ -289,19 +292,75 @@ class SessionView:
         return max(self.n_assistant, len(self.tool_calls) and 1)
 
 
-def iter_lines(log_path: Path) -> Iterable[tuple[int, dict]]:
+def parse_record_timestamp(value: object) -> datetime | None:
+    """Parse a JSONL record timestamp onto an absolute UTC-aware timeline.
+
+    The direct/Qwen harness historically emitted naive ISO timestamps in UTC,
+    while newer harnesses may emit ``Z`` or an explicit offset.  Normalizing
+    here lets protocol-boundary analyses filter records rather than whole
+    sessions (a stage transition can occur inside the session that crosses the
+    registered time limit).
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    raw = value.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def iter_lines(
+    log_path: Path,
+    *,
+    through: datetime | None = None,
+) -> Iterable[tuple[int, dict]]:
+    """Yield valid records, optionally stopping semantic events at ``through``.
+
+    Assistant/user records without a parseable timestamp fail the parse when a
+    cutoff is active: admitting or silently dropping an undated tool result
+    could change a protocol score. Structural records remain available because
+    they cannot create quest progress.
+    """
+    if through is not None and through.tzinfo is None:
+        raise ValueError("protocol cutoff must carry an explicit UTC offset")
+    cutoff = through.astimezone(timezone.utc) if through is not None else None
     with log_path.open() as f:
         for i, line in enumerate(f, 1):
             line = line.strip()
             if not line:
                 continue
             try:
-                yield i, json.loads(line)
-            except json.JSONDecodeError:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                if cutoff is not None:
+                    raise ValueError(
+                        f"{log_path}:{i}: malformed JSON under protocol cutoff"
+                    ) from exc
                 continue
+            if cutoff is not None:
+                record_time = parse_record_timestamp(record.get("timestamp"))
+                if record_time is not None and record_time > cutoff:
+                    continue
+                if record_time is None and record.get("type") in {
+                    "assistant", "user", "text", "reasoning", "tool_use",
+                }:
+                    raise ValueError(
+                        f"{log_path}:{i}: semantic record has no valid timestamp"
+                    )
+            yield i, record
 
 
-def parse_session(log_path: Path) -> SessionView:
+def parse_session(
+    log_path: Path,
+    *,
+    through: datetime | None = None,
+) -> SessionView:
     """Walk a session log once and produce a structured view.
 
     Pairs assistant tool_use blocks with the matching user tool_result by id.
@@ -318,7 +377,7 @@ def parse_session(log_path: Path) -> SessionView:
     pending_thinking: str | None = None
     pending_text: str | None = None
 
-    for line_no, rec in iter_lines(log_path):
+    for line_no, rec in iter_lines(log_path, through=through):
         rtype = rec.get("type")
         if rtype == "system" and rec.get("subtype") == "init":
             sv.init_info = {
@@ -485,7 +544,11 @@ def _split_think_tags(text: str) -> tuple[str | None, str | None]:
     return ("\n\n".join(thinks) or None), ("\n\n".join(prose) or None)
 
 
-def parse_session_opencode(log_path: Path) -> SessionView:
+def parse_session_opencode(
+    log_path: Path,
+    *,
+    through: datetime | None = None,
+) -> SessionView:
     sv = SessionView(log_path=log_path, meta=session_meta(log_path))
     # Seed init_info from the per-session meta.json since opencode logs have
     # no `system.init` line. Lets cmd_metrics / dashboard read model + harness
@@ -518,7 +581,7 @@ def parse_session_opencode(log_path: Path) -> SessionView:
                     tokens_total.get(f"{k}_tokens", 0) + int(v)
                 )
 
-    for line_no, rec in iter_lines(log_path):
+    for line_no, rec in iter_lines(log_path, through=through):
         rtype = rec.get("type")
         if rtype == "text":
             txt = (rec.get("part") or {}).get("text") or ""
@@ -610,12 +673,17 @@ def parse_session_opencode(log_path: Path) -> SessionView:
     return sv
 
 
-def parse_session_auto(log_path: Path, harness: str | None = None) -> SessionView:
+def parse_session_auto(
+    log_path: Path,
+    harness: str | None = None,
+    *,
+    through: datetime | None = None,
+) -> SessionView:
     """Pick the right parser based on harness (from meta.json, or override)."""
     h = harness or session_meta(log_path).get("harness", "claude")
     if h == "opencode":
-        return parse_session_opencode(log_path)
-    return parse_session(log_path)
+        return parse_session_opencode(log_path, through=through)
+    return parse_session(log_path, through=through)
 
 
 # ── Convenience extractors over a parsed session ─────────────────────────────
@@ -925,12 +993,20 @@ class RunSessionsView:
         return out
 
 
-def parse_run_sessions(agent_dir: Path, run_dir: Path,
-                       *, harness: str | None = None) -> RunSessionsView:
+def parse_run_sessions(
+    agent_dir: Path,
+    run_dir: Path,
+    *,
+    harness: str | None = None,
+    through: datetime | None = None,
+) -> RunSessionsView:
     """Parse every session_*.log under `run_dir`, sorted chronologically by
     filename (session_N_YYYYMMDD_HHMMSS.log). `harness` overrides auto-detect
     per session — usually unnecessary since each session's meta.json carries
-    the harness."""
+    the harness. When ``through`` is set, every file is opened and records are
+    filtered by their JSON timestamps. Do not prefilter from filename times:
+    historical Qwen filenames use a different timezone convention from their
+    UTC JSONL records."""
     rmeta = run_meta(run_dir)
 
     def _session_sort_key(p: Path) -> tuple[int, str]:
@@ -952,9 +1028,13 @@ def parse_run_sessions(agent_dir: Path, run_dir: Path,
     sessions: list[SessionView] = []
     for p in paths:
         try:
-            sessions.append(parse_session_auto(p, harness=harness))
+            sessions.append(parse_session_auto(p, harness=harness, through=through))
         except Exception:
-            # Skip corrupt logs rather than abort the whole run analysis.
+            # Interactive dashboards tolerate a corrupt historical session.
+            # Protocol scoring does not: skipping one could erase the evidence
+            # for a stage transition and silently change a paper result.
+            if through is not None:
+                raise
             continue
     return RunSessionsView(
         agent_dir=agent_dir,
@@ -1291,5 +1371,3 @@ def categorize_error(text: str) -> str:
         if rx.search(text):
             return label
     return "OTHER"
-
-

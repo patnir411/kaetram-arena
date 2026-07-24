@@ -1,6 +1,11 @@
 # Session Log
 _Keep under 30 lines. Update at end of every session. Most recent first._
 
+> **Historical development record, not an audited results source.** Entries below were written
+> during the runs and contain superseded causal language. The June raw bundles and exact
+> configurations are not checked in. Use `research/paper/claims-evidence-matrix.md` and
+> `research/paper/gargantua-review-2026-07-19.md` for allowed claims.
+
 ---
 
 ## 2026-07-23 — Reconciling Barath's July-19 audit stack (PRs #35–#53 + Kaetram-Open #333 + Linear KAE-76→86)

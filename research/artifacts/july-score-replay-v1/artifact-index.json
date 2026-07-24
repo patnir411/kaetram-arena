@@ -1,0 +1,35 @@
+{
+  "evidence_manifest_sha256": "6fa185370f920771f01d280611c3685734900a4e7fb58c0ecd2f42b82a8ec47d",
+  "export_script_sha256": "5e4dfa20adf959545cca0b7c5b71f9cc51ab365cc1d6795670ff640703049e2c",
+  "export_source_git_commit": "59167db684ace7b0f4fb7d16507da08f81e374fa",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "95174c9aa913c57cf424d912324e84ca8a9fefc28579a41760919cb9dcad2442",
+      "size_bytes": 722
+    },
+    {
+      "path": "observations.jsonl",
+      "sha256": "6160d1cbd1f106ce3d87c7d7ded898c2819750961300facddfb45bce00af397e",
+      "size_bytes": 6918939
+    },
+    {
+      "path": "registry.json",
+      "sha256": "339e1306388b17210fde577084f45833ae7baf9002c4b1f3c1e7a598749bd0b2",
+      "size_bytes": 2172665
+    },
+    {
+      "path": "scores.json",
+      "sha256": "60e7eca58291c9e9c905770f96fd57085f5114c2471037c4718affb2da54b02b",
+      "size_bytes": 8738
+    }
+  ],
+  "manifest_sha256": "26f0f7f8e22757b1af1e90af93e9baf71969b32e7bb77e847a6c5b54ddb5818d",
+  "raw_result_manifest_sha256": "edcdd1682f4f94d9981bdd358ba4373635a50f4e22e973d21fdc9d1a56733621",
+  "registry_manifest_sha256": "d18225c19ce896f2bbfc85fd1f285b19453629f817d44916a60e37b0b74ea626",
+  "schema_version": "kaetram.july-score-projection-artifact.v1",
+  "scorer_script_sha256": "c5523e52b9093c43e174c5f5b367e9ffe07de8b3fe42a9ad113573e3fe0bfdf2",
+  "scores_manifest_sha256": "63e8c6c70670fa4e2f5d527892093f4fb96d85be91e3896647a056eaf995b7bf",
+  "study_id": "recovered-july-mechanism-score-replay-v1",
+  "tree_sha256": "59052d0faf4065b76f3ea7e6c8dc8c5105311c4e460277fb8f5fb39e262134d3"
+}

@@ -17,9 +17,12 @@ running on --server-port, MongoDB in Docker (kaetram-mongo).
 """
 
 import argparse
+import hashlib
 import json
 import math
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -28,10 +31,33 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
+from heldout_guard import (
+    DEFAULT_REGISTRATION,
+    HeldOutRegistration,
+    HeldOutGuardError,
+    assert_prompt_not_reserved,
+    normalize_quest,
+    validate_eval_selection,
+)
+from inference_seed import validate_inference_seed
+from port_probe import is_tcp_port_open
+from canonical_start import (
+    initial_state_projection,
+    seed_canonical_player,
+    state_mismatches,
+)
+from run_manifest import sha256_json
+from scripts.isolated_python_entry import (
+    isolated_contract_active,
+    isolated_python_command,
+)
+
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
+EVAL_RESULTS_SCHEMA_VERSION = "kaetram.eval-results.v1"
 
 # Default Modal endpoints with per-model config
 # Each model gets its own username (no hyphens — Kaetram rejects them) and game server port.
@@ -85,11 +111,267 @@ SCENARIOS = {
 
 MONGO_CONTAINER = "kaetram-mongo"
 MONGO_DB = os.environ.get("KAETRAM_MONGO_DB", "kaetram_devlopment")
+ENVIRONMENT_RNG_MECHANISM = "kaetram-environment-rng-attestation/v2"
+ENVIRONMENT_RNG_ALGORITHM = "mulberry32-sha256-v1"
+GAME_DATABASE_ATTESTATION_SCHEMA = "kaetram-game-database-attestation/v2"
+GAME_MONGO_HOST = "127.0.0.1"
+GAME_MONGO_PORT = 27017
 MONGO_COLLECTIONS = [
     "player_info", "player_skills", "player_equipment",
     "player_inventory", "player_bank", "player_quests",
     "player_achievements", "player_statistics", "player_abilities",
 ]
+
+
+def build_python_child_command(
+    project_dir: str | Path,
+    script: str | Path,
+    arguments: list[str],
+) -> list[str]:
+    """Preserve the reviewed Python contract across nested eval processes."""
+    environment = Path(sys.executable).absolute().parent.parent
+    if isolated_contract_active(environment):
+        return isolated_python_command(
+            sys.executable,
+            repo_root=Path(project_dir),
+            environment_root=environment,
+            script=Path(script),
+            target_args=arguments,
+        )
+    return [sys.executable, str(script), *arguments]
+
+
+def normalize_server_port(value: str | int) -> int:
+    """Normalize CLI/config ports before passing them to strict socket probes."""
+    try:
+        port = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"server port must be an integer, got {value!r}") from exc
+    if not 1 <= port <= 65_535:
+        raise ValueError(f"server port must be between 1 and 65535, got {port}")
+    return port
+
+
+def require_node20_binary() -> str:
+    """Resolve an explicit Node 20 executable without assuming nvm or a shell."""
+    node_binary = os.environ.get("KAETRAM_NODE_BINARY") or shutil.which("node")
+    if not node_binary:
+        raise RuntimeError(
+            "Node.js is required; put Node 20 on PATH or set KAETRAM_NODE_BINARY"
+        )
+
+    try:
+        result = subprocess.run(
+            [node_binary, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"could not execute Node.js at {node_binary}: {exc}") from exc
+
+    version = result.stdout.strip()
+    if result.returncode != 0 or not re.fullmatch(r"v20\.\d+\.\d+", version):
+        detail = version or result.stderr.strip() or f"exit {result.returncode}"
+        raise RuntimeError(
+            f"Kaetram requires Node 20, but {node_binary} reported {detail}"
+        )
+
+    return node_binary
+
+
+def verify_environment_rng_attestation(
+    path: Path, provenance: dict
+) -> dict:
+    """Load and verify the game-server startup attestation, returning its stable core."""
+    try:
+        attestation = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"missing or invalid environment RNG attestation at {path}: {exc}") from exc
+    expected = {
+        "schema": provenance["environment_seed_mechanism"],
+        "algorithm": provenance["environment_rng_algorithm"],
+        "seedSha256": hashlib.sha256(
+            str(provenance["environment_seed"]).encode()
+        ).hexdigest(),
+        "gameRevision": provenance["environment_game_revision"],
+        "serverBundleSha256": provenance["environment_game_bundle_sha256"],
+        "drawsAtAttestation": 0,
+    }
+    mismatches = {
+        key: {"expected": value, "actual": attestation.get(key)}
+        for key, value in expected.items()
+        if attestation.get(key) != value
+    }
+    if mismatches:
+        raise RuntimeError(f"environment RNG attestation mismatch: {mismatches}")
+    return expected
+
+
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _mongo_connection_from_env_file(path: Path) -> dict[str, str]:
+    """Read conservative Mongo connection assignments from a dotenv file."""
+    matches: dict[str, list[str]] = {
+        "DATABASE": [],
+        "SKIP_DATABASE": [],
+        "MONGODB_HOST": [],
+        "MONGODB_PORT": [],
+        "MONGODB_DATABASE": [],
+        "MONGODB_TLS": [],
+        "MONGODB_SRV": [],
+        "MONGODB_USER": [],
+        "MONGODB_PASSWORD": [],
+        "MONGODB_AUTH_SOURCE": [],
+    }
+    for line_number, raw_line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = re.fullmatch(
+            r"(DATABASE|SKIP_DATABASE|MONGODB_HOST|MONGODB_PORT|"
+            r"MONGODB_DATABASE|MONGODB_TLS|MONGODB_SRV|MONGODB_USER|"
+            r"MONGODB_PASSWORD|MONGODB_AUTH_SOURCE)\s*=\s*(.*)",
+            stripped,
+        )
+        if not match:
+            continue
+        key, raw_value = match.group(1), match.group(2).strip()
+        value_match = re.fullmatch(
+            r"(?:'(?P<single>[A-Za-z0-9_.:-]*)'|"
+            r'"(?P<double>[A-Za-z0-9_.:-]*)"|'
+            r"(?P<plain>[A-Za-z0-9_.:-]*))",
+            raw_value,
+        )
+        if not value_match:
+            raise RuntimeError(
+                f"{path}:{line_number}: ambiguous or unsafe "
+                f"{key} value"
+            )
+        value = next(
+            value for value in value_match.groupdict().values()
+            if value is not None
+        )
+        matches[key].append(value)
+    duplicates = sorted(key for key, values in matches.items() if len(values) > 1)
+    if duplicates:
+        raise RuntimeError(f"{path}: duplicate MongoDB assignments: {duplicates}")
+    return {key: values[0] for key, values in matches.items() if values}
+
+
+def attest_game_database_configuration(
+    game_dir: Path,
+    expected_database: str,
+    *,
+    environ: dict[str, str] | None = None,
+) -> dict:
+    """Bind the database read by Kaetram's dotenv config to the harness lane."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", expected_database):
+        raise RuntimeError(f"unsafe expected MongoDB database {expected_database!r}")
+    game_dir = game_dir.expanduser().resolve()
+    defaults_path = game_dir / ".env.defaults"
+    local_path = game_dir / ".env"
+    if not defaults_path.is_file() or not local_path.is_file():
+        raise RuntimeError(
+            "Kaetram database attestation requires regular .env.defaults and .env files"
+        )
+
+    active_environ = os.environ if environ is None else environ
+    dotenv_controls = sorted(
+        key for key in active_environ if key.startswith("DOTENV_CONFIG_")
+    )
+    if dotenv_controls:
+        raise RuntimeError(
+            "refusing ambient dotenv-extended controls that can change game "
+            f"configuration semantics: {dotenv_controls}"
+        )
+    ambient_database_controls = sorted(
+        key
+        for key in active_environ
+        if key in {"DATABASE", "SKIP_DATABASE"} or key.startswith("MONGODB_")
+    )
+    if ambient_database_controls:
+        raise RuntimeError(
+            "refusing ambient database controls; game database configuration "
+            "must come only from the hash-attested dotenv files: "
+            f"{ambient_database_controls}"
+        )
+    node_env = active_environ.get("NODE_ENV", "")
+    if node_env and not re.fullmatch(r"[A-Za-z0-9_-]+", node_env):
+        raise RuntimeError(f"unsafe NODE_ENV value {node_env!r}")
+    config_paths = [defaults_path, local_path]
+    node_env_path = game_dir / f".env.{node_env}" if node_env else None
+    if node_env_path is not None and node_env_path.exists():
+        if not node_env_path.is_file() or node_env_path.is_symlink():
+            raise RuntimeError(f"refusing non-regular environment file {node_env_path}")
+        config_paths.append(node_env_path)
+
+    effective: dict[str, str] = {}
+    files = []
+    for path in config_paths:
+        if path.is_symlink():
+            raise RuntimeError(f"refusing symlinked environment file {path}")
+        effective.update(_mongo_connection_from_env_file(path))
+        files.append({
+            "path": path.relative_to(game_dir).as_posix(),
+            "sha256": _sha256_path(path),
+        })
+    effective_database = effective.get("MONGODB_DATABASE")
+    effective_backend = effective.get("DATABASE")
+    skip_database = effective.get("SKIP_DATABASE")
+    effective_host = effective.get("MONGODB_HOST")
+    effective_port = effective.get("MONGODB_PORT")
+    tls = effective.get("MONGODB_TLS")
+    srv = effective.get("MONGODB_SRV")
+    user = effective.get("MONGODB_USER")
+    password = effective.get("MONGODB_PASSWORD")
+    auth_source = effective.get("MONGODB_AUTH_SOURCE")
+    if (
+        effective_database != expected_database
+        or effective_backend != "mongodb"
+        or skip_database != "false"
+        or effective_host != GAME_MONGO_HOST
+        or effective_port != str(GAME_MONGO_PORT)
+        or tls != "false"
+        or srv != "false"
+        or user != ""
+        or password != ""
+        or auth_source != ""
+    ):
+        raise RuntimeError(
+            "game server MongoDB target differs from harness attested local "
+            f"lane: backend={effective_backend!r}, "
+            f"skip_database={skip_database!r}, game=({effective_host!r}, {effective_port!r}, "
+            f"{effective_database!r}), tls={tls!r}, srv={srv!r}, "
+            f"authentication_enabled={bool(user or password or auth_source)!r}, "
+            f"harness=({GAME_MONGO_HOST!r}, "
+            f"{GAME_MONGO_PORT!r}, {expected_database!r})"
+        )
+
+    record = {
+        "schema": GAME_DATABASE_ATTESTATION_SCHEMA,
+        "expected_database": expected_database,
+        "effective_database": effective_database,
+        "effective_backend": effective_backend,
+        "skip_database": False,
+        "effective_host": effective_host,
+        "effective_port": int(effective_port),
+        "tls": False,
+        "srv": False,
+        "authentication_enabled": False,
+        "node_env": node_env,
+        "config_files": files,
+    }
+    return {**record, "attestation_sha256": sha256_json(record)}
 
 
 # ---------------------------------------------------------------------------
@@ -142,22 +424,38 @@ def require_player_db_reset(
 # System prompt resolution
 # ---------------------------------------------------------------------------
 
-def resolve_system_prompt(project_dir: str, username: str, personality: str = "") -> str:
-    """Resolve system.md template with game knowledge and optional personality."""
-    system_path = os.path.join(project_dir, "prompts", "system.md")
-    knowledge_path = os.path.join(project_dir, "prompts", "game_knowledge.md")
+def resolve_system_prompt(
+    project_dir: str,
+    username: str,
+    personality: str = "",
+    *,
+    prompt_assets_dir: str = "",
+    include_game_knowledge: bool = True,
+    held_out_quest: str = "",
+    held_out_registration: HeldOutRegistration | None = None,
+    prompt_agent_name: str = "",
+) -> str:
+    """Resolve system.md with optional knowledge and held-out task targeting."""
+    asset_root = prompt_assets_dir or project_dir
+    system_path = os.path.join(asset_root, "prompts", "system.md")
+    knowledge_path = os.path.join(asset_root, "prompts", "game_knowledge.md")
 
     with open(system_path) as f:
         prompt = f.read()
     knowledge = ""
-    if os.path.isfile(knowledge_path):
+    if include_game_knowledge and os.path.isfile(knowledge_path):
         with open(knowledge_path) as f:
             knowledge = f.read()
 
     # Load personality block if specified
     personality_block = ""
     if personality:
-        pers_path = os.path.join(project_dir, "prompts", "personalities", f"{personality}.md")
+        pers_path = os.path.join(
+            asset_root,
+            "prompts",
+            "personalities",
+            f"{personality}.md",
+        )
         if os.path.isfile(pers_path):
             with open(pers_path) as f:
                 personality_block = f.read()
@@ -165,11 +463,52 @@ def resolve_system_prompt(project_dir: str, username: str, personality: str = ""
         else:
             print(f"  WARNING: personality file not found: {pers_path}")
 
-    prompt = prompt.replace("__USERNAME__", username)
+    prompt = prompt.replace("__USERNAME__", prompt_agent_name or username)
     prompt = prompt.replace("__GAME_KNOWLEDGE_BLOCK__", knowledge)
     prompt = prompt.replace("__PERSONALITY_BLOCK__", personality_block)
     prompt = prompt.replace("__PROJECT_DIR__", project_dir)
     prompt = prompt.replace("__SERVER_PORT__", "")
+    if held_out_quest:
+        registration = held_out_registration or validate_eval_selection(
+            held_out_quest, DEFAULT_REGISTRATION
+        )
+        if registration.schema_version != 2:
+            raise HeldOutGuardError(
+                "held-out prompt resolution requires a schema_version 2 registration"
+            )
+        if normalize_quest(held_out_quest) not in registration.normalized_aliases:
+            raise HeldOutGuardError(
+                "held-out prompt target does not match its locked registration"
+            )
+        # Remove the two static Desert Quest utility hints from system.md when
+        # that quest is held out. The only remaining name occurrence is the
+        # target declaration below; mechanics must be discovered live.
+        if normalize_quest(held_out_quest) == normalize_quest("Desert Quest"):
+            prompt = prompt.replace(
+                "(`lakesworld`/`crullfield` need Desert Quest done first). Reach those areas "
+                "by WALKING with `navigate`; only warp a hub you've confirmed unlocked.",
+                "(some hubs require quest unlocks). Only warp a hub you've confirmed unlocked.",
+            )
+            prompt = prompt.replace(
+                "The `lakesworld` warp only works after Desert Quest is finished — don't "
+                "attempt it before then, it fails silently.",
+                "Some destination warps are quest-gated and fail silently; only use warps "
+                "you have observed as unlocked.",
+            )
+        assert_prompt_not_reserved(
+            prompt,
+            registration=registration,
+            source=f"resolved personality {personality or 'none'}",
+        )
+        target = (
+            "\n\n<held_out_evaluation>\n"
+            f"For this evaluation only, your sole objective is to complete "
+            f"{registration.quest_name}. "
+            "Ignore the Core-3 ordering elsewhere in this prompt. No walkthrough has been "
+            "provided; discover and execute the quest through the normal game tools.\n"
+            "</held_out_evaluation>\n"
+        )
+        prompt = prompt.replace("# Kaetram Game Agent", "# Kaetram Game Agent" + target, 1)
     return prompt
 
 
@@ -188,6 +527,11 @@ def run_episode(
     run_dir: Path,
     server_port: str = "",
     personality: str = "",
+    held_out_quest: str = "",
+    no_walkthrough: bool = False,
+    endpoint_env: str = "",
+    inference_seed: int | None = None,
+    run_provenance: dict | None = None,
 ) -> dict:
     """Run one warm-session play_qwen.py episode. Returns run metadata.
 
@@ -208,25 +552,41 @@ def run_episode(
         "auth_mode": "subscription",
         "max_budget_usd": None,
         "scenario_run_dir": str(run_dir),
+        "inference_seed": inference_seed,
+        **(run_provenance or {}),
     }))
 
-    cmd = [
-        sys.executable, os.path.join(project_dir, "play_qwen.py"),
-        "--endpoint", endpoint,
-        "--model", model_api_name,
-        "--sandbox", sandbox,
-        "--run-dir", str(run_dir),
-        "--harness-meta", str(harness_meta_path),
-        "--max-duration-seconds", str(duration_seconds),
-        "--system-prompt", system_prompt_file,
-        "--project-dir", project_dir,
-    ]
+    cmd = build_python_child_command(
+        project_dir,
+        os.path.join(project_dir, "play_qwen.py"),
+        [
+            "--model", model_api_name,
+            "--sandbox", sandbox,
+            "--run-dir", str(run_dir),
+            "--harness-meta", str(harness_meta_path),
+            "--max-duration-seconds", str(duration_seconds),
+            "--system-prompt", system_prompt_file,
+            "--project-dir", project_dir,
+        ],
+    )
+    if endpoint_env:
+        cmd.extend(["--endpoint-env", endpoint_env])
+    else:
+        cmd.extend(["--endpoint", endpoint])
     if server_port:
         cmd.extend(["--server-port", server_port])
     if personality:
         cmd.extend(["--personality", personality])
+    if inference_seed is not None:
+        cmd.extend(["--inference-seed", str(inference_seed)])
 
     env = {**os.environ, "KAETRAM_USERNAME": username, "PYTHONUNBUFFERED": "1"}
+    if no_walkthrough:
+        env["KAETRAM_NO_WALKTHROUGH"] = "1"
+        env["KAETRAM_HELDOUT_QUEST"] = held_out_quest
+    else:
+        env.pop("KAETRAM_NO_WALKTHROUGH", None)
+        env.pop("KAETRAM_HELDOUT_QUEST", None)
 
     start = time.time()
     try:
@@ -272,14 +632,16 @@ def start_eval_watchdog(
         return None, None
 
     log_path = Path("/tmp") / f"eval_watchdog_{output_dir.name or 'eval'}.log"
-    cmd = [
-        sys.executable,
-        str(script_path),
-        "--run-dir", str(output_dir),
-        "--episodes", str(episodes),
-        "--interval", str(interval),
-        "--stale-seconds", str(stale_seconds),
-    ]
+    cmd = build_python_child_command(
+        project_dir,
+        script_path,
+        [
+            "--run-dir", str(output_dir),
+            "--episodes", str(episodes),
+            "--interval", str(interval),
+            "--stale-seconds", str(stale_seconds),
+        ],
+    )
     if kill_on_failure:
         cmd.append("--kill-on-failure")
     for model_name, model_cfg in models.items():
@@ -351,12 +713,12 @@ def parse_log(log_path: Path) -> list[dict]:
                             "args": blk.get("input", {}) or {},
                             "id": blk.get("id", ""),
                         })
-                # Multiple `assistant` records for one logical turn (one block
-                # each) are collapsed by the extractor only via tool_calls
-                # presence. Emit one entry per record so per-block thinking/
-                # text records still count as turns; aggregate tool_use blocks.
-                # The extractor increments assistant_turns per record and reads
-                # tool_calls (one tool-call → one assistant record).
+                # A thinking-only block is not a second logical model turn.
+                # play_qwen emits thinking and tool-use blocks as sibling
+                # records with the same turn number, so counting the empty
+                # thinking record halves an otherwise perfect parse rate.
+                if not texts and not tool_calls:
+                    continue
                 entry = {"role": "assistant", "content": " ".join(texts)}
                 if tool_calls:
                     entry["tool_calls"] = tool_calls
@@ -378,6 +740,66 @@ def parse_log(log_path: Path) -> list[dict]:
                     })
             # Drop type=="system"/"result" — not consumed by metrics.
     return entries
+
+
+def validate_eval_session_terminals(session_logs: list[Path]) -> list[dict]:
+    """Require a complete, non-error warm-session termination chain.
+
+    ``play_qwen`` intentionally returns process exit code zero after some
+    model-API failures, so the subprocess return code alone cannot establish a
+    valid episode.  Every session log must contain exactly one terminal record.
+    Intermediate sessions may end only for context rollover, and the final
+    session must prove that the declared wall-clock budget was exhausted.
+    """
+    if not session_logs:
+        raise RuntimeError("episode produced no session logs")
+
+    terminals: list[dict] = []
+    for log_path in session_logs:
+        records: list[dict] = []
+        with open(log_path) as f:
+            for raw in f:
+                raw = raw.strip()
+                if not raw or not raw.startswith("{"):
+                    continue
+                try:
+                    record = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if (
+                    record.get("type") == "result"
+                    and record.get("subtype") == "session_end"
+                ):
+                    records.append(record)
+        if len(records) != 1:
+            raise RuntimeError(
+                f"{log_path.name}: expected exactly one session_end record, "
+                f"found {len(records)}"
+            )
+        terminal = records[0]
+        reason = terminal.get("terminal_reason") or terminal.get("result")
+        if terminal.get("is_error") is not False:
+            raise RuntimeError(
+                f"{log_path.name}: session ended in error ({reason or 'unknown'})"
+            )
+        terminals.append(terminal)
+
+    for index, terminal in enumerate(terminals[:-1]):
+        reason = terminal.get("terminal_reason") or terminal.get("result")
+        if reason != "context_overflow":
+            raise RuntimeError(
+                f"{session_logs[index].name}: intermediate session ended with "
+                f"{reason!r}, expected 'context_overflow'"
+            )
+
+    final = terminals[-1]
+    final_reason = final.get("terminal_reason") or final.get("result")
+    if final_reason != "duration_exhausted":
+        raise RuntimeError(
+            f"{session_logs[-1].name}: final session ended with "
+            f"{final_reason!r}, expected 'duration_exhausted'"
+        )
+    return terminals
 
 
 
@@ -405,6 +827,24 @@ def _parse_tool_json(content: str) -> dict | None:
         return json.loads(json_str)
     except (json.JSONDecodeError, ValueError):
         return None
+
+
+def validate_canonical_first_observation(entries: list[dict]) -> dict:
+    """Require the first environment result to prove the canonical start."""
+    tool_entries = [entry for entry in entries if entry.get("role") == "tool"]
+    if not tool_entries:
+        raise RuntimeError("episode produced no environment tool result")
+    content = tool_entries[0].get("content", "")
+    if not isinstance(content, str) or not content.startswith("observe: "):
+        raise RuntimeError("first environment tool result was not observe")
+    payload = _parse_tool_json(content)
+    if not isinstance(payload, dict):
+        raise RuntimeError("first observe result was not valid JSON")
+    projection = initial_state_projection(payload)
+    mismatches = state_mismatches(projection)
+    if mismatches:
+        raise RuntimeError(f"first observe did not match canonical start: {mismatches}")
+    return projection
 
 
 def _read_player_db_snapshot(username: str) -> dict | None:
@@ -532,10 +972,10 @@ def _read_quest_achievement_snapshot_with_retry(username: str, retries: int = 5,
 # `prompts/quest_walkthroughs.json` (Foresting=3, Herbalist's=3, Rick's Roll=4
 # → 10 total). Duplicated here to avoid coupling eval_harness to the
 # log_analysis package's import path.
-CORE_3_QUEST_NAMES: tuple[str, ...] = (
-    "Foresting",
-    "Herbalist's Desperation",
-    "Rick's Roll",
+CORE_3_QUEST_KEYS: tuple[str, ...] = (
+    "foresting",
+    "herbalistdesperation",
+    "ricksroll",
 )
 CORE_3_TOTAL_STAGES = 10
 
@@ -544,6 +984,10 @@ def _diff_quest_achievement_metrics(before: dict | None, after: dict | None) -> 
     """Compute episode delta + cumulative metrics from quest/achievement snapshots."""
     before = before or {"quests": {}, "achievements": {}}
     after = after or {"quests": {}, "achievements": {}}
+    before_quests = before.get("quests", {})
+    after_quests = after.get("quests", {})
+    before_achievements = before.get("achievements", {})
+    after_achievements = after.get("achievements", {})
 
     def _summarize(before_map: dict, after_map: dict) -> tuple[int, int, int, int, int]:
         completed_cum = sum(1 for v in after_map.values() if v.get("finished"))
@@ -560,14 +1004,18 @@ def _diff_quest_achievement_metrics(before: dict | None, after: dict | None) -> 
             stages_advanced += max(0, int(after_entry.get("stage", 0)) - int(before_entry.get("stage", 0)))
         return completed_cum, started_cum, completed_delta, started_delta, stages_advanced
 
-    q_done, q_started, q_done_delta, q_started_delta, q_stages = _summarize(before["quests"], after["quests"])
-    a_done, a_started, a_done_delta, a_started_delta, a_stages = _summarize(before["achievements"], after["achievements"])
+    q_done, q_started, q_done_delta, q_started_delta, q_stages = _summarize(before_quests, after_quests)
+    a_done, a_started, a_done_delta, a_started_delta, a_stages = _summarize(
+        before_achievements, after_achievements
+    )
 
     # Core 3 stage delta — paper headline metric, capped at 10.
     core3_stages = 0
-    for name in CORE_3_QUEST_NAMES:
-        before_entry = before["quests"].get(name, {"stage": 0})
-        after_entry = after["quests"].get(name, {"stage": 0})
+    # Snapshot maps are keyed by the stable internal quest keys emitted by
+    # ``_read_quest_achievement_snapshot``, not human-readable display names.
+    for key in CORE_3_QUEST_KEYS:
+        before_entry = before_quests.get(key, {"stage": 0})
+        after_entry = after_quests.get(key, {"stage": 0})
         core3_stages += max(0, int(after_entry.get("stage", 0)) - int(before_entry.get("stage", 0)))
     core3_stages = min(core3_stages, CORE_3_TOTAL_STAGES)
 
@@ -582,6 +1030,39 @@ def _diff_quest_achievement_metrics(before: dict | None, after: dict | None) -> 
         "achievements_started_db": a_started,
         "achievements_completed_delta": a_done_delta,
         "achievement_stages_advanced": a_stages,
+    }
+
+
+def _held_out_quest_metrics(
+    before: dict | None,
+    after: dict | None,
+    registration: HeldOutRegistration | None,
+) -> dict:
+    """Return DB-authoritative progress for the preregistered quest."""
+    if registration is None:
+        return {}
+    before_quests = (before or {}).get("quests") or {}
+    after_quests = (after or {}).get("quests") or {}
+
+    def _entry(quests: dict) -> dict:
+        for key, value in quests.items():
+            if normalize_quest(key) in registration.normalized_aliases:
+                return value
+        return {}
+
+    before_entry = _entry(before_quests)
+    after_entry = _entry(after_quests)
+    before_stage = int(before_entry.get("stage", 0) or 0)
+    after_stage = int(after_entry.get("stage", 0) or 0)
+    return {
+        "held_out_quest": registration.quest_name,
+        "held_out_quest_snapshot_available": after is not None,
+        "held_out_quest_stage_before": before_stage,
+        "held_out_quest_stage_after": after_stage,
+        "held_out_quest_stages_advanced": max(0, after_stage - before_stage),
+        "held_out_quest_completed_delta": int(
+            bool(after_entry.get("finished")) and not bool(before_entry.get("finished"))
+        ),
     }
 
 
@@ -729,8 +1210,10 @@ def compute_episode_metrics(
 # Scenario success criteria
 # ---------------------------------------------------------------------------
 
-def check_scenario_success(scenario: str, metrics: dict) -> bool:
+def check_scenario_success(scenario: str, metrics: dict, held_out_quest: str = "") -> bool:
     """Check if an episode met the scenario-specific success criteria."""
+    if held_out_quest:
+        return metrics.get("held_out_quest_completed_delta", 0) > 0
     if scenario == "A":
         # Rat Grind: killed at least 5 rats
         return metrics["kills"] >= 5 and metrics["action_counts"].get("attack", 0) >= 5
@@ -761,61 +1244,180 @@ def run_model_eval(
     server_port: str,
     resume_from: int = 0,
     personality: str = "",
+    include_game_knowledge: bool = True,
+    held_out_registration: HeldOutRegistration | None = None,
+    sandbox: str = "",
+    model_api_name: str = "",
+    endpoint_ref: str = "",
+    endpoint_env: str = "",
+    inference_seed: int | None = None,
+    duration_seconds_override: int = 0,
+    provenance_meta: dict | None = None,
+    prompt_agent_name: str = "",
 ) -> dict:
     """Run all episodes for one model. Returns full results dict."""
     scenario_cfg = SCENARIOS[scenario]
-    duration_minutes = scenario_cfg["duration_minutes"]
-    duration_seconds = duration_minutes * 60
-    sandbox = f"/tmp/kaetram_eval_{model_name}"
+    duration_seconds = duration_seconds_override or scenario_cfg["duration_minutes"] * 60
+    duration_minutes = duration_seconds / 60
+    sandbox = sandbox or f"/tmp/kaetram_eval_{model_name}"
     model_output_dir = output_dir / model_name
     model_output_dir.mkdir(parents=True, exist_ok=True)
 
     # Resolve system prompt once, write to temp file
-    prompt_text = resolve_system_prompt(project_dir, username, personality)
+    held_out_quest = held_out_registration.quest_name if held_out_registration else ""
+    endpoint_ref = endpoint_ref or "direct-endpoint"
+    resolved_prompt_agent_name = prompt_agent_name or username
+    prompt_text = resolve_system_prompt(
+        project_dir,
+        username,
+        personality,
+        include_game_knowledge=include_game_knowledge,
+        held_out_quest=held_out_quest,
+        held_out_registration=held_out_registration,
+        prompt_agent_name=resolved_prompt_agent_name,
+    )
     prompt_file = model_output_dir / "system_prompt.md"
     prompt_file.write_text(prompt_text)
 
     # Model API name (what the endpoint expects)
-    api_name = "kaetram" if "serve" in endpoint else "kaetram-base"
+    api_name = model_api_name or ("kaetram" if "serve" in endpoint else "kaetram-base")
 
     print(f"\n{'='*60}")
     print(f"Evaluating: {model_name}")
-    print(f"  Endpoint:  {endpoint}")
+    print(f"  Endpoint:  {endpoint_ref}")
     print(f"  Scenario:  {scenario} — {scenario_cfg['name']} ({duration_minutes} min)")
     print(f"  Episodes:  {n_episodes} (resuming from {resume_from})")
     print(f"  Sandbox:   {sandbox}")
     print(f"  Username:  {username}")
+    print(f"  Prompt ID: {resolved_prompt_agent_name}")
     print(f"  Port:      {server_port}")
+    print(f"  Knowledge: {'included' if include_game_knowledge else 'omitted'}")
+    if inference_seed is not None:
+        print(f"  Inference seed: {inference_seed}")
+    if held_out_quest:
+        print(f"  Held out:  {held_out_quest} ({held_out_registration.path})")
     print(f"{'='*60}\n")
 
     # Ensure game server is running on the required port
     # Uses direct node command (same as orchestrate.GameServer)
     _game_server_proc = None
     if server_port:
-        import shutil
-        check_cmd = f"ss -tlnp 2>/dev/null | grep -q ':{server_port} '"
-        if subprocess.run(check_cmd, shell=True).returncode != 0:
-            nvm_sh = os.path.expanduser("~/.nvm/nvm.sh")
-            server_dir = os.path.expanduser("~/projects/Kaetram-Open/packages/server")
+        probe_port = normalize_server_port(server_port)
+        server_running = is_tcp_port_open("127.0.0.1", probe_port)
+        rng_required = bool(
+            provenance_meta
+            and provenance_meta.get("environment_seed_mechanism")
+            == ENVIRONMENT_RNG_MECHANISM
+        )
+        if rng_required and server_running:
+            raise RuntimeError(
+                f"refusing pre-existing game server on port {server_port}; "
+                "its environment RNG cannot be attested for this cell"
+            )
+        if not server_running:
+            game_dir = Path(
+                os.environ.get("KAETRAM_GAME_DIR", "~/projects/Kaetram-Open")
+            ).expanduser().resolve()
+            server_dir = game_dir / "packages" / "server"
             if os.path.isdir(server_dir):
+                database_attestation = attest_game_database_configuration(
+                    game_dir, MONGO_DB
+                )
+                expected_database_sha = (
+                    provenance_meta.get("game_database_attestation_sha256")
+                    if provenance_meta
+                    else ""
+                )
+                if (
+                    expected_database_sha
+                    and database_attestation["attestation_sha256"]
+                    != expected_database_sha
+                ):
+                    raise RuntimeError(
+                        "game database configuration differs from prelaunch attestation"
+                    )
+                provenance_meta = {
+                    **(provenance_meta or {}),
+                    "game_database_attestation": database_attestation,
+                    "game_database_attestation_sha256": database_attestation[
+                        "attestation_sha256"
+                    ],
+                }
                 print(f"  Starting game server on port {server_port}...")
-                gs_cmd = f'source "{nvm_sh}" && nvm use 20 --silent && exec node --enable-source-maps dist/main.js --port {server_port}'
+                node_binary = require_node20_binary()
+                gs_cmd = [
+                    node_binary,
+                    "--enable-source-maps",
+                    "dist/main.js",
+                    "--port",
+                    str(server_port),
+                ]
+                game_env = {**os.environ, "ACCEPT_LICENSE": "true"}
+                attestation_path = model_output_dir / "environment-rng.json"
+                if rng_required:
+                    if attestation_path.exists():
+                        raise RuntimeError(
+                            f"refusing existing environment RNG attestation: {attestation_path}"
+                        )
+                    game_env.update({
+                        "KAETRAM_ENV_RNG_REQUIRED": "1",
+                        "KAETRAM_ENV_SEED": str(provenance_meta["environment_seed"]),
+                        "KAETRAM_ENV_RNG_ATTESTATION_PATH": str(attestation_path.resolve()),
+                        "KAETRAM_GAME_REVISION": provenance_meta["environment_game_revision"],
+                        "KAETRAM_GAME_BUNDLE_SHA256": provenance_meta[
+                            "environment_game_bundle_sha256"
+                        ],
+                    })
                 gs_log = open(f"/tmp/eval_gameserver_{server_port}.log", "w")
                 _game_server_proc = subprocess.Popen(
-                    ["bash", "-c", gs_cmd], cwd=server_dir,
+                    gs_cmd, cwd=server_dir,
                     stdout=gs_log, stderr=gs_log,
-                    env={**os.environ, "ACCEPT_LICENSE": "true", "SKIP_DATABASE": "false"},
+                    env=game_env,
                 )
+                gs_log.close()
                 # Wait for port
                 for _i in range(60):
-                    if subprocess.run(check_cmd, shell=True).returncode == 0:
+                    if is_tcp_port_open("127.0.0.1", probe_port):
                         print(f"  Game server ready on port {server_port} ({_i+1}s)")
                         # Listening is not enough; give the world a few seconds to finish booting.
                         time.sleep(5)
                         break
+                    if _game_server_proc.poll() is not None:
+                        raise RuntimeError(
+                            f"game server exited with code {_game_server_proc.returncode} "
+                            f"before opening port {server_port}"
+                        )
                     time.sleep(1)
                 else:
-                    print(f"  WARNING: Game server on port {server_port} not detected after 60s")
+                    if _game_server_proc.poll() is None:
+                        _game_server_proc.terminate()
+                    raise RuntimeError(
+                        f"game server on port {server_port} not detected after 60s"
+                    )
+                if (
+                    attest_game_database_configuration(game_dir, MONGO_DB)
+                    != database_attestation
+                ):
+                    if _game_server_proc.poll() is None:
+                        _game_server_proc.terminate()
+                    raise RuntimeError(
+                        "game database configuration changed during server startup"
+                    )
+                if rng_required:
+                    try:
+                        verified_attestation = verify_environment_rng_attestation(
+                            attestation_path, provenance_meta
+                        )
+                    except RuntimeError:
+                        if _game_server_proc.poll() is None:
+                            _game_server_proc.terminate()
+                        raise
+                    provenance_meta = {
+                        **provenance_meta,
+                        "environment_rng_attestation": verified_attestation,
+                    }
+            elif rng_required:
+                raise RuntimeError(f"attested Kaetram server directory is missing: {server_dir}")
 
     episodes = []
 
@@ -830,11 +1432,24 @@ def run_model_eval(
     for ep_num in range(resume_from + 1, n_episodes + 1):
         print(f"\n--- Episode {ep_num}/{n_episodes} ---")
 
-        # 1. Reset player data
+        episode_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_dir = Path(sandbox) / "logs" / f"run_{episode_ts}_ep{ep_num:03d}"
+        run_dir.mkdir(parents=True, exist_ok=False)
+
+        # 1. Reset and create the exact canonical benchmark player. Relying on
+        # client-side fallback registration is not reproducible: some client
+        # builds do not surface invalid-login text, leaving the account absent.
         print(f"  Resetting MongoDB for {username}...")
         require_player_db_reset(username)
+        canonical_receipt = seed_canonical_player(username, db_name=MONGO_DB)
+        canonical_receipt["receipt_sha256"] = sha256_json(canonical_receipt)
+        (run_dir / "canonical_start.json").write_text(
+            json.dumps(canonical_receipt, indent=2, sort_keys=True) + "\n"
+        )
         db_before = _read_player_db_snapshot(username)
         qa_before = _read_quest_achievement_snapshot(username)
+        if db_before is None or qa_before is None:
+            raise RuntimeError("canonical start could not be read back from MongoDB")
 
         # Clear sandbox state (keep mcp_server.log for dashboard).
         # Sandbox /state holds the live game-state JSON + .session_counter
@@ -849,9 +1464,6 @@ def run_model_eval(
         # Inside that process, sessions roll on context_overflow — Mongo state
         # carries the character forward across rollovers. We aggregate metrics
         # over all session_*.log files in the per-episode run dir.
-        episode_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_dir = Path(sandbox) / "logs" / f"run_{episode_ts}_ep{ep_num:03d}"
-
         run_info = run_episode(
             project_dir=project_dir,
             endpoint=endpoint,
@@ -863,6 +1475,11 @@ def run_model_eval(
             run_dir=run_dir,
             server_port=server_port,
             personality=personality,
+            held_out_quest=held_out_quest,
+            no_walkthrough=bool(held_out_registration),
+            endpoint_env=endpoint_env,
+            inference_seed=inference_seed,
+            run_provenance=provenance_meta,
         )
         total_duration = run_info["duration_seconds"]
         last_returncode = run_info["returncode"]
@@ -870,6 +1487,10 @@ def run_model_eval(
         # Aggregate across all session logs play_qwen wrote during this episode.
         session_logs = sorted(run_dir.glob("session_*.log"),
                               key=lambda p: p.stat().st_mtime)
+        raw_session_dir = model_output_dir / f"episode_{ep_num:03d}_raw"
+        raw_session_dir.mkdir(parents=True, exist_ok=False)
+        for source in sorted(path for path in run_dir.iterdir() if path.is_file()):
+            shutil.copy2(source, raw_session_dir / source.name)
         all_log_entries: list[dict] = []
         for log_path in session_logs:
             all_log_entries.extend(parse_log(log_path))
@@ -888,8 +1509,50 @@ def run_model_eval(
                 "returncode": last_returncode,
             }
             episodes.append(episode)
-            _save_results(results_path, model_name, endpoint, scenario, episodes)
+            _save_results(
+                results_path, model_name, endpoint_ref, scenario, episodes,
+                include_game_knowledge=include_game_knowledge,
+                held_out_registration=held_out_registration,
+                inference_seed=inference_seed,
+                duration_seconds_budget=duration_seconds,
+                provenance_meta=provenance_meta,
+                prompt_agent_name=resolved_prompt_agent_name,
+            )
             print("  Aborting remaining episodes after zero-turn failure to avoid contaminating the run")
+            break
+
+        invalid_reason = ""
+        initial_projection: dict = {}
+        if last_returncode != 0:
+            invalid_reason = f"agent harness exited with code {last_returncode}"
+        else:
+            try:
+                validate_eval_session_terminals(session_logs)
+                initial_projection = validate_canonical_first_observation(
+                    all_log_entries
+                )
+            except RuntimeError as exc:
+                invalid_reason = str(exc)
+        if invalid_reason:
+            print(f"  Invalid episode: {invalid_reason}")
+            episodes.append({
+                "episode": ep_num,
+                "status": "invalid_environment",
+                "reason": invalid_reason,
+                "duration_seconds": total_duration,
+                "returncode": last_returncode,
+                "sub_sessions": sub_session,
+            })
+            _save_results(
+                results_path, model_name, endpoint_ref, scenario, episodes,
+                include_game_knowledge=include_game_knowledge,
+                held_out_registration=held_out_registration,
+                inference_seed=inference_seed,
+                duration_seconds_budget=duration_seconds,
+                provenance_meta=provenance_meta,
+                prompt_agent_name=resolved_prompt_agent_name,
+            )
+            print("  Aborting remaining episodes after invalid environment evidence")
             break
 
         # Save combined log to eval output directory
@@ -900,12 +1563,23 @@ def run_model_eval(
 
         db_after = _read_player_db_snapshot_with_retry(username)
         qa_after = _read_quest_achievement_snapshot_with_retry(username)
+        state_snapshot_path = model_output_dir / f"episode_{ep_num:03d}_state.json"
+        state_snapshot_path.write_text(json.dumps({
+            "schema_version": "kaetram.eval-state-boundary.v1",
+            "episode": ep_num,
+            "player_metrics_before": db_before,
+            "player_metrics_after": db_after,
+            "quest_achievement_before": qa_before,
+            "quest_achievement_after": qa_after,
+            "canonical_first_observation": initial_projection,
+        }, indent=2, sort_keys=True) + "\n")
         metrics = compute_episode_metrics(
             all_log_entries,
             db_before=db_before, db_after=db_after,
             qa_before=qa_before, qa_after=qa_after,
         )
-        success = check_scenario_success(scenario, metrics)
+        metrics.update(_held_out_quest_metrics(qa_before, qa_after, held_out_registration))
+        success = check_scenario_success(scenario, metrics, held_out_quest)
 
         episode = {
             "episode": ep_num,
@@ -934,7 +1608,15 @@ def run_model_eval(
               f"({total_duration:.0f}s)")
 
         # 4. Save intermediate results (crash-safe)
-        _save_results(results_path, model_name, endpoint, scenario, episodes)
+        _save_results(
+            results_path, model_name, endpoint_ref, scenario, episodes,
+            include_game_knowledge=include_game_knowledge,
+            held_out_registration=held_out_registration,
+            inference_seed=inference_seed,
+            duration_seconds_budget=duration_seconds,
+            provenance_meta=provenance_meta,
+            prompt_agent_name=resolved_prompt_agent_name,
+        )
 
     # Clean up game server if we started one
     if _game_server_proc and _game_server_proc.poll() is None:
@@ -946,12 +1628,25 @@ def run_model_eval(
             _game_server_proc.kill()
 
     # Final save
-    results = _save_results(results_path, model_name, endpoint, scenario, episodes)
+    results = _save_results(
+        results_path, model_name, endpoint_ref, scenario, episodes,
+        include_game_knowledge=include_game_knowledge,
+        held_out_registration=held_out_registration,
+        inference_seed=inference_seed,
+        duration_seconds_budget=duration_seconds,
+        provenance_meta=provenance_meta,
+        prompt_agent_name=resolved_prompt_agent_name,
+    )
     return results
 
 
 def _save_results(path: Path, model_name: str, endpoint: str, scenario: str,
-                  episodes: list[dict]) -> dict:
+                  episodes: list[dict], *, include_game_knowledge: bool = True,
+                  held_out_registration: HeldOutRegistration | None = None,
+                  inference_seed: int | None = None,
+                  duration_seconds_budget: int | None = None,
+                  provenance_meta: dict | None = None,
+                  prompt_agent_name: str = "") -> dict:
     """Save results JSON with metadata and aggregated metrics."""
     # Aggregate per-metric arrays for eval_compare.py
     ok_episodes = [e for e in episodes if e.get("status") == "ok"]
@@ -989,27 +1684,49 @@ def _save_results(path: Path, model_name: str, endpoint: str, scenario: str,
             "stuck_resets": [e.get("stuck_resets", 0) for e in ok_episodes],
             "success_rate": [1 if e.get("success", False) else 0 for e in ok_episodes],
         }
+        if held_out_registration is not None:
+            metrics.update({
+                "held_out_quest_completion_rate": [
+                    e.get("held_out_quest_completed_delta", 0) for e in ok_episodes
+                ],
+                "held_out_quest_stages_advanced": [
+                    e.get("held_out_quest_stages_advanced", 0) for e in ok_episodes
+                ],
+            })
 
     git_sha = ""
     try:
         git_sha = subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
+            ["git", "rev-parse", "HEAD"],
             stderr=subprocess.DEVNULL, text=True,
         ).strip()
     except Exception:
         pass
 
+    budget_seconds = duration_seconds_budget or SCENARIOS[scenario]["duration_minutes"] * 60
     results = {
+        "schema_version": EVAL_RESULTS_SCHEMA_VERSION,
         "meta": {
             "model": model_name,
             "endpoint": endpoint,
             "scenario": scenario,
             "scenario_name": SCENARIOS[scenario]["name"],
-            "duration_minutes": SCENARIOS[scenario]["duration_minutes"],
+            "duration_minutes": budget_seconds / 60,
+            "duration_seconds_budget": budget_seconds,
+            "include_game_knowledge": include_game_knowledge,
+            "held_out_quest": held_out_registration.quest_name if held_out_registration else "",
+            "held_out_registration": str(held_out_registration.path) if held_out_registration else "",
+            "held_out_registration_sha256": (
+                held_out_registration.sha256 if held_out_registration else ""
+            ),
+            "tool_schema_source": os.environ.get("KAETRAM_TOOL_SCHEMA_SOURCE", "runtime-default"),
             "total_episodes": len(episodes),
             "ok_episodes": len(ok_episodes),
             "timestamp": datetime.now().isoformat(),
             "git_sha": git_sha,
+            "inference_seed": inference_seed,
+            "prompt_agent_name": prompt_agent_name,
+            **(provenance_meta or {}),
         },
         "episodes": episodes,
         "metrics": metrics,
@@ -1064,6 +1781,10 @@ Examples:
              "Default: DEFAULT_MODELS (see top of file).",
     )
     parser.add_argument(
+        "--models-env", nargs="*",
+        help="Model definitions as name=ENDPOINT_ENV pairs; keeps endpoint URLs out of argv/logs",
+    )
+    parser.add_argument(
         "--episodes", type=int, default=50,
         help="Episodes per model (default: 50 — paper minimum for Bonferroni-corrected stat-sig over 3 models × 5 metrics)",
     )
@@ -1071,6 +1792,17 @@ Examples:
         "--scenario", default="D", choices=list(SCENARIOS.keys()),
         help="Evaluation scenario (default: D = Open Play)",
     )
+    parser.add_argument(
+        "--duration-seconds", type=int, default=0,
+        help="Explicit wall-clock budget per episode; required by frozen long-run protocols",
+    )
+    parser.add_argument("--protocol-id", default="")
+    parser.add_argument("--experiment-manifest-sha256", default="")
+    parser.add_argument("--endpoint-attestation-sha256", default="")
+    parser.add_argument("--checkpoint-sha256", default="")
+    parser.add_argument("--game-database-attestation-sha256", default="")
+    parser.add_argument("--tokenizer-sha256", default="")
+    parser.add_argument("--render-contract-sha256", default="")
     parser.add_argument(
         "--output-dir", type=Path, default=Path("dataset/eval"),
         help="Output directory (default: dataset/eval/)",
@@ -1082,6 +1814,14 @@ Examples:
     parser.add_argument(
         "--username", default="",
         help="In-game username (default: per-model from DEFAULT_MODELS, no hyphens)",
+    )
+    parser.add_argument(
+        "--prompt-agent-name",
+        default="",
+        help=(
+            "Stable model-visible agent name, independent of the isolated DB "
+            "username; matched parallel protocols should set this explicitly"
+        ),
     )
     parser.add_argument(
         "--project-dir", default=os.path.dirname(os.path.abspath(__file__)),
@@ -1101,6 +1841,56 @@ Examples:
         help="Inject a personality block into the system prompt (default: none)",
     )
     parser.add_argument(
+        "--omit-game-knowledge", action="store_true",
+        help="Leave the prompts/game_knowledge.md block empty (no-walkthrough eval)",
+    )
+    parser.add_argument(
+        "--held-out-quest", default="",
+        help="Evaluation-only quest; must match the locked preregistration and requires --omit-game-knowledge",
+    )
+    parser.add_argument(
+        "--held-out-registration", type=Path, default=DEFAULT_REGISTRATION,
+        help=f"Locked held-out quest registration (default: {DEFAULT_REGISTRATION})",
+    )
+    parser.add_argument(
+        "--held-out-registration-sha256",
+        default="",
+        help="Expected SHA-256 of the locked held-out registration",
+    )
+    parser.add_argument(
+        "--sandbox", default="",
+        help="Explicit isolated sandbox path (default: /tmp/kaetram_eval_<model>)",
+    )
+    parser.add_argument(
+        "--model-api-name", default="",
+        help="Model identifier sent to the OpenAI-compatible endpoint",
+    )
+    parser.add_argument(
+        "--inference-seed", type=int,
+        help="Registered per-replicate base seed for deterministic model sampling",
+    )
+    parser.add_argument("--factorial-schedule-algorithm", default="")
+    parser.add_argument("--factorial-schedule-seed", type=int)
+    parser.add_argument("--factorial-schedule-index", type=int)
+    parser.add_argument("--factorial-batch-index", type=int)
+    parser.add_argument("--factorial-cluster-id", default="")
+    parser.add_argument("--factorial-pair-id", default="")
+    parser.add_argument(
+        "--tool-recovery-enabled",
+        choices=("off", "on"),
+        default="",
+        help=(
+            "Bind the expected KAETRAM_TOOL_RECOVERY state into run metadata "
+            "and fail if the inherited environment differs"
+        ),
+    )
+    parser.add_argument("--environment-seed-mechanism", default="")
+    parser.add_argument("--environment-seed", type=int)
+    parser.add_argument("--environment-rng-algorithm", default="")
+    parser.add_argument("--environment-game-revision", default="")
+    parser.add_argument("--environment-game-bundle-sha256", default="")
+    parser.add_argument("--environment-seed-reason", default="")
+    parser.add_argument(
         "--watchdog", action="store_true",
         help="Launch a background watchdog for endpoint/process/progress health",
     )
@@ -1118,13 +1908,184 @@ Examples:
     )
     args = parser.parse_args()
 
+    if args.prompt_agent_name and not re.fullmatch(
+        r"[A-Za-z][A-Za-z0-9]{0,23}", args.prompt_agent_name
+    ):
+        parser.error(
+            "--prompt-agent-name must be alphanumeric, start with a letter, "
+            "and contain at most 24 characters"
+        )
+    if args.inference_seed is not None:
+        try:
+            validate_inference_seed(args.inference_seed)
+        except ValueError as exc:
+            parser.error(str(exc))
+    provenance_values = (
+        args.factorial_schedule_algorithm,
+        args.factorial_schedule_seed,
+        args.factorial_schedule_index,
+        args.factorial_batch_index,
+        args.factorial_cluster_id,
+        args.factorial_pair_id,
+        args.environment_seed_mechanism,
+        args.environment_seed,
+        args.environment_rng_algorithm,
+        args.environment_game_revision,
+        args.environment_game_bundle_sha256,
+        args.environment_seed_reason,
+    )
+    if any(value not in (None, "") for value in provenance_values) and any(
+        value in (None, "") for value in provenance_values
+    ):
+        parser.error("factorial provenance arguments must be provided together")
+    run_provenance = {}
+    if args.factorial_schedule_algorithm:
+        if args.inference_seed is None:
+            parser.error("factorial provenance requires --inference-seed")
+        if args.factorial_schedule_algorithm not in {
+            "sha256-rank-v1",
+            "sha256-paired-rank-v1",
+            "balanced-paired-order-v1",
+        }:
+            parser.error("unsupported factorial schedule algorithm")
+        try:
+            validate_inference_seed(
+                args.factorial_schedule_seed, label="factorial schedule seed"
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        if args.factorial_schedule_index < 0 or args.factorial_batch_index < 0:
+            parser.error("factorial schedule and batch indices must be non-negative")
+        if args.environment_seed_mechanism != ENVIRONMENT_RNG_MECHANISM:
+            parser.error("unsupported environment seed mechanism")
+        try:
+            validate_inference_seed(args.environment_seed, label="environment seed")
+        except ValueError as exc:
+            parser.error(str(exc))
+        if args.environment_rng_algorithm != ENVIRONMENT_RNG_ALGORITHM:
+            parser.error("unsupported environment RNG algorithm")
+        if not re.fullmatch(
+            r"[0-9a-f]{40}|[0-9a-f]{64}", args.environment_game_revision
+        ):
+            parser.error("environment game revision must be an exact lowercase commit hash")
+        if not re.fullmatch(r"[0-9a-f]{64}", args.environment_game_bundle_sha256):
+            parser.error("environment game bundle SHA-256 must be exact lowercase hex")
+        run_provenance = {
+            "factorial_schedule_algorithm": args.factorial_schedule_algorithm,
+            "factorial_schedule_seed": args.factorial_schedule_seed,
+            "factorial_schedule_index": args.factorial_schedule_index,
+            "factorial_batch_index": args.factorial_batch_index,
+            "factorial_cluster_id": args.factorial_cluster_id,
+            "factorial_pair_id": args.factorial_pair_id,
+            "environment_seed_mechanism": args.environment_seed_mechanism,
+            "environment_seed": args.environment_seed,
+            "environment_rng_algorithm": args.environment_rng_algorithm,
+            "environment_game_revision": args.environment_game_revision,
+            "environment_game_bundle_sha256": args.environment_game_bundle_sha256,
+            "environment_seed_reason": args.environment_seed_reason,
+        }
+    if args.tool_recovery_enabled:
+        requested_recovery = args.tool_recovery_enabled == "on"
+        raw_recovery = os.environ.get("KAETRAM_TOOL_RECOVERY")
+        if raw_recovery not in (None, "", "1"):
+            parser.error(
+                "KAETRAM_TOOL_RECOVERY must be absent/empty for off or exactly 1 for on"
+            )
+        actual_recovery = raw_recovery == "1"
+        if actual_recovery != requested_recovery:
+            parser.error(
+                "--tool-recovery-enabled disagrees with KAETRAM_TOOL_RECOVERY"
+            )
+        run_provenance["tool_recovery_enabled"] = requested_recovery
+
+    if args.duration_seconds < 0:
+        parser.error("--duration-seconds cannot be negative")
+    provenance_values = {
+        "experiment_manifest_sha256": args.experiment_manifest_sha256,
+        "endpoint_attestation_sha256": args.endpoint_attestation_sha256,
+        "checkpoint_sha256": args.checkpoint_sha256,
+        "tokenizer_sha256": args.tokenizer_sha256,
+        "render_contract_sha256": args.render_contract_sha256,
+    }
+    supplied = [bool(value) for value in provenance_values.values()]
+    if any(supplied) and not all(supplied):
+        parser.error("factorial provenance SHA-256 arguments must be supplied together")
+    if args.protocol_id and not args.duration_seconds:
+        parser.error("--protocol-id requires --duration-seconds")
+    for label, value in provenance_values.items():
+        if value and not re.fullmatch(r"[0-9a-f]{64}", value):
+            parser.error(f"--{label.replace('_', '-')} must be a lowercase SHA-256")
+    if args.game_database_attestation_sha256 and not re.fullmatch(
+        r"[0-9a-f]{64}", args.game_database_attestation_sha256
+    ):
+        parser.error("--game-database-attestation-sha256 must be a lowercase SHA-256")
+    provenance_meta = (
+        {"protocol_id": args.protocol_id, **provenance_values}
+        if args.protocol_id or any(supplied)
+        else None
+    )
+    if args.game_database_attestation_sha256:
+        provenance_meta = {
+            **(provenance_meta or {}),
+            "game_database_attestation_sha256": (
+                args.game_database_attestation_sha256
+            ),
+        }
+    combined_provenance = {**(provenance_meta or {}), **run_provenance}
+    provenance_meta = combined_provenance or None
+
+    held_out_registration = None
+    if args.held_out_quest:
+        if not args.omit_game_knowledge:
+            parser.error("--held-out-quest requires --omit-game-knowledge")
+        if not re.fullmatch(r"[0-9a-f]{64}", args.held_out_registration_sha256):
+            parser.error(
+                "--held-out-quest requires --held-out-registration-sha256"
+            )
+        try:
+            held_out_registration = validate_eval_selection(
+                args.held_out_quest,
+                args.held_out_registration,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        if held_out_registration.sha256 != args.held_out_registration_sha256:
+            parser.error(
+                "held-out registration SHA-256 mismatch: "
+                f"expected {args.held_out_registration_sha256}, "
+                f"loaded {held_out_registration.sha256}"
+            )
+        provenance_meta = {
+            **(provenance_meta or {}),
+            "held_out_registration_sha256": held_out_registration.sha256,
+        }
+    elif args.held_out_registration_sha256:
+        parser.error(
+            "--held-out-registration-sha256 requires --held-out-quest"
+        )
+
     # Parse model definitions
     models = {}
-    if args.models:
+    if args.models and args.models_env:
+        parser.error("use only one of --models or --models-env")
+    if args.models_env:
+        for m in args.models_env:
+            if "=" not in m:
+                parser.error(f"model environment definition must be name=ENV_VAR, got: {m}")
+            name, endpoint_env = m.split("=", 1)
+            endpoint = os.environ.get(endpoint_env, "")
+            if not endpoint:
+                parser.error(f"endpoint environment variable is empty: {endpoint_env}")
+            models[name] = {
+                "endpoint": endpoint,
+                "endpoint_env": endpoint_env,
+                "endpoint_ref": f"env:{endpoint_env}",
+            }
+    elif args.models:
         for m in args.models:
             if "=" in m:
                 name, endpoint = m.split("=", 1)
-                models[name] = {"endpoint": endpoint}
+                models[name] = {"endpoint": endpoint, "endpoint_ref": "direct-endpoint"}
             else:
                 print(f"Error: model must be name=endpoint, got: {m}")
                 sys.exit(1)
@@ -1150,6 +2111,9 @@ Examples:
     print(f"  Parallel: {args.parallel}")
     print(f"  Output:   {args.output_dir}")
     print(f"  MongoDB:  {MONGO_DB}")
+    print(f"  Knowledge: {'omitted' if args.omit_game_knowledge else 'included'}")
+    if held_out_registration:
+        print(f"  Held out: {held_out_registration.quest_name}")
 
     # Check MongoDB
     try:
@@ -1187,20 +2151,70 @@ Examples:
         for model_name, model_cfg in models.items():
             log_path = f"/tmp/eval_{model_name}.log"
             log_f = open(log_path, "w")
-            cmd = [
-                sys.executable, __file__,
-                "--models", f"{model_name}={model_cfg['endpoint']}",
-                "--episodes", str(args.episodes),
-                "--scenario", args.scenario,
-                "--output-dir", str(args.output_dir),
-                "--project-dir", args.project_dir,
-                "--username", model_cfg["username"],
-                "--server-port", model_cfg["server_port"],
-            ]
+            cmd = build_python_child_command(
+                args.project_dir,
+                __file__,
+                [
+                    "--episodes", str(args.episodes),
+                    "--scenario", args.scenario,
+                    "--output-dir", str(args.output_dir),
+                    "--project-dir", args.project_dir,
+                    "--username", model_cfg["username"],
+                    "--server-port", model_cfg["server_port"],
+                ],
+            )
+            if args.duration_seconds:
+                cmd.extend(["--duration-seconds", str(args.duration_seconds)])
+            if args.protocol_id:
+                cmd.extend(["--protocol-id", args.protocol_id])
+            for key, value in provenance_values.items():
+                if value:
+                    cmd.extend([f"--{key.replace('_', '-')}", value])
+            if model_cfg.get("endpoint_env"):
+                cmd.extend(["--models-env", f"{model_name}={model_cfg['endpoint_env']}"])
+            else:
+                cmd.extend(["--models", f"{model_name}={model_cfg['endpoint']}"])
             if args.resume:
                 cmd.extend(["--resume", str(args.resume)])
             if args.personality:
                 cmd.extend(["--personality", args.personality])
+            if args.omit_game_knowledge:
+                cmd.append("--omit-game-knowledge")
+            if held_out_registration:
+                cmd.extend([
+                    "--held-out-quest", held_out_registration.quest_name,
+                    "--held-out-registration", str(held_out_registration.path),
+                    "--held-out-registration-sha256",
+                    held_out_registration.sha256,
+                ])
+            if args.sandbox:
+                cmd.extend(["--sandbox", args.sandbox])
+            if args.model_api_name:
+                cmd.extend(["--model-api-name", args.model_api_name])
+            if args.inference_seed is not None:
+                cmd.extend(["--inference-seed", str(args.inference_seed)])
+            if args.prompt_agent_name:
+                cmd.extend(["--prompt-agent-name", args.prompt_agent_name])
+            if args.factorial_schedule_algorithm:
+                cmd.extend([
+                    "--factorial-schedule-algorithm", args.factorial_schedule_algorithm,
+                    "--factorial-schedule-seed", str(args.factorial_schedule_seed),
+                    "--factorial-schedule-index", str(args.factorial_schedule_index),
+                    "--factorial-batch-index", str(args.factorial_batch_index),
+                    "--factorial-cluster-id", args.factorial_cluster_id,
+                    "--factorial-pair-id", args.factorial_pair_id,
+                    "--environment-seed-mechanism", args.environment_seed_mechanism,
+                    "--environment-seed", str(args.environment_seed),
+                    "--environment-rng-algorithm", args.environment_rng_algorithm,
+                    "--environment-game-revision", args.environment_game_revision,
+                    "--environment-game-bundle-sha256",
+                    args.environment_game_bundle_sha256,
+                    "--environment-seed-reason", args.environment_seed_reason,
+                ])
+            if args.tool_recovery_enabled:
+                cmd.extend([
+                    "--tool-recovery-enabled", args.tool_recovery_enabled,
+                ])
             print(f"  {model_name}: port={model_cfg['server_port']} user={model_cfg['username']} personality={args.personality or 'none'} log={log_path}")
             procs[model_name] = subprocess.Popen(cmd, stdout=log_f, stderr=subprocess.STDOUT)
             log_files[model_name] = log_f
@@ -1253,6 +2267,16 @@ Examples:
                 server_port=model_cfg.get("server_port", args.server_port),
                 resume_from=args.resume,
                 personality=args.personality,
+                include_game_knowledge=not args.omit_game_knowledge,
+                held_out_registration=held_out_registration,
+                sandbox=args.sandbox,
+                model_api_name=args.model_api_name,
+                endpoint_ref=model_cfg.get("endpoint_ref", "direct-endpoint"),
+                endpoint_env=model_cfg.get("endpoint_env", ""),
+                inference_seed=args.inference_seed,
+                duration_seconds_override=args.duration_seconds,
+                provenance_meta=provenance_meta,
+                prompt_agent_name=args.prompt_agent_name,
             )
             all_results[model_name] = results
 

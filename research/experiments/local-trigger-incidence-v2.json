@@ -1,0 +1,185 @@
+{
+  "schema_version": "kaetram.local-trigger-incidence-registration.v1",
+  "study_id": "local-trigger-incidence-seeded-v2",
+  "status": "registered_before_outcomes",
+  "purpose": "Prospectively replicate the v1 native-schema incidence result on an outcome-unseen historical-state panel after repairing and attesting effective request-local sampling seeds.",
+  "claim_boundary": {
+    "confirmatory": false,
+    "permitted": [
+      "checkpoint-conditional trigger incidence under the registered interfaces",
+      "paired inference-time interface contrasts on the fixed outcome-unseen state panel",
+      "whether the positive native-schema contrast discovered in v1 has the same direction at each fixed checkpoint",
+      "within-state response and recovery-outcome heterogeneity across effective request seeds"
+    ],
+    "prohibited": [
+      "checkpoint or training-method superiority",
+      "a recovery benefit",
+      "a learned self-correction policy",
+      "quest-performance improvement",
+      "independence of states sampled from the same historical run",
+      "generalization beyond the fixed checkpoints, renderer, and historical state panel"
+    ]
+  },
+  "state_pool": {
+    "source_run_id": "run_20260608_185339",
+    "source_glob": "dataset/raw/agent_*/runs/run_20260608_185339/session_*.log",
+    "personality": "completionist",
+    "state_count": 20,
+    "decision_turn": 4,
+    "max_history_messages": 28,
+    "excluded_design": "research/artifacts/local-trigger-incidence-v1/design/design.json",
+    "excluded_design_sha256": "039f3ebdd8a0808e8a91023e523a2ca8615bd363774686a2338770cf8056640f",
+    "excluded_source_logs": [
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_100_20260609_010744.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_106_20260609_011343.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_111_20260609_012101.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_117_20260609_013441.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_122_20260609_013851.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_128_20260609_014342.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_133_20260609_015029.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_139_20260609_020302.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_144_20260609_021551.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_14_20260608_231458.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_155_20260609_023054.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_160_20260609_023954.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_166_20260609_024739.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_171_20260609_025350.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_177_20260609_030130.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_182_20260609_030531.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_188_20260609_031147.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_193_20260609_032251.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_199_20260609_032933.log",
+      "dataset/raw/agent_1/runs/run_20260608_185339/session_203_20260609_033508.log"
+    ],
+    "selection": "Exclude the 20 exact v1 source paths before parsing. Among remaining logs whose retained session metadata says personality=completionist, sort source paths relative to the supplied historical root, scan every floor(eligible_source_count/(2*state_count))-th path with a minimum stride of one, retain the fourth reconstructable decision state, and stop after 20 states.",
+    "outcome_independence": "The v2 panel excludes every source log used in v1. Selection uses registered paths, metadata, and parseability only; no v2 generation is inspected before the complete design is hashed."
+  },
+  "snapshots": {
+    "base_2b": {
+      "api_model": "2b-base",
+      "checkpoint_sha256": "aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1"
+    },
+    "opd_r2_2b": {
+      "api_model": "2b-opd-r2",
+      "checkpoint_sha256": "636aa92a16ee63965d5211625ba32c0524eb90da87f6b4727ee1f057e0486104"
+    },
+    "opd_r3_2b": {
+      "api_model": "2b-opd-r3",
+      "checkpoint_sha256": "c4df1ea2fda9253d595ff4a2068c72dd4de173241ab93cc1ee0d5dc42e302873"
+    }
+  },
+  "endpoint_contract": {
+    "tokenizer_sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+    "render_contract_sha256": "bc1597c47e5efbe533e52bb43335114426210bb29f868ef4fb2e7f86ca5b28ed",
+    "chat_template_sha256": "562a0a6f72bf5722612866d9f5d7e947be4b08a429e407f8e522e70137db5e1e",
+    "sampling_contract_sha256": "506e4d3ae39e53793ceaef6a39b31dabce13a72b9345af5b43d96de2b46ff5d3",
+    "fix_mistral_regex": false
+  },
+  "seed_gate": {
+    "required": true,
+    "purpose": "Fail closed before study outcomes unless different request seeds change model semantics and an exact repeated seed reproduces.",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Reply in plain English. Do not call tools."
+      },
+      {
+        "role": "user",
+        "content": "Invent a six-word name for a fictional coastal library and one sentence describing a strange object inside. Avoid proper names from real places."
+      }
+    ],
+    "tool_schema": "absent",
+    "base_seed": 929001,
+    "distinct_seed_count": 5,
+    "repeat_seed_index": 2,
+    "minimum_unique_semantic_responses": 3,
+    "sampling": {
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 20,
+      "presence_penalty": 1.5,
+      "max_tokens": 80,
+      "attempts": 3,
+      "request_timeout_seconds": 180
+    }
+  },
+  "factors": {
+    "documentation": {
+      "python_docs": "Retain the historical Python-call-like literals in the system prompt.",
+      "canonical_docs": "Apply canonicalize.docify_system_prompt to system messages."
+    },
+    "native_tool_schema": {
+      "absent": "Omit the OpenAI tools field, matching the historical gradient-time renderer.",
+      "present": "Send the full frozen tool_surface.MODEL_VISIBLE_TOOL_DEFINITIONS."
+    }
+  },
+  "conditions": [
+    {
+      "condition_id": "python-docs_no-tools",
+      "documentation": "python_docs",
+      "native_tool_schema": "absent"
+    },
+    {
+      "condition_id": "python-docs_native-tools",
+      "documentation": "python_docs",
+      "native_tool_schema": "present"
+    },
+    {
+      "condition_id": "canonical-docs_no-tools",
+      "documentation": "canonical_docs",
+      "native_tool_schema": "absent"
+    },
+    {
+      "condition_id": "canonical-docs_native-tools",
+      "documentation": "canonical_docs",
+      "native_tool_schema": "present"
+    }
+  ],
+  "sampling": {
+    "samples_per_state_condition": 5,
+    "base_seed": 830001,
+    "paired_seed_formula": "base_seed + 100 * zero_based_state_index + zero_based_sample_index",
+    "condition_order": "For each state-sample block, rotate the registered condition order by block_index modulo four. This balances deterministic order; it is not random assignment.",
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "presence_penalty": 1.5,
+    "max_tokens": 400,
+    "concurrency": 4,
+    "attempts": 3,
+    "request_timeout_seconds": 360,
+    "grid_rationale": "Twenty outcome-unseen states times five effective paired seeds preserves the 100-requests-per-cell v1 scale. The fixed panel tests directional replication and seed heterogeneity; it is not a power calculation or population sample."
+  },
+  "outcomes": {
+    "primary": "Recovery opportunity: the response has no structured tool call and canonicalize.recover_tool_calls(content) returns at least one candidate.",
+    "secondary": [
+      "raw malformed-emission indicator from canonicalize.is_malformed",
+      "structured tool-call indicator",
+      "no-call indicator",
+      "malformed surface-form family",
+      "request failure",
+      "unique semantic responses per state-condition group",
+      "within-group primary-outcome heterogeneity"
+    ]
+  },
+  "analysis": {
+    "estimand_unit": "The registered finite set of 100 state-seed pairs per checkpoint-condition. States may be temporally dependent observations from one historical run and are not treated as independent population draws.",
+    "checkpoint_handling": "Analyze each fixed checkpoint separately; do not treat checkpoints as training replicates, pool them into a population effect, or generalize beyond the fixed request grid.",
+    "registered_contrasts_per_checkpoint": [
+      "native tools present minus absent, averaged over documentation conditions",
+      "canonical documentation minus Python documentation, averaged over native-schema conditions",
+      "documentation-by-native-schema difference in differences"
+    ],
+    "directional_replication_criterion": "The v1 native-tools main effect replicates directionally only if its registered rate difference is strictly positive at Base, R2, and R3 on the complete v2 grid. Documentation and interaction contrasts have no directional replication criterion.",
+    "seed_heterogeneity": "For every checkpoint-condition-state group, report the count of unique semantic responses and whether the primary outcome varies across the five seeds. Report the total groups with more than one semantic response and more than one primary-outcome value.",
+    "reporting": "Report exact finite-grid cell rates, paired rate differences, the number of states with positive, negative, or zero paired differences, the directional replication criterion, and registered seed-heterogeneity counts. Do not report p-values, confidence intervals, binomial bounds, or claims of population uncertainty.",
+    "incomplete_cells": "Retain failures, but emit no registered contrasts or directional replication verdict unless every scheduled request succeeds."
+  },
+  "provenance": {
+    "endpoint_policy": "Loopback-only local endpoints; metered or remote endpoint overrides are not permitted by this registration.",
+    "endpoint_identity": "Require /health status ok and exact API model, checkpoint, canonical tokenizer, render contract, chat template, tokenizer-regex mode, and explicit-key sampling contract before creating an outcome directory.",
+    "seed_gate_identity": "Require a passed, hash-indexed, endpoint-matched gate for each checkpoint before its outcome directory can be created.",
+    "source_identity": "The preparation receipt hashes every selected source log and rendered message list, and records the exact excluded v1 source set. The run receipt records the clean Arena commit containing this registration.",
+    "retention": "Retain the complete design, seed-gate raw responses and receipts, raw study response messages, request metadata without endpoint URLs, endpoint attestations, results, summaries, and SHA-256 artifact indexes."
+  }
+}

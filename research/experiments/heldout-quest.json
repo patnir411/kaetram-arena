@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "experiment_id": "opd-2b-weights-x-recovery-heldout-v1",
+  "registered_at": "2026-07-18",
+  "locked": true,
+  "preregistered_before_evaluation": true,
+  "quest": {
+    "name": "Desert Quest",
+    "key": "desertquest",
+    "aliases": [
+      "Dying Soldier quest",
+      "Dying Soldier",
+      "lavanpc"
+    ]
+  },
+  "selection_rationale": "Fresh-account feasible and absent from the repository-resident OPD seed definitions and teacher-grading inputs/outputs checked on 2026-07-18. This is a scoped repository provenance claim, not a retroactive claim about untracked or external artifacts. The evaluator removes the always-on knowledge block and the MCP tool redacts static walkthrough/advisory fields for this quest.",
+  "allowed_uses": [
+    "evaluation"
+  ],
+  "forbidden_uses": [
+    "training_seed",
+    "teacher_grading"
+  ]
+}

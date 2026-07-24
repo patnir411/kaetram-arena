@@ -1,0 +1,23 @@
+{
+  "endpoint_health": {
+    "attestation": {
+      "api_model": "2b-opd-r2",
+      "chat_template_sha256": "562a0a6f72bf5722612866d9f5d7e947be4b08a429e407f8e522e70137db5e1e",
+      "checkpoint_sha256": "636aa92a16ee63965d5211625ba32c0524eb90da87f6b4727ee1f057e0486104",
+      "deployment_id": "local-mlx-lm-0.31.3-opd_r2_2b-2b51ca6d3186-11908184ad9b",
+      "fix_mistral_regex": false,
+      "render_contract_sha256": "11908184ad9ba71352740d4d429790ea427446b11146be202bf873bd7163979f",
+      "runtime_environment_receipt_sha256": "7db666ab3753394be571a182ef53ba45817a6e1d1f8413badc1ff11ed18c4789",
+      "snapshot_lock_sha256": "8117a75f24b50625469ffff26384584ad99526bf687a79a8b11ad7612cf62a32",
+      "snapshot_tree_sha256": "0ad86369dec284477ccee1a2f2cf7dbf776e7fdbf59f346fc2946f85178a1388",
+      "tokenizer_sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+      "tokenizer_source_revision": "15852e8c16360a2fea060d615a32b45270f8a8fc"
+    },
+    "status": "ok"
+  },
+  "endpoint_identity_stable": true,
+  "error": null,
+  "schema_version": "kaetram.local-trigger-incidence-run.v1.postflight",
+  "snapshot": "opd_r2_2b",
+  "study_id": "local-trigger-incidence-v1"
+}

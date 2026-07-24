@@ -32,6 +32,8 @@ serve_image = (
         "SGLANG_DISABLE_CUDNN_CHECK": "1",
     })
     .add_local_python_source("render")
+    .add_local_python_source("inference_seed")
+    .add_local_python_source("endpoint_identity")
 )
 
 BASE_MODEL_ID = "Qwen/Qwen3.5-2B"
@@ -54,6 +56,8 @@ QWEN_DECODE_MODE = "thinking_general"
 # source of truth shared with train_modal.py, serve_modal.py, and the
 # convert_to_qwen.py truncation gate.
 from render import patch_qwen_chat_template
+from inference_seed import validate_inference_seed
+from endpoint_identity import endpoint_attestation
 
 
 @app.cls(
@@ -140,7 +144,7 @@ class Inference:
 
     @modal.asgi_app()
     def serve(self):
-        from fastapi import FastAPI, Request
+        from fastapi import FastAPI, HTTPException, Request
         import time
         import uuid
 
@@ -148,6 +152,7 @@ class Inference:
 
         @web_app.get("/health")
         async def health():
+            attestation = endpoint_attestation("2b-base")
             return {
                 "status": "ok",
                 "model": BASE_MODEL_ID,
@@ -162,6 +167,8 @@ class Inference:
                 },
                 "capabilities": ["chat", "score"],
                 "supports_system_prefix": True,
+                "supports_seed": True,
+                "attestation": attestation,
             }
 
         def _apply_system_prefix(messages, system_prefix):
@@ -194,6 +201,12 @@ class Inference:
             top_p = body.get("top_p", QWEN_THINK_TOP_P)
             top_k = body.get("top_k", QWEN_THINK_TOP_K)
             presence_penalty = body.get("presence_penalty", QWEN_THINK_PRESENCE_PENALTY)
+            seed = body.get("seed")
+            if seed is not None:
+                try:
+                    seed = validate_inference_seed(seed, label="seed")
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
 
             # Honor tools= from the request body so the chat template
             # injects Qwen3.5's native tool spec block. The base model was
@@ -232,16 +245,16 @@ class Inference:
                 add_generation_prompt=True,
             )
 
-            output = await self.engine.async_generate(
-                prompt,
-                sampling_params={
-                    "temperature": temperature,
-                    "top_p": top_p,
-                    "top_k": top_k,
-                    "presence_penalty": presence_penalty,
-                    "max_new_tokens": max_tokens,
-                },
-            )
+            sampling_params = {
+                "temperature": temperature,
+                "top_p": top_p,
+                "top_k": top_k,
+                "presence_penalty": presence_penalty,
+                "max_new_tokens": max_tokens,
+            }
+            if seed is not None:
+                sampling_params["sampling_seed"] = seed
+            output = await self.engine.async_generate(prompt, sampling_params=sampling_params)
             generated_text = output["text"]
             prompt_tokens = output.get("meta_info", {}).get("prompt_tokens", 0)
             completion_tokens = output.get("meta_info", {}).get("completion_tokens", 0)

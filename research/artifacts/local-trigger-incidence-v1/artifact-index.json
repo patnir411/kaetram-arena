@@ -1,0 +1,124 @@
+{
+  "analysis_script_sha256": "e33104b6d47244b50106c6af44188d5c7a1f45fb7ca0b236bcf7488bb35a9d96",
+  "analysis_source_git_commit": "514542a9f76cddbeefe68ef52d93a39a49225118",
+  "design_sha256": "039f3ebdd8a0808e8a91023e523a2ca8615bd363774686a2338770cf8056640f",
+  "experiment_source_git_commit": "514542a9f76cddbeefe68ef52d93a39a49225118",
+  "export_script_sha256": "13413c6a4eae43a278cff37341a3e434e8974f418b8328cf5b2b0e72669864da",
+  "files": [
+    {
+      "path": "analysis/analysis-summary.json",
+      "sha256": "3bc7ed07a0ee5cb91807008e22b322bbafbcede95234ce5af0b814d89d3d4601",
+      "size_bytes": 9887
+    },
+    {
+      "path": "analysis/artifact-index.json",
+      "sha256": "e4d6be106bc6f5fec2af5d02c637b200a805186012768e44e214e79b097ac0dd",
+      "size_bytes": 644
+    },
+    {
+      "path": "analysis/cells.csv",
+      "sha256": "27047ade437c78907f85924951d0df4356b51ca9fac942c4dd8ccad9d7abc780",
+      "size_bytes": 1188
+    },
+    {
+      "path": "analysis/contrasts.csv",
+      "sha256": "12b8b5db500fbb4edffa2610cd7d11ba1ba8e94ecc46858f0c45666021e71fa1",
+      "size_bytes": 595
+    },
+    {
+      "path": "design/design.json",
+      "sha256": "039f3ebdd8a0808e8a91023e523a2ca8615bd363774686a2338770cf8056640f",
+      "size_bytes": 604836
+    },
+    {
+      "path": "design/design.receipt.json",
+      "sha256": "f889d25be059ea7fb0b12acfaf70bfebcfe11e511e302278ef2fd08d811e6a4f",
+      "size_bytes": 510
+    },
+    {
+      "path": "registration.json",
+      "sha256": "0d4f38ef15fe94509e593aa50d4967cda082ebd6b62e90b5e2aef3a4f0762eb7",
+      "size_bytes": 6597
+    },
+    {
+      "path": "runs/base_2b/artifact-index.json",
+      "sha256": "800bafd4bc23ca8854d431585c4a68ab10abe1e4971758f5a42a7f20c34b4ab8",
+      "size_bytes": 864
+    },
+    {
+      "path": "runs/base_2b/completed.json",
+      "sha256": "749041a8b76ab2085c05581abd1bf15ae7e664741b7995723a3e037a6d53c155",
+      "size_bytes": 403
+    },
+    {
+      "path": "runs/base_2b/postflight.json",
+      "sha256": "ea553b7011ef04f4323e9de152243fd3a314a12d152108b90e788d477152ee50",
+      "size_bytes": 1190
+    },
+    {
+      "path": "runs/base_2b/prelaunch.json",
+      "sha256": "79e035ce479b3d64b91199b5d722664a9f6140c1efbe8d8b1cf1a7a63e3805a9",
+      "size_bytes": 2248
+    },
+    {
+      "path": "runs/base_2b/results.jsonl",
+      "sha256": "a0f8b21a7fc0223eb157371d5af426197109878f035ba8cf961c5a172b73d18d",
+      "size_bytes": 1146891
+    },
+    {
+      "path": "runs/opd_r2_2b/artifact-index.json",
+      "sha256": "33ddc3537da461bc51b1b1ba9ec8dc9ea311c47238f2828520e17560fa287919",
+      "size_bytes": 866
+    },
+    {
+      "path": "runs/opd_r2_2b/completed.json",
+      "sha256": "844655dc8e0255f73b0d7efe1284673be6f754cb329f3438321266841f2d8dcc",
+      "size_bytes": 405
+    },
+    {
+      "path": "runs/opd_r2_2b/postflight.json",
+      "sha256": "5ad2ed2f5bdb5d02f28a3cc9f784f3dbd558a6c55fa51df614b38cb978a2048f",
+      "size_bytes": 1196
+    },
+    {
+      "path": "runs/opd_r2_2b/prelaunch.json",
+      "sha256": "582c599ca2371938307df72131d0d0ae3b92a073fbeb6f9053576bcb2644a5b5",
+      "size_bytes": 2254
+    },
+    {
+      "path": "runs/opd_r2_2b/results.jsonl",
+      "sha256": "080f7f8f7b834bf742609c0cc712d191f788bf729160b0e606a7d6aca33bdc92",
+      "size_bytes": 1100916
+    },
+    {
+      "path": "runs/opd_r3_2b/artifact-index.json",
+      "sha256": "f08a7a10f064e58109ffdce3628bcd8759fcd177fbe15cd00d6fd12d89b2c208",
+      "size_bytes": 866
+    },
+    {
+      "path": "runs/opd_r3_2b/completed.json",
+      "sha256": "5c66663bc92e989725b5b199e043786b8836c13cb268f765ff9e48ae6c910e9d",
+      "size_bytes": 405
+    },
+    {
+      "path": "runs/opd_r3_2b/postflight.json",
+      "sha256": "e795cd986b5f94c35fccb0b8493f4f33d228737897afc524fe45ded323691a10",
+      "size_bytes": 1196
+    },
+    {
+      "path": "runs/opd_r3_2b/prelaunch.json",
+      "sha256": "980a0d0e44c6208ad8df2c344bb04ce8b336be48c07db193701a2c56f370be70",
+      "size_bytes": 2254
+    },
+    {
+      "path": "runs/opd_r3_2b/results.jsonl",
+      "sha256": "c42365342e738fbf2a9fa0ddf4ce104383091190c5b09c4d7ef0bdd08f8649fc",
+      "size_bytes": 1066925
+    }
+  ],
+  "registration_sha256": "0d4f38ef15fe94509e593aa50d4967cda082ebd6b62e90b5e2aef3a4f0762eb7",
+  "schema_version": "kaetram.local-trigger-incidence-public-artifact.v1",
+  "study_id": "local-trigger-incidence-v1",
+  "tree_sha256": "8595c66194138e931aade908fe0d0e2b2ba3ac5a1c6cb1de5016729bfb2af9f4",
+  "verifier_script_sha256": "07bd2b6e66893705bb80c49f79592490d1ba353b96c177df293280099ca86e12"
+}

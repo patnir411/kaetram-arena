@@ -14,14 +14,22 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 import play_qwen
 from cli_adapter import detect_log_format
-from scripts.log_analysis.parse import parse_session
+from scripts.log_analysis.parse import (
+    parse_record_timestamp,
+    parse_run_sessions,
+    parse_session,
+)
 
 
 def _make_logger(tmp_path: Path) -> play_qwen.SessionLogger:
@@ -131,6 +139,35 @@ def test_log_assistant_skips_when_nothing_to_emit(tmp_path: Path) -> None:
     assert _read_records(logger) == []
 
 
+def test_raw_model_emission_preserves_pre_rewrite_content_and_arguments(tmp_path: Path) -> None:
+    logger = _make_logger(tmp_path)
+    logger.open_next_session()
+    call = SimpleNamespace(
+        id="raw_1",
+        function=SimpleNamespace(
+            name="gather",
+            arguments='<parameter=item="Oak">',
+        ),
+    )
+    play_qwen.log_raw_model_emission(
+        logger,
+        turn=4,
+        content='<function=gather("Oak")>',
+        tool_calls=[call],
+        usage={"prompt_tokens": 10, "completion_tokens": 3},
+    )
+    logger.close()
+    record = _read_records(logger)[0]
+    assert record["type"] == "raw_model_emission"
+    assert record["content"] == '<function=gather("Oak")>'
+    assert record["tool_calls"] == [{
+        "id": "raw_1",
+        "name": "gather",
+        "arguments": '<parameter=item="Oak">',
+    }]
+    assert record["usage"] == {"input_tokens": 10, "output_tokens": 3}
+
+
 def test_log_tool_result_pairs_via_tool_use_id(tmp_path: Path) -> None:
     logger = _make_logger(tmp_path)
     logger.open_next_session()
@@ -206,3 +243,150 @@ def test_full_log_round_trips_through_claude_parser(tmp_path: Path) -> None:
     assert tc.result_raw == "player at (10,10)"
     # Result record populated.
     assert sv.result_summary.get("terminal_reason") == "context_overflow"
+
+
+def test_protocol_cutoff_filters_records_inside_a_crossing_session(tmp_path: Path) -> None:
+    log_path = tmp_path / "session_1_20260711_060000.log"
+    records = [
+        {"type": "system", "subtype": "init", "model": "m"},
+        {
+            "type": "assistant",
+            "timestamp": "2026-07-11T10:00:00",
+            "message": {"content": [{
+                "type": "tool_use", "id": "before", "name": "observe", "input": {},
+            }]},
+        },
+        {
+            "type": "user",
+            "timestamp": "2026-07-11T10:01:00Z",
+            "message": {"content": [{
+                "type": "tool_result", "tool_use_id": "before",
+                "content": '{"active_quests":[]}',
+            }]},
+        },
+        {
+            "type": "assistant",
+            "timestamp": "2026-07-11T11:00:00+00:00",
+            "message": {"content": [{
+                "type": "tool_use", "id": "after", "name": "observe", "input": {},
+            }]},
+        },
+        {
+            "type": "user",
+            "timestamp": "2026-07-11T11:01:00+00:00",
+            "message": {"content": [{
+                "type": "tool_result", "tool_use_id": "after",
+                "content": '{"finished_quests":[{"name":"Foresting"}]}',
+            }]},
+        },
+    ]
+    log_path.write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    cutoff = datetime(2026, 7, 11, 10, 30, tzinfo=timezone.utc)
+    parsed = parse_session(log_path, through=cutoff)
+
+    assert [call.tool_use_id for call in parsed.tool_calls] == ["before"]
+    assert parsed.tool_calls[0].result_payload == {"active_quests": []}
+
+
+def test_naive_record_timestamps_are_historical_utc() -> None:
+    assert parse_record_timestamp("2026-07-11T10:00:00") == datetime(
+        2026, 7, 11, 10, 0, tzinfo=timezone.utc,
+    )
+
+
+def test_protocol_cutoff_rejects_naive_cutoff_and_undated_semantic_record(
+    tmp_path: Path,
+) -> None:
+    log_path = tmp_path / "session_1.log"
+    log_path.write_text(json.dumps({
+        "type": "assistant",
+        "message": {"content": [{
+            "type": "tool_use", "id": "undated", "name": "observe", "input": {},
+        }]},
+    }) + "\n")
+
+    with pytest.raises(ValueError, match="explicit UTC offset"):
+        parse_session(log_path, through=datetime(2026, 7, 11, 10, 30))
+    with pytest.raises(ValueError, match="no valid timestamp"):
+        parse_session(
+            log_path,
+            through=datetime(2026, 7, 11, 10, 30, tzinfo=timezone.utc),
+        )
+
+
+def test_protocol_cutoff_rejects_malformed_json_record(tmp_path: Path) -> None:
+    log_path = tmp_path / "session_1.log"
+    log_path.write_text('{"type":"assistant"\n')
+
+    with pytest.raises(ValueError, match="malformed JSON under protocol cutoff"):
+        parse_session(
+            log_path,
+            through=datetime(2026, 7, 11, 10, 30, tzinfo=timezone.utc),
+        )
+
+
+def test_protocol_cutoff_is_inclusive_and_drops_late_tool_result(
+    tmp_path: Path,
+) -> None:
+    log_path = tmp_path / "session_1.log"
+    cutoff = datetime(2026, 7, 11, 10, 30, tzinfo=timezone.utc)
+    records = [
+        {
+            "type": "assistant",
+            "timestamp": "2026-07-11T10:30:00.000000Z",
+            "message": {"content": [{
+                "type": "tool_use", "id": "crossing", "name": "observe", "input": {},
+            }]},
+        },
+        {
+            "type": "user",
+            "timestamp": "2026-07-11T10:30:00.000001Z",
+            "message": {"content": [{
+                "type": "tool_result", "tool_use_id": "crossing",
+                "content": '{"finished_quests":[{"name":"Foresting"}]}',
+            }]},
+        },
+    ]
+    log_path.write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    parsed = parse_session(log_path, through=cutoff)
+
+    assert [call.tool_use_id for call in parsed.tool_calls] == ["crossing"]
+    assert parsed.tool_calls[0].result_payload is None
+
+
+def test_run_cutoff_does_not_prefilter_from_ambiguous_filename_timezone(
+    tmp_path: Path,
+) -> None:
+    agent_dir = tmp_path / "agent_0"
+    run_dir = agent_dir / "runs" / "run_test"
+    run_dir.mkdir(parents=True)
+    # Filename time would be interpreted as EDT by the display helper and look
+    # later than the cutoff; the authoritative record time is UTC and valid.
+    log_path = run_dir / "session_1_20260711_140000.log"
+    log_path.write_text(
+        json.dumps({
+            "type": "assistant",
+            "timestamp": "2026-07-11T10:00:00",
+            "message": {"content": [{
+                "type": "tool_use", "id": "valid", "name": "observe", "input": {},
+            }]},
+        }) + "\n",
+        encoding="utf-8",
+    )
+
+    parsed = parse_run_sessions(
+        agent_dir,
+        run_dir,
+        through=datetime(2026, 7, 11, 10, 30, tzinfo=timezone.utc),
+    )
+
+    assert len(parsed.sessions) == 1
+    assert [call.tool_use_id for call in parsed.all_tool_calls] == ["valid"]

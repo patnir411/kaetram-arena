@@ -21,6 +21,9 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# NODE_ENV=eval pins both game servers to this database. Export the same value
+# for eval_harness DB snapshots and the pre-run reset.
+export KAETRAM_MONGO_DB="kaetram_eval"
 
 EPISODES=3
 SCENARIO=D
@@ -42,7 +45,8 @@ PERS_FLAG=""
 RUN_TAG="$(date +%Y%m%d_%H%M%S)"
 [ -n "$PERSONALITY" ] && RUN_TAG="${RUN_TAG}_${PERSONALITY}"
 RUN_DIR="$PROJECT_DIR/dataset/eval/runs/${RUN_TAG}"
-mkdir -p "$RUN_DIR"
+# A timestamp collision must fail instead of reusing artifacts from another run.
+mkdir "$RUN_DIR"
 
 # ── Cleanup ──
 # Scope every kill to the eval lane — never a bare pkill on the generic names
@@ -77,6 +81,35 @@ reap_eval_orphans() {
     fi
   done
 }
+
+SFT_PID=""
+BASE_PID=""
+WATCHDOG_PID=""
+
+cleanup_on_signal() {
+  local exit_code="$1"
+  local child_pid eval_port server_pid
+  trap - INT TERM
+  set +e
+  for child_pid in "$WATCHDOG_PID" "$SFT_PID" "$BASE_PID"; do
+    if [ -n "$child_pid" ] && kill -0 "$child_pid" 2>/dev/null; then
+      kill "$child_pid" 2>/dev/null
+    fi
+  done
+  for child_pid in "$WATCHDOG_PID" "$SFT_PID" "$BASE_PID"; do
+    [ -n "$child_pid" ] && wait "$child_pid" 2>/dev/null
+  done
+  for eval_port in 9071 9061; do
+    server_pid=$(ss -tlnp 2>/dev/null | grep ":${eval_port} " \
+      | grep -oP 'pid=\K[0-9]+' | head -1 || true)
+    [ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null
+  done
+  reap_eval_orphans
+  exit "$exit_code"
+}
+
+trap 'cleanup_on_signal 130' INT
+trap 'cleanup_on_signal 143' TERM
 reap_eval_orphans
 
 # Kill BOTH eval game servers by their dedicated ports (9061 r10-sft, 9071 base).
@@ -176,9 +209,6 @@ PYTHONUNBUFFERED=1 python3 "$PROJECT_DIR/scripts/eval_watchdog.py" \
 WATCHDOG_PID=$!
 echo "  Watchdog started (PID $WATCHDOG_PID, log: /tmp/eval_watchdog_${RUN_TAG}.log)"
 
-# Symlink latest for dashboard
-ln -sfn "$RUN_DIR" "$PROJECT_DIR/dataset/eval/latest"
-
 echo ""
 echo "Both evals running in parallel."
 echo "  Dashboard: http://localhost:8080 (Eval tab — live side-by-side + metrics)"
@@ -193,8 +223,8 @@ while kill -0 $SFT_PID 2>/dev/null || kill -0 $BASE_PID 2>/dev/null; do
   sleep 30
   SFT_STATUS="running"
   BASE_STATUS="running"
-  kill -0 $SFT_PID 2>/dev/null || SFT_STATUS="done (rc=$(wait $SFT_PID 2>/dev/null; echo $?))"
-  kill -0 $BASE_PID 2>/dev/null || BASE_STATUS="done (rc=$(wait $BASE_PID 2>/dev/null; echo $?))"
+  kill -0 $SFT_PID 2>/dev/null || SFT_STATUS="done"
+  kill -0 $BASE_PID 2>/dev/null || BASE_STATUS="done"
 
   SFT_EP=0; BASE_EP=0
   [ -f "$RUN_DIR/r10-sft/results.json" ] && SFT_EP=$(python3 -c "import json; print(len([e for e in json.load(open('$RUN_DIR/r10-sft/results.json'))['episodes'] if e.get('status')=='ok']))" 2>/dev/null || echo 0)
@@ -203,6 +233,17 @@ while kill -0 $SFT_PID 2>/dev/null || kill -0 $BASE_PID 2>/dev/null; do
   echo "[$(date +%H:%M)] r10-sft: $SFT_STATUS ($SFT_EP/$EPISODES eps) | base: $BASE_STATUS ($BASE_EP/$EPISODES eps)"
 done
 
+# Reap each child exactly once and retain its real exit status.
+SFT_RC=0
+BASE_RC=0
+wait "$SFT_PID" || SFT_RC=$?
+wait "$BASE_PID" || BASE_RC=$?
+
+if kill -0 "$WATCHDOG_PID" 2>/dev/null; then
+  kill "$WATCHDOG_PID" 2>/dev/null || true
+fi
+wait "$WATCHDOG_PID" 2>/dev/null || true
+
 # ── Cleanup eval game servers ──
 # Trailing space on the port match so ":9061 " can't substring-match ":90610".
 for EVAL_PORT in 9071 9061; do
@@ -210,12 +251,45 @@ for EVAL_PORT in 9071 9061; do
   [ -n "$GS_PID" ] && kill "$GS_PID" 2>/dev/null || true
 done
 
+validate_arm() {
+  local model_name="$1"
+  local result_path="$RUN_DIR/$model_name/results.json"
+  python3 "$PROJECT_DIR/scripts/validate_eval_results.py" \
+    --results "$result_path" \
+    --model "$model_name" \
+    --episodes "$EPISODES" \
+    --scenario "$SCENARIO"
+}
+
+VALIDATION_RC=0
+validate_arm "r10-sft" || VALIDATION_RC=1
+validate_arm "base" || VALIDATION_RC=1
+
+if [ "$SFT_RC" -ne 0 ] || [ "$BASE_RC" -ne 0 ] || [ "$VALIDATION_RC" -ne 0 ]; then
+  echo ""
+  echo "EVAL FAILED"
+  echo "  r10-sft exit: $SFT_RC"
+  echo "  base exit:    $BASE_RC"
+  echo "  Run preserved for diagnosis: $RUN_DIR"
+  echo "  dataset/eval/latest-run.txt was not changed"
+  exit 1
+fi
+
+# Promote only a complete, validated paired run. The helper validates that the
+# target is a real direct child of dataset/eval/runs and atomically replaces a
+# regular text pointer; directory symlinks are prohibited by runtime isolation.
+LATEST_RUN_RELATIVE=$(
+  python3 "$PROJECT_DIR/dashboard/eval_latest.py" promote \
+    --eval-dir "$PROJECT_DIR/dataset/eval" \
+    --run-dir "$RUN_DIR"
+)
+
 echo ""
 echo "EVAL COMPLETE"
 echo "  Run dir: $RUN_DIR"
 echo "  Results: $RUN_DIR/r10-sft/results.json"
 echo "           $RUN_DIR/base/results.json"
-echo "  Symlink: dataset/eval/latest → $RUN_DIR"
+echo "  Pointer: dataset/eval/latest-run.txt → $LATEST_RUN_RELATIVE"
 echo ""
 echo "Compare: python3 eval_compare.py $RUN_DIR/base/results.json $RUN_DIR/r10-sft/results.json"
 echo "History: ls dataset/eval/runs/"

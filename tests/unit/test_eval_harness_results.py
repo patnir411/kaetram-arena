@@ -33,6 +33,7 @@ def test_save_results_records_time_budget_without_max_turns(
         episodes=[{"episode": 1, "status": "ok"}],
     )
 
+    assert results["schema_version"] == "kaetram.eval-results.v1"
     assert results["meta"]["model"] == "base"
     assert results["meta"]["endpoint"] == "https://example.invalid/v1"
     assert results["meta"]["scenario"] == scenario

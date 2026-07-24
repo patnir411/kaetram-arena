@@ -1,0 +1,99 @@
+{
+  "schema_version": 2,
+  "experiment_id": "opd-2b-weights-x-recovery-heldout-v2",
+  "registered_at": "2026-07-23",
+  "locked": true,
+  "preregistered_before_evaluation": true,
+  "supersedes": {
+    "path": "research/experiments/heldout-quest.json",
+    "sha256": "1d4b66136334580b0c58b9ceb7ab4b91760b800ba502d163689b69b70ee2448c",
+    "reason": "Pre-outcome hostile audit found task-specific hints in the fully resolved explorer personality and found matched-training exclusions were not bound to the locked registration."
+  },
+  "quest": {
+    "name": "Desert Quest",
+    "key": "desertquest",
+    "aliases": [
+      "Dying Soldier quest",
+      "Dying Soldier",
+      "lavanpc"
+    ]
+  },
+  "prompt_guard": {
+    "forbidden_markers_outside_objective": [
+      "desertquest",
+      "Dying Soldier quest",
+      "Dying Soldier",
+      "lavanpc",
+      "Wife",
+      "crullfield",
+      "lakesworld"
+    ]
+  },
+  "training_guard": {
+    "exclusion_terms": [
+      "Desert Quest",
+      "desertquest",
+      "Dying Soldier quest",
+      "Dying Soldier",
+      "lavanpc"
+    ],
+    "tokenizer": {
+      "snapshot": "base_2b",
+      "tokenizer_sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+      "snapshot_lock_sha256": "8117a75f24b50625469ffff26384584ad99526bf687a79a8b11ad7612cf62a32",
+      "fix_mistral_regex": false,
+      "vocab_size": 248077
+    },
+    "forbidden_token_sequences": [
+      {
+        "term": "Desert Quest",
+        "variants": [
+          {"text": "Desert Quest", "token_ids": [4737, 517, 14615]},
+          {"text": " Desert Quest", "token_ids": [40788, 14615]},
+          {"text": "desert quest", "token_ids": [5618, 517, 2151]},
+          {"text": " desert quest", "token_ids": [22865, 2151]}
+        ]
+      },
+      {
+        "term": "desertquest",
+        "variants": [
+          {"text": "desertquest", "token_ids": [5618, 517, 699]},
+          {"text": " desertquest", "token_ids": [22865, 699]}
+        ]
+      },
+      {
+        "term": "Dying Soldier quest",
+        "variants": [
+          {"text": "Dying Soldier quest", "token_ids": [35, 6806, 50665, 2151]},
+          {"text": " Dying Soldier quest", "token_ids": [414, 6806, 50665, 2151]},
+          {"text": "dying soldier quest", "token_ids": [67, 6806, 25276, 2151]},
+          {"text": " dying soldier quest", "token_ids": [21582, 25276, 2151]}
+        ]
+      },
+      {
+        "term": "Dying Soldier",
+        "variants": [
+          {"text": "Dying Soldier", "token_ids": [35, 6806, 50665]},
+          {"text": " Dying Soldier", "token_ids": [414, 6806, 50665]},
+          {"text": "dying soldier", "token_ids": [67, 6806, 25276]},
+          {"text": " dying soldier", "token_ids": [21582, 25276]}
+        ]
+      },
+      {
+        "term": "lavanpc",
+        "variants": [
+          {"text": "lavanpc", "token_ids": [75, 29892, 3858]},
+          {"text": " lavanpc", "token_ids": [28522, 276, 3858]}
+        ]
+      }
+    ]
+  },
+  "selection_rationale": "Superseding registration frozen before any held-out evaluation outcome. It preserves the original task choice while adding a complete resolved-prompt guard and tokenizer-bound training exclusions. The task remains fresh-account feasible and absent from the repository-resident OPD seed definitions and teacher-grading inputs/outputs checked before registration.",
+  "allowed_uses": [
+    "evaluation"
+  ],
+  "forbidden_uses": [
+    "training_seed",
+    "teacher_grading"
+  ]
+}

@@ -14,9 +14,10 @@ path can't be used across sizes.
 Load discipline (the first run wedged both endpoints): the serve classes take
 @modal.concurrent(max_inputs=16); this client holds at most PER_EP_CONCURRENCY
 in flight per endpoint, renders in a worker thread so the event loop keeps
-servicing responses, submits in chunks, and appends results incrementally so a
-crash/stall resumes instead of restarting (states already in the output files
-are skipped by (session, turn_idx)).
+servicing responses, and submits in chunks. Provenance-sealed builds are
+create-only: a crash leaves an explicitly partial artifact that must be moved
+aside before a fresh build. The builder never attaches a new receipt to
+pre-existing records.
 
 Emits pre-tokenized training records for finetune/train_opd_2b.py:
     input_ids          = ctx_ids + target_ids
@@ -35,37 +36,90 @@ Usage (round 2 — student EP is the r1 endpoint):
   TWOB_EP=https://patnir411--kaetram-qwen-2b-opd-inference-serve.modal.run/v1 \
   FOURB_EP=https://.../v1 \
     python3 scripts/opd/opd_2b_data.py --run-ids run_20260610_140358 <seeded_run> \
-      --out-dir dataset/opd_2b/round2
-  modal volume put kaetram-model-vol dataset/opd_2b/round2/records.jsonl \
-      /opd_2b/round2/records.jsonl --force
+      --out-dir dataset/opd_2b/round2 \
+      --student-artifact-id qwen-2b-r1 --student-artifact-sha256 <64-hex> \
+      --teacher-artifact-id qwen-4b --teacher-artifact-sha256 <64-hex> \
+      --tokenizer-path /immutable/qwen-tokenizer
+  # Keep the emitted records and records.manifest.json together. The trainer
+  # requires both --records-path and --records-manifest-path.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
+import importlib.metadata
 import json
 import os
+import platform
 import re
+import subprocess
 import sys
+import tempfile
 from collections import defaultdict
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO / "scripts" / "opd"))
-sys.path.insert(0, str(REPO / "finetune"))
-
-from canonicalize import docify_system_prompt, is_malformed  # noqa: E402
-from opd_probe import reconstruct_session  # noqa: E402
-from opd_round1 import turn_to_chat  # noqa: E402
-from opd_wall_probe import _frontier, _finished_from_payload  # noqa: E402
-from render import patch_qwen_chat_template  # noqa: E402
+FROZEN_MARKER_NAME = ".kaetram-opd-frozen-build.json"
+FROZEN_MARKER_SCHEMA = "kaetram-opd-frozen-entrypoint-v1"
+EXECUTION_ROOT = Path(__file__).resolve().parents[2]
+FROZEN_MARKER_PATH = EXECUTION_ROOT / FROZEN_MARKER_NAME
+if FROZEN_MARKER_PATH.is_file():
+    try:
+        _FROZEN_MARKER = json.loads(FROZEN_MARKER_PATH.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("frozen OPD entrypoint marker is invalid") from exc
+    if (
+        not isinstance(_FROZEN_MARKER, dict)
+        or set(_FROZEN_MARKER)
+        != {"schema_version", "source_repo", "build_sources_sha256"}
+        or _FROZEN_MARKER.get("schema_version") != FROZEN_MARKER_SCHEMA
+        or not isinstance(_FROZEN_MARKER.get("source_repo"), str)
+        or not _FROZEN_MARKER["source_repo"]
+    ):
+        raise RuntimeError("frozen OPD entrypoint marker fields are invalid")
+    REPO = Path(_FROZEN_MARKER["source_repo"]).resolve()
+else:
+    _FROZEN_MARKER = None
+    REPO = EXECUTION_ROOT
+# This list is deliberately available without importing any local module. Main
+# snapshots it first, then imports every local dependency from that immutable
+# copy. receipt_chain.py carries the same closed inventory and checks equality
+# when the frozen modules are loaded.
+BUILD_SOURCE_PATHS = (
+    "bootstrap.py",
+    "canonical_start.py",
+    "eval_harness.py",
+    "inference_seed.py",
+    "finetune/render.py",
+    "scripts/opd/canonicalize.py",
+    "heldout_guard.py",
+    "port_probe.py",
+    "run_manifest.py",
+    "scripts/isolated_python_entry.py",
+    "tool_surface.py",
+    "scripts/opd/opd_2b_data.py",
+    "scripts/opd/opd_data_manifest.py",
+    "scripts/opd/opd_probe.py",
+    "scripts/opd/opd_round1.py",
+    "scripts/opd/opd_wall_probe.py",
+    "scripts/opd/record_schema.py",
+    "scripts/opd/receipt_chain.py",
+    "scripts/log_analysis/parse.py",
+    "prompts/game_knowledge.md",
+    "prompts/personalities/completionist.md",
+    "prompts/personalities/explorer_tinkerer.md",
+    "prompts/personalities/grinder.md",
+    "prompts/system.md",
+    "research/experiments/heldout-quest-v2.json",
+    "research/experiments/heldout-quest.json",
+)
 
 STUDENT_EP = os.environ["TWOB_EP"].rstrip("/")
 TEACHER_EP = os.environ["FOURB_EP"].rstrip("/")
 
-STUDENT_TOKENIZER_ID = "Qwen/Qwen3.5-2B"  # must match serve_modal_2b.py's rendering
 MAX_HIST_MSGS = 28
 MAX_SEQ = 16384
 KL_COEF = 1.0
@@ -80,9 +134,135 @@ SCORE_TIMEOUT = 240.0
 SCORE_RETRIES = 3
 
 
-def load_student_tokenizer():
+def sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def canonical_sha256(value: object) -> str:
+    payload = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _training_handoff_text(records_path: Path, manifest_path: Path) -> str:
+    def display(path: Path) -> str:
+        resolved = path.resolve()
+        try:
+            return resolved.relative_to(REPO.resolve()).as_posix()
+        except ValueError:
+            return str(resolved)
+
+    records = display(records_path)
+    manifest = display(manifest_path)
+    return "\n".join([
+        "",
+        "Next: stage this inseparable training-record bundle:",
+        f"  records:  {records}",
+        f"  manifest: {manifest}",
+        "Trainer arguments after staging (replace <staged-bundle>; both mandatory):",
+        "  --records-path <staged-bundle>/records.jsonl",
+        "  --records-manifest-path <staged-bundle>/records.manifest.json",
+    ])
+
+
+def is_digest(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdef" for char in value)
+    )
+
+
+def _load_frozen_local_dependencies(snapshot_root: Path) -> None:
+    """Import all local execution code from the pre-import immutable snapshot."""
+    global BUILDER_RELATIVE_PATH, MANIFEST_SCHEMA_VERSION
+    global OPD_TRAIN_RECORD_SCHEMA_SHA256, OPD_TRAIN_RECORD_SCHEMA_VERSION
+    global OPD_TRAIN_RECORD_VALIDATOR_SHA256
+    global _finished_from_payload, _frontier, assert_text_not_reserved
+    global docify_system_prompt, is_malformed, patch_qwen_chat_template
+    global reconstruct_session, turn_to_chat
+
+    local_module_names = {
+        "bootstrap",
+        "canonical_start",
+        "canonicalize",
+        "eval_harness",
+        "heldout_guard",
+        "inference_seed",
+        "opd_data_manifest",
+        "opd_probe",
+        "opd_round1",
+        "opd_wall_probe",
+        "parse",
+        "port_probe",
+        "receipt_chain",
+        "record_schema",
+        "render",
+        "run_manifest",
+        "scripts.isolated_python_entry",
+        "tool_surface",
+    }
+    preloaded = sorted(local_module_names & set(sys.modules))
+    if preloaded:
+        raise RuntimeError(
+            "local builder dependencies were cached before the frozen import: "
+            + ", ".join(preloaded)
+        )
+
+    for path in (
+        snapshot_root,
+        snapshot_root / "scripts" / "opd",
+        snapshot_root / "scripts" / "log_analysis",
+        snapshot_root / "finetune",
+    ):
+        sys.path.insert(0, str(path))
+
+    from canonicalize import docify_system_prompt as frozen_docify_system_prompt
+    from canonicalize import is_malformed as frozen_is_malformed
+    from heldout_guard import assert_text_not_reserved as frozen_assert_text_not_reserved
+    from opd_data_manifest import BUILDER_RELATIVE_PATH as frozen_builder_path
+    from opd_data_manifest import MANIFEST_SCHEMA_VERSION as frozen_manifest_schema
+    from opd_probe import reconstruct_session as frozen_reconstruct_session
+    from opd_round1 import turn_to_chat as frozen_turn_to_chat
+    from opd_wall_probe import _finished_from_payload as frozen_finished_from_payload
+    from opd_wall_probe import _frontier as frozen_frontier
+    from receipt_chain import BUILD_SOURCE_PATHS as receipt_build_source_paths
+    from record_schema import (
+        OPD_TRAIN_RECORD_SCHEMA_SHA256 as frozen_record_schema_sha256,
+    )
+    from record_schema import (
+        OPD_TRAIN_RECORD_SCHEMA_VERSION as frozen_record_schema_version,
+    )
+    from record_schema import (
+        OPD_TRAIN_RECORD_VALIDATOR_SHA256 as frozen_validator_sha256,
+    )
+    from render import patch_qwen_chat_template as frozen_patch_qwen_chat_template
+
+    if tuple(receipt_build_source_paths) != tuple(BUILD_SOURCE_PATHS):
+        raise RuntimeError("builder and receipt source inventories disagree")
+    BUILDER_RELATIVE_PATH = frozen_builder_path
+    MANIFEST_SCHEMA_VERSION = frozen_manifest_schema
+    OPD_TRAIN_RECORD_SCHEMA_SHA256 = frozen_record_schema_sha256
+    OPD_TRAIN_RECORD_SCHEMA_VERSION = frozen_record_schema_version
+    OPD_TRAIN_RECORD_VALIDATOR_SHA256 = frozen_validator_sha256
+    _finished_from_payload = frozen_finished_from_payload
+    _frontier = frozen_frontier
+    assert_text_not_reserved = frozen_assert_text_not_reserved
+    docify_system_prompt = frozen_docify_system_prompt
+    is_malformed = frozen_is_malformed
+    patch_qwen_chat_template = frozen_patch_qwen_chat_template
+    reconstruct_session = frozen_reconstruct_session
+    turn_to_chat = frozen_turn_to_chat
+
+
+def load_student_tokenizer(tokenizer_path: Path):
     from transformers import AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(STUDENT_TOKENIZER_ID, trust_remote_code=True)
+    tok = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
     patch_qwen_chat_template(tok)
     return tok
 
@@ -114,22 +294,245 @@ def _emission_text(turn):
     return content + "<|im_end|>\n"
 
 
-def collect_action_states(run_ids):
+def _copy_and_hash(source: Path, destination: Path | None = None) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    output = None
+    try:
+        if destination is not None:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            output = destination.open("xb")
+        with source.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+                size += len(chunk)
+                if output is not None:
+                    output.write(chunk)
+        if output is not None:
+            output.flush()
+            os.fsync(output.fileno())
+    finally:
+        if output is not None:
+            output.close()
+    return digest.hexdigest(), size
+
+
+def _snapshot_source_logs(
+    run_ids: list[str],
+    *,
+    snapshot_root: Path | None = None,
+) -> list[dict]:
+    if not run_ids or len(run_ids) != len(set(run_ids)):
+        raise RuntimeError("--run-ids must contain unique run identifiers")
+    inventory = []
+    for run_id in run_ids:
+        logs = sorted((REPO / "dataset" / "raw").glob(
+            f"agent_*/runs/{run_id}/session_*.log"
+        ))
+        if not logs:
+            raise RuntimeError(f"declared run has no source logs: {run_id}")
+        for path in logs:
+            resolved = path.resolve()
+            meta = resolved.with_suffix(".meta.json")
+            if not meta.is_file():
+                raise RuntimeError(
+                    f"source log has no adjacent session metadata: {meta}"
+                )
+            relative = resolved.relative_to(REPO).as_posix()
+            meta_relative = meta.relative_to(REPO).as_posix()
+            log_sha, log_size = _copy_and_hash(
+                resolved,
+                snapshot_root / relative if snapshot_root is not None else None,
+            )
+            meta_sha, meta_size = _copy_and_hash(
+                meta,
+                snapshot_root / meta_relative if snapshot_root is not None else None,
+            )
+            try:
+                metadata = json.loads(
+                    (snapshot_root / meta_relative if snapshot_root is not None else meta)
+                    .read_text(encoding="utf-8")
+                )
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise RuntimeError(f"source session metadata is invalid: {meta}") from exc
+            if not isinstance(metadata, dict):
+                raise RuntimeError(f"source session metadata is not an object: {meta}")
+            personality = metadata.get("personality") or "completionist"
+            if not isinstance(personality, str) or not personality:
+                raise RuntimeError(f"source session personality is invalid: {meta}")
+            personality_prompt = f"prompts/personalities/{personality}.md"
+            if personality_prompt not in BUILD_SOURCE_PATHS:
+                raise RuntimeError(
+                    f"source session selects an unbound personality prompt: {personality}"
+                )
+            inventory.append({
+                "run_id": run_id,
+                "path": relative,
+                "sha256": log_sha,
+                "size_bytes": log_size,
+                "meta_path": meta_relative,
+                "meta_sha256": meta_sha,
+                "meta_size_bytes": meta_size,
+                "personality_prompt_path": personality_prompt,
+            })
+    inventory.sort(key=lambda item: item["path"])
+    if len({item["path"] for item in inventory}) != len(inventory):
+        raise RuntimeError("source-log inventory contains duplicate paths")
+    return inventory
+
+
+def _verify_source_snapshot(inventory: list[dict]) -> None:
+    for item in inventory:
+        path = REPO / item["path"]
+        if (
+            not path.is_file()
+            or path.stat().st_size != item["size_bytes"]
+            or sha256_path(path) != item["sha256"]
+        ):
+            raise RuntimeError(f"source log changed during the build: {item['path']}")
+        meta = REPO / item["meta_path"]
+        if (
+            not meta.is_file()
+            or meta.stat().st_size != item["meta_size_bytes"]
+            or sha256_path(meta) != item["meta_sha256"]
+        ):
+            raise RuntimeError(
+                f"source metadata changed during the build: {item['meta_path']}"
+            )
+
+
+def _snapshot_build_sources() -> dict[str, str]:
+    snapshot: dict[str, str] = {}
+    for relative in BUILD_SOURCE_PATHS:
+        path = REPO / relative
+        if not path.is_file():
+            raise RuntimeError(f"material build input is missing: {relative}")
+        snapshot[relative] = sha256_path(path)
+    return snapshot
+
+
+def _materialize_build_inputs(
+    snapshot: dict[str, str],
+    snapshot_root: Path,
+) -> None:
+    if set(snapshot) != set(BUILD_SOURCE_PATHS):
+        raise RuntimeError("material build-input snapshot is incomplete")
+    for relative, expected in snapshot.items():
+        actual, _ = _copy_and_hash(REPO / relative, snapshot_root / relative)
+        if actual != expected:
+            raise RuntimeError(
+                f"material build input changed while snapshotting: {relative}"
+            )
+
+
+def _snapshot_hashes(snapshot_root: Path) -> dict[str, str]:
+    snapshot: dict[str, str] = {}
+    for relative in BUILD_SOURCE_PATHS:
+        path = snapshot_root / relative
+        if not path.is_file():
+            raise RuntimeError(f"frozen material build input is missing: {relative}")
+        snapshot[relative] = sha256_path(path)
+    return snapshot
+
+
+def _verify_build_source_snapshot(snapshot: dict[str, str]) -> None:
+    if set(snapshot) != set(BUILD_SOURCE_PATHS):
+        raise RuntimeError("material build-input snapshot is incomplete")
+    for relative, expected in snapshot.items():
+        path = REPO / relative
+        if not path.is_file() or sha256_path(path) != expected:
+            raise RuntimeError(
+                f"material build input changed during the build: {relative}"
+            )
+
+
+def _directory_digest(root: Path) -> str:
+    inventory = []
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            raise RuntimeError(f"tokenizer snapshot contains a symlink: {path}")
+        if path.is_file():
+            inventory.append({
+                "path": path.relative_to(root).as_posix(),
+                "sha256": sha256_path(path),
+                "size_bytes": path.stat().st_size,
+            })
+    if not inventory:
+        raise RuntimeError("tokenizer snapshot contains no regular files")
+    return canonical_sha256(inventory)
+
+
+def _materialize_directory_snapshot(
+    source_root: Path,
+    destination_root: Path,
+    *,
+    expected_sha256: str,
+) -> Path:
+    inventory = []
+    for source in sorted(source_root.rglob("*")):
+        if source.is_symlink():
+            raise RuntimeError(f"snapshot source contains a symlink: {source}")
+        if not source.is_file():
+            continue
+        relative = source.relative_to(source_root)
+        digest, size = _copy_and_hash(source, destination_root / relative)
+        inventory.append({
+            "path": relative.as_posix(),
+            "sha256": digest,
+            "size_bytes": size,
+        })
+    if canonical_sha256(inventory) != expected_sha256:
+        raise RuntimeError("directory changed while materializing its snapshot")
+    return destination_root
+
+
+def collect_action_states(
+    inventory: list[dict],
+    *,
+    source_root: Path | None = None,
+):
     """Per-turn (messages, emission, verb, frontier, session, turn_idx, n_turns,
     holdout) over the rollout logs. messages = [system, bootstrap, ...tail...]
     (context only); emission = the raw action continuation."""
-    logs = []
-    for run in run_ids:
-        logs.extend(sorted((REPO / "dataset" / "raw").glob(f"agent_*/runs/{run}/session_*.log")))
     states = []
     n_no_emission = 0
-    for log_i, lp in enumerate(logs):
+    states_by_run = defaultdict(int)
+    reconstruction_root = source_root.resolve() if source_root is not None else REPO
+    for log_i, source in enumerate(inventory):
+        lp = reconstruction_root / source["path"]
         try:
-            base_messages, turns = reconstruct_session(lp)
-        except Exception:
-            continue
+            base_messages, turns = reconstruct_session(
+                lp,
+                source_repo=reconstruction_root,
+                render_project_dir=REPO,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"failed to parse declared source log: {lp}") from exc
+        # Exclude the always-on system prompt from this scan: it mentions the
+        # quest name as a warp prerequisite but contains no walkthrough.  Any
+        # model action/reasoning or tool result touching the reserved quest is
+        # nevertheless a hard stop before either endpoint grades the session.
+        activity_text = json.dumps([
+            {
+                "text": turn.text,
+                "tool_calls": turn.tool_calls,
+                "results": [result.result_str for result in results],
+            }
+            for turn, results in turns
+        ])
+        assert_text_not_reserved(
+            activity_text,
+            use="teacher_grading",
+            source=str(lp),
+            path=(
+                reconstruction_root
+                / "research"
+                / "experiments"
+                / "heldout-quest-v2.json"
+            ),
+        )
         if not turns:
-            continue
+            raise RuntimeError(f"declared source log contains no turns: {lp}")
         holdout = (log_i % HOLDOUT_EVERY) == 0
         rolling = list(base_messages)
         finished: set[str] = set()
@@ -150,6 +553,8 @@ def collect_action_states(run_ids):
                         "session": lp.name,
                         "turn_idx": turn_idx,
                         "holdout": holdout,
+                        "source_run": source["run_id"],
+                        "source_log": source["path"],
                     })
             rolling.append(turn_to_chat(turn))
             for tr in results:
@@ -160,10 +565,18 @@ def collect_action_states(run_ids):
         n_turns = len(turns)
         for st in session_states:
             st["n_turns"] = n_turns
+            states_by_run[st["source_run"]] += 1
         states.extend(session_states)
+    missing = sorted({item["run_id"] for item in inventory} - set(states_by_run))
+    if missing:
+        raise RuntimeError(
+            "declared run produced no usable action state(s): " + ", ".join(missing)
+        )
     if n_no_emission:
-        print(f"  skipped {n_no_emission} tool-call turns with no reconstructible emission "
-              f"(empty/thinking-block text)")
+        raise RuntimeError(
+            f"{n_no_emission} tool-call turn(s) have no reconstructible emission; "
+            "refusing an incompletely accounted corpus"
+        )
     return states
 
 
@@ -324,18 +737,6 @@ async def build_record(client, tok, st, sem_s, sem_t):
     return rec, "ok_cf" if counterfactual else "ok"
 
 
-def _done_keys(path):
-    keys = set()
-    if path.exists():
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    r = json.loads(line)
-                    keys.add((r["session"], r["turn_idx"]))
-    return keys
-
-
 def _print_diagnostic(diag):
     print("\n## Pre-train reverse-KL diagnostic  (mean logp_2B - logp_4B, per action token)")
     print("   positive => the 2B is over-confident where the 4B disagrees (OPD suppresses);")
@@ -357,28 +758,199 @@ def _print_diagnostic(diag):
             print(f"    {front:<12} mean_rkl {s/n:+.4f}   ({n} action tokens)")
 
 
+def _health_url(endpoint: str) -> str:
+    parts = urlsplit(endpoint)
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        raise RuntimeError("scoring endpoint must be an HTTP(S) URL")
+    base_path = parts.path.rstrip("/")
+    if base_path.endswith("/v1"):
+        base_path = base_path[:-3]
+    return urlunsplit((parts.scheme, parts.netloc, base_path + "/health", "", ""))
+
+
+async def _verified_endpoint_attestation(
+    client: httpx.AsyncClient,
+    endpoint: str,
+    *,
+    expected_deployment_id: str,
+    expected_checkpoint_sha256: str,
+) -> dict:
+    try:
+        response = await client.get(_health_url(endpoint), timeout=60)
+        response.raise_for_status()
+        payload = response.json()
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
+        raise RuntimeError("scoring endpoint did not return valid /health JSON") from exc
+    if not isinstance(payload, dict) or payload.get("status") != "ok":
+        raise RuntimeError("scoring endpoint is not healthy")
+    if "score" not in (payload.get("capabilities") or []):
+        raise RuntimeError("scoring endpoint does not attest the score capability")
+    attestation = payload.get("attestation")
+    fields = {
+        "deployment_id",
+        "api_model",
+        "checkpoint_sha256",
+        "tokenizer_sha256",
+        "render_contract_sha256",
+    }
+    if not isinstance(attestation, dict) or set(attestation) != fields:
+        raise RuntimeError("scoring endpoint has no complete identity attestation")
+    if (
+        attestation.get("deployment_id") != expected_deployment_id
+        or attestation.get("checkpoint_sha256") != expected_checkpoint_sha256
+        or not isinstance(attestation.get("api_model"), str)
+        or not attestation["api_model"]
+        or any(
+            not is_digest(attestation.get(field))
+            for field in (
+                "checkpoint_sha256",
+                "tokenizer_sha256",
+                "render_contract_sha256",
+            )
+        )
+    ):
+        raise RuntimeError("scoring endpoint identity does not match the requested artifact")
+    return attestation
+
+
+def _state_identity(state: dict) -> dict:
+    return {
+        "source_run": state["source_run"],
+        "source_log": state["source_log"],
+        "session": state["session"],
+        "turn_idx": state["turn_idx"],
+        "verb": state["verb"],
+        "frontier": state["frontier"],
+        "holdout": state["holdout"],
+    }
+
+
+def _publish_create_only(temporary: Path, destination: Path) -> None:
+    try:
+        os.link(temporary, destination)
+    except FileExistsError as exc:
+        raise RuntimeError(
+            f"refusing to replace a concurrently created artifact: {destination}"
+        ) from exc
+    temporary.unlink()
+
+
 async def main():
+    if _FROZEN_MARKER is None:
+        raise RuntimeError(
+            "OPD builder must run through its frozen entrypoint; execute this "
+            "file as a script instead of importing main()"
+        )
+    snapshot_root = EXECUTION_ROOT
+    system_temp_root = Path(tempfile.gettempdir()).resolve()
+    if (
+        snapshot_root == REPO
+        or snapshot_root.is_relative_to(REPO)
+        or not snapshot_root.is_relative_to(system_temp_root)
+    ):
+        raise RuntimeError(
+            "OPD frozen build root must be isolated from the mutable source repository"
+        )
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-ids", nargs="+", default=["run_20260610_140358"])
     ap.add_argument("--out-dir", default="dataset/opd_2b/round2")
     ap.add_argument("--limit", type=int, default=0, help="cap states (0 = all; for smoke tests)")
+    ap.add_argument("--student-artifact-id", required=True)
+    ap.add_argument("--student-artifact-sha256", required=True)
+    ap.add_argument("--teacher-artifact-id", required=True)
+    ap.add_argument("--teacher-artifact-sha256", required=True)
+    ap.add_argument(
+        "--tokenizer-path",
+        required=True,
+        help="immutable local tokenizer snapshot containing tokenizer.json",
+    )
     args = ap.parse_args()
+    # The launcher copied every local input before this interpreter loaded the
+    # builder. This process executes that copied builder and imports all other
+    # local code only from the same tree.
+    build_sources = _snapshot_hashes(snapshot_root)
+    if (
+        _FROZEN_MARKER.get("build_sources_sha256")
+        != canonical_sha256(build_sources)
+    ):
+        raise RuntimeError("frozen OPD source inventory does not match its launcher")
+    _verify_build_source_snapshot(build_sources)
+    _load_frozen_local_dependencies(snapshot_root)
+    for name in ("student_artifact_sha256", "teacher_artifact_sha256"):
+        value = getattr(args, name)
+        if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+            ap.error(f"--{name.replace('_', '-')} must be a lowercase SHA-256")
+    for name in ("student_artifact_id", "teacher_artifact_id"):
+        value = getattr(args, name)
+        if not value.strip() or "://" in value or any(char.isspace() for char in value):
+            ap.error(
+                f"--{name.replace('_', '-')} must be a non-URL artifact identifier"
+            )
 
-    tok = load_student_tokenizer()
-    states = collect_action_states(args.run_ids)
+    source_inventory = _snapshot_source_logs(
+        args.run_ids,
+        snapshot_root=snapshot_root,
+    )
+    _verify_source_snapshot(source_inventory)
+    async with httpx.AsyncClient() as identity_client:
+        student_attestation, teacher_attestation = await asyncio.gather(
+            _verified_endpoint_attestation(
+                identity_client,
+                STUDENT_EP,
+                expected_deployment_id=args.student_artifact_id,
+                expected_checkpoint_sha256=args.student_artifact_sha256,
+            ),
+            _verified_endpoint_attestation(
+                identity_client,
+                TEACHER_EP,
+                expected_deployment_id=args.teacher_artifact_id,
+                expected_checkpoint_sha256=args.teacher_artifact_sha256,
+            ),
+        )
+    tokenizer_path = Path(args.tokenizer_path).resolve()
+    tokenizer_file = tokenizer_path / "tokenizer.json"
+    if not tokenizer_file.is_file():
+        ap.error("--tokenizer-path must contain tokenizer.json")
+    tokenizer_sha256 = sha256_path(tokenizer_file)
+    tokenizer_snapshot_sha256 = _directory_digest(tokenizer_path)
+    frozen_tokenizer_path = _materialize_directory_snapshot(
+        tokenizer_path,
+        snapshot_root / "tokenizer",
+        expected_sha256=tokenizer_snapshot_sha256,
+    )
+    if (
+        sha256_path(frozen_tokenizer_path / "tokenizer.json")
+        != tokenizer_sha256
+    ):
+        raise RuntimeError("tokenizer.json changed while materializing its snapshot")
+    if (
+        student_attestation["tokenizer_sha256"] != tokenizer_sha256
+        or teacher_attestation["tokenizer_sha256"] != tokenizer_sha256
+    ):
+        ap.error(
+            "local tokenizer.json does not match both endpoint identity attestations"
+        )
+
+    tok = load_student_tokenizer(frozen_tokenizer_path)
+    states = collect_action_states(source_inventory, source_root=snapshot_root)
     if args.limit:
         states = states[: args.limit]
+    candidate_state_identities = [_state_identity(state) for state in states]
 
     out_dir = REPO / args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     rec_path = out_dir / "records.jsonl"
     hold_path = out_dir / "heldout.jsonl"
+    manifest_path = out_dir / "records.manifest.json"
 
-    done = _done_keys(rec_path) | _done_keys(hold_path)
-    if done:
-        before = len(states)
-        states = [s for s in states if (s["session"], s["turn_idx"]) not in done]
-        print(f"resume: {len(done)} already scored, {before - len(states)} skipped")
+    existing = [path for path in (rec_path, hold_path, manifest_path) if path.exists()]
+    if existing:
+        rendered = ", ".join(str(path) for path in existing)
+        sys.exit(
+            "FATAL: provenance-sealed builds are create-only; move the partial or "
+            f"completed artifacts before retrying: {rendered}"
+        )
 
     n_hold = sum(1 for s in states if s["holdout"])
     print(f"action states to score: {len(states)} ({n_hold} held out at session level) "
@@ -387,6 +959,7 @@ async def main():
     sem_s = asyncio.Semaphore(PER_EP_CONCURRENCY)
     sem_t = asyncio.Semaphore(PER_EP_CONCURRENCY)
     counts = defaultdict(int)
+    excluded_states: list[dict] = []
     diag = defaultdict(lambda: [0.0, 0])
     n_ok = n_hold_done = 0
     n_masked_tokens = n_masked_spans = n_action_tokens = 0
@@ -407,12 +980,24 @@ async def main():
                          f"(student={'ok' if warm_s else 'FAIL'} @ {STUDENT_EP}, "
                          f"teacher={'ok' if warm_t else 'FAIL'} @ {TEACHER_EP}) — "
                          f"endpoint down or URL wrong; not starting the build.")
-        with open(rec_path, "a") as rf, open(hold_path, "a") as hf:
+        with open(rec_path, "x") as rf, open(hold_path, "x") as hf:
             for i in range(0, len(states), CHUNK):
                 chunk = states[i:i + CHUNK]
                 results = await asyncio.gather(
                     *(build_record(client, tok, st, sem_s, sem_t) for st in chunk))
-                for rec, status in results:
+                unexpected = [
+                    {**_state_identity(state), "status": status}
+                    for state, (_, status) in zip(chunk, results)
+                    if status not in {"ok", "ok_cf", "holdout", "overlong"}
+                ]
+                if unexpected:
+                    first = unexpected[0]
+                    raise RuntimeError(
+                        "record construction failed closed: "
+                        f"{first['status']} at {first['source_log']} "
+                        f"turn {first['turn_idx']}"
+                    )
+                for st, (rec, status) in zip(chunk, results):
                     counts[status] += 1
                     if status in ("ok", "ok_cf"):
                         rf.write(json.dumps(rec) + "\n")
@@ -426,20 +1011,148 @@ async def main():
                     elif status == "holdout":
                         hf.write(json.dumps(rec) + "\n")
                         n_hold_done += 1
+                    else:
+                        excluded_states.append({
+                            **_state_identity(st),
+                            "status": status,
+                        })
                 rf.flush(); hf.flush()
                 print(f"  {min(i + CHUNK, len(states))}/{len(states)}  {dict(counts)}", flush=True)
 
     print(f"\n=== build done: {dict(counts)} ===")
     print(f"train records appended: {n_ok} -> {rec_path}")
     print(f"heldout appended:       {n_hold_done} -> {hold_path}")
+    if n_ok == 0:
+        raise RuntimeError("record build produced no training records")
     if n_action_tokens:
         print(f"malformed-param spans masked: {n_masked_spans} spans / "
               f"{n_masked_tokens} tokens ({n_masked_tokens/n_action_tokens*100:.2f}% of action tokens)")
     _print_diagnostic(diag)
-    vol_dst = f"/opd_2b/{out_dir.name}/records.jsonl"
-    print(f"\nNext: modal volume put kaetram-model-vol {rec_path.relative_to(REPO)} "
-          f"{vol_dst} --force")
+    _verify_source_snapshot(source_inventory)
+    async with httpx.AsyncClient() as identity_client:
+        ending_student, ending_teacher = await asyncio.gather(
+            _verified_endpoint_attestation(
+                identity_client,
+                STUDENT_EP,
+                expected_deployment_id=args.student_artifact_id,
+                expected_checkpoint_sha256=args.student_artifact_sha256,
+            ),
+            _verified_endpoint_attestation(
+                identity_client,
+                TEACHER_EP,
+                expected_deployment_id=args.teacher_artifact_id,
+                expected_checkpoint_sha256=args.teacher_artifact_sha256,
+            ),
+        )
+    if ending_student != student_attestation or ending_teacher != teacher_attestation:
+        raise RuntimeError("scoring endpoint identity changed during the build")
+    _verify_build_source_snapshot(build_sources)
+    if (
+        sha256_path(tokenizer_file) != tokenizer_sha256
+        or _directory_digest(tokenizer_path) != tokenizer_snapshot_sha256
+    ):
+        raise RuntimeError("tokenizer snapshot changed during the build")
+    # Root receipts are emitted only here, from the two files opened with
+    # exclusive mode by this invocation. There is intentionally no reusable
+    # post-hoc attestor that could relabel arbitrary existing records.
+    manifest = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "builder": BUILDER_RELATIVE_PATH,
+        "script_sha256": build_sources[BUILDER_RELATIVE_PATH],
+        "source_runs": list(args.run_ids),
+        "source_logs": source_inventory,
+        "source_sha256": canonical_sha256(source_inventory),
+        "output": str(rec_path.resolve()),
+        "output_sha256": sha256_path(rec_path),
+        "heldout": str(hold_path.resolve()),
+        "heldout_sha256": sha256_path(hold_path),
+        "record_schema_version": OPD_TRAIN_RECORD_SCHEMA_VERSION,
+        "record_schema_sha256": OPD_TRAIN_RECORD_SCHEMA_SHA256,
+        "record_schema_validator_sha256": OPD_TRAIN_RECORD_VALIDATOR_SHA256,
+        "n_records": n_ok,
+        "n_heldout": n_hold_done,
+        "candidate_states": len(states),
+        "candidate_states_sha256": canonical_sha256(candidate_state_identities),
+        "status_counts": dict(sorted(counts.items())),
+        "excluded_states": excluded_states,
+        "excluded_states_sha256": canonical_sha256(excluded_states),
+        "build_sources": build_sources,
+        "parameters": {
+            "student_endpoint_attestation": student_attestation,
+            "teacher_endpoint_attestation": teacher_attestation,
+            "tokenizer_sha256": tokenizer_sha256,
+            "tokenizer_snapshot_sha256": tokenizer_snapshot_sha256,
+            "runtime_versions": {
+                "python": platform.python_version(),
+                "httpx": importlib.metadata.version("httpx"),
+                "transformers": importlib.metadata.version("transformers"),
+                "tokenizers": importlib.metadata.version("tokenizers"),
+            },
+            "max_history_messages": MAX_HIST_MSGS,
+            "max_sequence_tokens": MAX_SEQ,
+            "kl_coefficient": KL_COEF,
+            "holdout_every": HOLDOUT_EVERY,
+            "early_weight": EARLY_WEIGHT,
+            "malformed_parameter_pattern": MALFORMED_PARAM_RE.pattern,
+            "counterfactual_grading": True,
+            "limit": args.limit,
+        },
+    }
+    payload = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w+b",
+            dir=manifest_path.parent,
+            prefix=f".{manifest_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _publish_create_only(temporary, manifest_path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    print(f"sealed build receipt: {manifest_path} ({manifest['output_sha256']})")
+    print(_training_handoff_text(rec_path, manifest_path))
+
+
+def _launch_frozen_entrypoint() -> int:
+    """Run the actual builder in a clean interpreter from a frozen source tree."""
+    if _FROZEN_MARKER is not None:
+        asyncio.run(main())
+        return 0
+    with tempfile.TemporaryDirectory(
+        prefix="kaetram-opd-build-inputs-"
+    ) as directory:
+        snapshot_root = Path(directory).resolve()
+        build_sources = _snapshot_build_sources()
+        _materialize_build_inputs(build_sources, snapshot_root)
+        marker = {
+            "schema_version": FROZEN_MARKER_SCHEMA,
+            "source_repo": str(REPO),
+            "build_sources_sha256": canonical_sha256(build_sources),
+        }
+        marker_path = snapshot_root / FROZEN_MARKER_NAME
+        with marker_path.open("x", encoding="utf-8") as handle:
+            json.dump(marker, handle, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(snapshot_root / "scripts/opd/opd_2b_data.py"),
+                *sys.argv[1:],
+            ],
+            env=os.environ.copy(),
+            check=False,
+        )
+        return completed.returncode
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(_launch_frozen_entrypoint())

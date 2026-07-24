@@ -1,0 +1,442 @@
+{
+  "lock_sha256": "8117a75f24b50625469ffff26384584ad99526bf687a79a8b11ad7612cf62a32",
+  "schema_version": "kaetram-hf-snapshot-lock-v1",
+  "snapshots": {
+    "base_2b": {
+      "file_count": 13,
+      "files": [
+        {
+          "git_blob_sha1": "52373fe24473b1aa44333d318f578ae6bf04b49b",
+          "path": ".gitattributes",
+          "size_bytes": 1570
+        },
+        {
+          "git_blob_sha1": "f938136e3adacfd92be087f6e113b5d6d97f678f",
+          "path": "LICENSE",
+          "size_bytes": 11544
+        },
+        {
+          "git_blob_sha1": "2efa49d346c547ea81cd3d1310f414df25934f45",
+          "path": "README.md",
+          "size_bytes": 62814
+        },
+        {
+          "git_blob_sha1": "0ef09f214eaa6d9bca297988afc1454b5827b2c7",
+          "path": "chat_template.jinja",
+          "size_bytes": 7755
+        },
+        {
+          "git_blob_sha1": "d30a15be1bbfd610f58ad80f1fbeb6778f58a80f",
+          "path": "config.json",
+          "size_bytes": 2908
+        },
+        {
+          "git_blob_sha1": "a494e019ca1502219fd0128658b979e5f05ae8e8",
+          "path": "merges.txt",
+          "size_bytes": 3353259
+        },
+        {
+          "path": "model.safetensors-00001-of-00001.safetensors",
+          "sha256": "aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1",
+          "size_bytes": 4548221488
+        },
+        {
+          "git_blob_sha1": "69a41758e1138259916d08b99b56fada441fd502",
+          "path": "model.safetensors.index.json",
+          "size_bytes": 64460
+        },
+        {
+          "git_blob_sha1": "2ea84a437d448ff71b08df68fdd949d5cc4ebb64",
+          "path": "preprocessor_config.json",
+          "size_bytes": 390
+        },
+        {
+          "path": "tokenizer.json",
+          "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+          "size_bytes": 12807982
+        },
+        {
+          "git_blob_sha1": "fae3ce993e07c092ad024dde45e592379fde91bb",
+          "path": "tokenizer_config.json",
+          "size_bytes": 16709
+        },
+        {
+          "git_blob_sha1": "3ba673a5ad7d4d13f54155ecd38b2a94a6dac8fe",
+          "path": "video_preprocessor_config.json",
+          "size_bytes": 385
+        },
+        {
+          "git_blob_sha1": "0aa0ce0658d60ac4a5d609f4eadb0e8e43514176",
+          "path": "vocab.json",
+          "size_bytes": 6722759
+        }
+      ],
+      "repo_id": "Qwen/Qwen3.5-2B",
+      "repo_type": "model",
+      "revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+      "size_bytes": 4571274023
+    },
+    "opd_r1_2b": {
+      "file_count": 17,
+      "files": [
+        {
+          "git_blob_sha1": "52373fe24473b1aa44333d318f578ae6bf04b49b",
+          "path": ".gitattributes",
+          "size_bytes": 1570
+        },
+        {
+          "git_blob_sha1": "c050c810bb23868bf63170700a980c3082f085de",
+          "path": "NOTICE",
+          "size_bytes": 1195
+        },
+        {
+          "git_blob_sha1": "1387f5142cc1e8d17092de05a3ad538254a80b67",
+          "path": "README.md",
+          "size_bytes": 3842
+        },
+        {
+          "git_blob_sha1": "393b57dda88b069adfe65fd52627c795f29d40da",
+          "path": "adapter/README.md",
+          "size_bytes": 528
+        },
+        {
+          "git_blob_sha1": "44f3820f196a7ad8259c50176d456fa0ef4f1352",
+          "path": "adapter/adapter_config.json",
+          "size_bytes": 1247
+        },
+        {
+          "path": "adapter/adapter_model.safetensors",
+          "sha256": "c1b6915aa54d8b4ca40f5b53cd8177342a7a19d013bc56201964a547be074ee0",
+          "size_bytes": 174616272
+        },
+        {
+          "git_blob_sha1": "a3e24fb4e1988ff63b2e331da55d7bb2c3780f30",
+          "path": "adapter/chat_template.jinja",
+          "size_bytes": 8118
+        },
+        {
+          "git_blob_sha1": "8af8110fe33fb48d1a0aefafb83005347beda96a",
+          "path": "adapter/processor_config.json",
+          "size_bytes": 1296
+        },
+        {
+          "path": "adapter/tokenizer.json",
+          "sha256": "87a7830d63fcf43bf241c3c5242e96e62dd3fdc29224ca26fed8ea333db72de4",
+          "size_bytes": 19989343
+        },
+        {
+          "git_blob_sha1": "702d49e15b1fe848c3f4962a0144b5b50f111c2d",
+          "path": "adapter/tokenizer_config.json",
+          "size_bytes": 7161
+        },
+        {
+          "git_blob_sha1": "a3e24fb4e1988ff63b2e331da55d7bb2c3780f30",
+          "path": "chat_template.jinja",
+          "size_bytes": 8118
+        },
+        {
+          "git_blob_sha1": "bcda9e90cc2e64aa6210b5c9a1122291c9e8a659",
+          "path": "config.json",
+          "size_bytes": 3226
+        },
+        {
+          "path": "model.safetensors-00001-of-00001.safetensors",
+          "sha256": "d3b7e02bb07c48f1832edba43bbcba85480e44e70c21b0d4404f89f3d835ac82",
+          "size_bytes": 4548221488
+        },
+        {
+          "git_blob_sha1": "69a41758e1138259916d08b99b56fada441fd502",
+          "path": "model.safetensors.index.json",
+          "size_bytes": 64460
+        },
+        {
+          "git_blob_sha1": "8af8110fe33fb48d1a0aefafb83005347beda96a",
+          "path": "processor_config.json",
+          "size_bytes": 1296
+        },
+        {
+          "path": "tokenizer.json",
+          "sha256": "87a7830d63fcf43bf241c3c5242e96e62dd3fdc29224ca26fed8ea333db72de4",
+          "size_bytes": 19989343
+        },
+        {
+          "git_blob_sha1": "269ded6bb89819b9436207727cf5042b7e09103f",
+          "path": "tokenizer_config.json",
+          "size_bytes": 15560
+        }
+      ],
+      "repo_id": "patnir41/kaetram-qwen3.5-2b-opd-r1",
+      "repo_type": "model",
+      "revision": "d24e0c216153ce4ce4949d66ba13e05211cc3a69",
+      "size_bytes": 4762934063
+    },
+    "opd_r2_2b": {
+      "file_count": 17,
+      "files": [
+        {
+          "git_blob_sha1": "52373fe24473b1aa44333d318f578ae6bf04b49b",
+          "path": ".gitattributes",
+          "size_bytes": 1570
+        },
+        {
+          "git_blob_sha1": "c050c810bb23868bf63170700a980c3082f085de",
+          "path": "NOTICE",
+          "size_bytes": 1195
+        },
+        {
+          "git_blob_sha1": "d55b2e4ade3ce1ca4ec59121d0abd7bb29bc4cb0",
+          "path": "README.md",
+          "size_bytes": 3462
+        },
+        {
+          "git_blob_sha1": "d35205692c940783cb9d78490de7e836de21d04a",
+          "path": "adapter/README.md",
+          "size_bytes": 566
+        },
+        {
+          "git_blob_sha1": "0af1f4e9fc447c1c5f71c450682edfc4fe2502c0",
+          "path": "adapter/adapter_config.json",
+          "size_bytes": 1266
+        },
+        {
+          "path": "adapter/adapter_model.safetensors",
+          "sha256": "32080de7ebfd4b0325b2f8e3b587342cc397c7e8a2e7806601fed187b6366853",
+          "size_bytes": 174616272
+        },
+        {
+          "git_blob_sha1": "a3e24fb4e1988ff63b2e331da55d7bb2c3780f30",
+          "path": "adapter/chat_template.jinja",
+          "size_bytes": 8118
+        },
+        {
+          "git_blob_sha1": "8af8110fe33fb48d1a0aefafb83005347beda96a",
+          "path": "adapter/processor_config.json",
+          "size_bytes": 1296
+        },
+        {
+          "path": "adapter/tokenizer.json",
+          "sha256": "87a7830d63fcf43bf241c3c5242e96e62dd3fdc29224ca26fed8ea333db72de4",
+          "size_bytes": 19989343
+        },
+        {
+          "git_blob_sha1": "35e403ec0858e4de70b75648e78121ad28278dc4",
+          "path": "adapter/tokenizer_config.json",
+          "size_bytes": 7160
+        },
+        {
+          "git_blob_sha1": "a3e24fb4e1988ff63b2e331da55d7bb2c3780f30",
+          "path": "chat_template.jinja",
+          "size_bytes": 8118
+        },
+        {
+          "git_blob_sha1": "2c14e3c10db7cd3540e3e0c0ac0eb9618197dad2",
+          "path": "config.json",
+          "size_bytes": 3253
+        },
+        {
+          "path": "model.safetensors-00001-of-00001.safetensors",
+          "sha256": "636aa92a16ee63965d5211625ba32c0524eb90da87f6b4727ee1f057e0486104",
+          "size_bytes": 4548221488
+        },
+        {
+          "git_blob_sha1": "69a41758e1138259916d08b99b56fada441fd502",
+          "path": "model.safetensors.index.json",
+          "size_bytes": 64460
+        },
+        {
+          "git_blob_sha1": "8af8110fe33fb48d1a0aefafb83005347beda96a",
+          "path": "processor_config.json",
+          "size_bytes": 1296
+        },
+        {
+          "path": "tokenizer.json",
+          "sha256": "87a7830d63fcf43bf241c3c5242e96e62dd3fdc29224ca26fed8ea333db72de4",
+          "size_bytes": 19989343
+        },
+        {
+          "git_blob_sha1": "f69f9cb9a0914a56b07e3ef4314fdfba9490ca8e",
+          "path": "tokenizer_config.json",
+          "size_bytes": 15559
+        }
+      ],
+      "repo_id": "patnir41/kaetram-qwen3.5-2b-opd-r2",
+      "repo_type": "model",
+      "revision": "2b51ca6d31869368fad562c03d786e21de60899c",
+      "size_bytes": 4762933765
+    },
+    "opd_r3_2b": {
+      "file_count": 17,
+      "files": [
+        {
+          "git_blob_sha1": "52373fe24473b1aa44333d318f578ae6bf04b49b",
+          "path": ".gitattributes",
+          "size_bytes": 1570
+        },
+        {
+          "git_blob_sha1": "c050c810bb23868bf63170700a980c3082f085de",
+          "path": "NOTICE",
+          "size_bytes": 1195
+        },
+        {
+          "git_blob_sha1": "e30f069f9bc86fff6f2f4ae3289f957801a6fca9",
+          "path": "README.md",
+          "size_bytes": 3666
+        },
+        {
+          "git_blob_sha1": "484b8a6385b1616a00228aaa2fdac777d04d9725",
+          "path": "adapter/README.md",
+          "size_bytes": 566
+        },
+        {
+          "git_blob_sha1": "6124c6d3375e4b4ef21976192c332df10ad88d45",
+          "path": "adapter/adapter_config.json",
+          "size_bytes": 1266
+        },
+        {
+          "path": "adapter/adapter_model.safetensors",
+          "sha256": "583c06ef54199837597002fbde15d41346955274403eb8e0495e11e9df564b61",
+          "size_bytes": 174616272
+        },
+        {
+          "git_blob_sha1": "a3e24fb4e1988ff63b2e331da55d7bb2c3780f30",
+          "path": "adapter/chat_template.jinja",
+          "size_bytes": 8118
+        },
+        {
+          "git_blob_sha1": "8af8110fe33fb48d1a0aefafb83005347beda96a",
+          "path": "adapter/processor_config.json",
+          "size_bytes": 1296
+        },
+        {
+          "path": "adapter/tokenizer.json",
+          "sha256": "87a7830d63fcf43bf241c3c5242e96e62dd3fdc29224ca26fed8ea333db72de4",
+          "size_bytes": 19989343
+        },
+        {
+          "git_blob_sha1": "35e403ec0858e4de70b75648e78121ad28278dc4",
+          "path": "adapter/tokenizer_config.json",
+          "size_bytes": 7160
+        },
+        {
+          "git_blob_sha1": "a3e24fb4e1988ff63b2e331da55d7bb2c3780f30",
+          "path": "chat_template.jinja",
+          "size_bytes": 8118
+        },
+        {
+          "git_blob_sha1": "d67acd7da52c9c8d3d98ddd86a4b3b1a8316d28f",
+          "path": "config.json",
+          "size_bytes": 3253
+        },
+        {
+          "path": "model.safetensors-00001-of-00001.safetensors",
+          "sha256": "c4df1ea2fda9253d595ff4a2068c72dd4de173241ab93cc1ee0d5dc42e302873",
+          "size_bytes": 4548221488
+        },
+        {
+          "git_blob_sha1": "69a41758e1138259916d08b99b56fada441fd502",
+          "path": "model.safetensors.index.json",
+          "size_bytes": 64460
+        },
+        {
+          "git_blob_sha1": "8af8110fe33fb48d1a0aefafb83005347beda96a",
+          "path": "processor_config.json",
+          "size_bytes": 1296
+        },
+        {
+          "path": "tokenizer.json",
+          "sha256": "87a7830d63fcf43bf241c3c5242e96e62dd3fdc29224ca26fed8ea333db72de4",
+          "size_bytes": 19989343
+        },
+        {
+          "git_blob_sha1": "f69f9cb9a0914a56b07e3ef4314fdfba9490ca8e",
+          "path": "tokenizer_config.json",
+          "size_bytes": 15559
+        }
+      ],
+      "repo_id": "patnir41/kaetram-qwen3.5-2b-opd-r3",
+      "repo_type": "model",
+      "revision": "c26ae0691bd16788102d4231e598c7d16c90f3e0",
+      "size_bytes": 4762933969
+    },
+    "teacher_4b": {
+      "file_count": 14,
+      "files": [
+        {
+          "git_blob_sha1": "52373fe24473b1aa44333d318f578ae6bf04b49b",
+          "path": ".gitattributes",
+          "size_bytes": 1570
+        },
+        {
+          "git_blob_sha1": "f938136e3adacfd92be087f6e113b5d6d97f678f",
+          "path": "LICENSE",
+          "size_bytes": 11544
+        },
+        {
+          "git_blob_sha1": "7950a3aadf378cd13758097bc52f0ed849a59007",
+          "path": "README.md",
+          "size_bytes": 77661
+        },
+        {
+          "git_blob_sha1": "a585dec894e63da457d9440ec6aa7caa16d20860",
+          "path": "chat_template.jinja",
+          "size_bytes": 7756
+        },
+        {
+          "git_blob_sha1": "557d961b205319c6a7da5f757f565b69b3967b7d",
+          "path": "config.json",
+          "size_bytes": 3161
+        },
+        {
+          "git_blob_sha1": "a494e019ca1502219fd0128658b979e5f05ae8e8",
+          "path": "merges.txt",
+          "size_bytes": 3353259
+        },
+        {
+          "path": "model.safetensors-00001-of-00002.safetensors",
+          "sha256": "26a93f066e1916adb13453dae5a0c707c0fbc71299ed98779571a907b8e74c61",
+          "size_bytes": 5329398688
+        },
+        {
+          "path": "model.safetensors-00002-of-00002.safetensors",
+          "sha256": "cb544bd9bfae93dc59b0f22b292f5933573854a7f9b97835c67060d7d910e188",
+          "size_bytes": 3990429408
+        },
+        {
+          "git_blob_sha1": "fddda6039f7c1d17260c9e923b8a72fd025d9a86",
+          "path": "model.safetensors.index.json",
+          "size_bytes": 76196
+        },
+        {
+          "git_blob_sha1": "2ea84a437d448ff71b08df68fdd949d5cc4ebb64",
+          "path": "preprocessor_config.json",
+          "size_bytes": 390
+        },
+        {
+          "path": "tokenizer.json",
+          "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+          "size_bytes": 12807982
+        },
+        {
+          "git_blob_sha1": "eda48d3e75a8e59a8479ee4ec8b37f76e711d9c1",
+          "path": "tokenizer_config.json",
+          "size_bytes": 16710
+        },
+        {
+          "git_blob_sha1": "3ba673a5ad7d4d13f54155ecd38b2a94a6dac8fe",
+          "path": "video_preprocessor_config.json",
+          "size_bytes": 385
+        },
+        {
+          "git_blob_sha1": "0aa0ce0658d60ac4a5d609f4eadb0e8e43514176",
+          "path": "vocab.json",
+          "size_bytes": 6722759
+        }
+      ],
+      "repo_id": "Qwen/Qwen3.5-4B",
+      "repo_type": "model",
+      "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+      "size_bytes": 9342907469
+    }
+  },
+  "source": "https://huggingface.co"
+}

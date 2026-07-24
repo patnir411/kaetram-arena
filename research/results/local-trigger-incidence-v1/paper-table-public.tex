@@ -1,0 +1,33 @@
+% Deterministically rendered from analysis/analysis-summary.json.
+\begin{table*}[t]
+\centering
+\small
+\caption{Recovery-opportunity incidence on the registered 20-state
+finite grid. Five nominal request seeds produced identical semantic
+responses within every state--condition group, so cells collapse
+duplicates and show opportunity states/state outputs (rate).
+Contrasts are paired rate differences in percentage points; $+/-/0$
+counts the states with positive, negative, or zero effects. Descriptive
+fixed-grid results only.}
+\label{tab:trigger-incidence}
+\begin{tabular}{lrrrr}
+\toprule
+Weights & Python / none & Python / native & Canonical / none & Canonical / native \\
+\midrule
+Base & 6/20 (30.0\%) & 10/20 (50.0\%) & 4/20 (20.0\%) & 12/20 (60.0\%) \\
+Round 2 & 5/20 (25.0\%) & 11/20 (55.0\%) & 5/20 (25.0\%) & 8/20 (40.0\%) \\
+Round 3 & 7/20 (35.0\%) & 7/20 (35.0\%) & 6/20 (30.0\%) & 12/20 (60.0\%) \\
+\bottomrule
+\end{tabular}
+
+\vspace{3pt}
+\begin{tabular}{lrrr}
+\toprule
+Weights & Native schema & Canonical docs & Interaction \\
+\midrule
+Base & +30.0 (9/0/11) & +0.0 (3/3/14) & +20.0 (5/2/13) \\
+Round 2 & +22.5 (8/0/12) & -7.5 (3/5/12) & -15.0 (2/5/13) \\
+Round 3 & +15.0 (5/1/14) & +10.0 (4/1/15) & +30.0 (5/2/13) \\
+\bottomrule
+\end{tabular}
+\end{table*}
