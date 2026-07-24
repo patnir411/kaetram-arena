@@ -218,6 +218,10 @@ The dashboard at `http://localhost:8080` includes a **Tests tab** for launching 
 - Run history is persisted; per-test status pills update live via the dashboard WebSocket.
 - Terminal-launched pytest runs also surface here via the `/ingest/test_event` CLI shim.
 
+For the clean-clone, CPU-only unit-test contract, use the pinned bootstrap in
+[`docs/local-unit-tests.md`](docs/local-unit-tests.md). It intentionally excludes
+GPU/model, live endpoint, generated-dataset, and browser/game-server reproduction.
+
 Backend lives in `dashboard/test_runner.py`; full reference in `dashboard/DASHBOARD.md`.
 
 ## Slash commands
