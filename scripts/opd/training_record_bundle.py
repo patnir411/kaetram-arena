@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import random
 from pathlib import Path
 
@@ -198,6 +199,25 @@ def load_verified_training_records(
     records = Path(records_path)
     receipt = Path(manifest_path) if str(manifest_path) else None
     _require(records.is_file(), f"records path is not a regular file: {records}")
+    if receipt is None and os.environ.get("KAETRAM_ALLOW_UNRECEIPTED") == "1":
+        # Escape hatch for pre-receipt corpora (June/July mechanism arms) and
+        # knob-override builds the receipted schema does not describe yet.
+        # Per-record schema validation still applies; only the transformation
+        # receipt is waived, and the run must be labeled legacy_unattested.
+        line = "=" * 78
+        print(line, flush=True)
+        print(
+            "UNRECEIPTED LEGACY MODE (KAETRAM_ALLOW_UNRECEIPTED=1): loading records "
+            "without a transformation receipt.",
+            flush=True,
+        )
+        print(
+            "Per-record schema validation still applies; label every artifact from "
+            "this run provenance=legacy_unattested.",
+            flush=True,
+        )
+        print(line, flush=True)
+        return _load_records(records)
     _require(receipt is not None, "--records-manifest-path is required")
     _require(receipt.is_file(), f"records manifest is not a regular file: {receipt}")
     try:

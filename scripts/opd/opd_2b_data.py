@@ -580,7 +580,11 @@ def collect_action_states(
     return states
 
 
+_LEGACY_UNRECEIPTED = os.environ.get("KAETRAM_ALLOW_UNRECEIPTED") == "1"
+COUNTERFACTUAL_GRADING_ENABLED = not os.environ.get("OPD_BUILD_NO_CF")
+
 _BUILD_TOOLS = None
+_BUILD_TOOLS_RECEIPT = None
 if os.environ.get("OPD_BUILD_TOOLS_JSON"):
     # Serving-context parity (Seam-1 repair): rollouts are generated and evals
     # served WITH the native tools= block (play_qwen sends it; the chat template
@@ -589,9 +593,20 @@ if os.environ.get("OPD_BUILD_TOOLS_JSON"):
     # context missing that reminder — the environment where even base leaks
     # Python-call forms at 7–9% (defect-origin probe, 2026-07-16). Passing the
     # snapshot restores byte-parity between the gradient context and serving.
-    with open(os.environ["OPD_BUILD_TOOLS_JSON"]) as _f:
+    _tools_path = Path(os.environ["OPD_BUILD_TOOLS_JSON"])
+    with open(_tools_path) as _f:
         _d = json.load(_f)
         _BUILD_TOOLS = _d if isinstance(_d, list) else _d.get("tools")
+    if not isinstance(_BUILD_TOOLS, list) or not _BUILD_TOOLS:
+        raise RuntimeError(
+            "OPD_BUILD_TOOLS_JSON must be a JSON list of tool specs or an object "
+            "with a non-empty 'tools' list"
+        )
+    _BUILD_TOOLS_RECEIPT = {
+        "path": str(_tools_path.resolve()),
+        "sha256": hashlib.sha256(_tools_path.read_bytes()).hexdigest(),
+        "n_tools": len(_BUILD_TOOLS),
+    }
     print(f"serving-context parity ON: rendering with {len(_BUILD_TOOLS)} tool specs")
 
 
@@ -640,7 +655,7 @@ async def build_record(client, tok, st, sem_s, sem_t):
     # counterfactual grading) — required for arm parity in ablation builds
     # whose comparison arm was built pre-round-3 (e.g. the ±seeding ablation
     # against the round-2 corpus).
-    counterfactual = (not os.environ.get("OPD_BUILD_NO_CF")) and is_malformed(st["emission"])
+    counterfactual = COUNTERFACTUAL_GRADING_ENABLED and is_malformed(st["emission"])
     if counterfactual:
         cf_msgs = [{**st["messages"][0],
                     "content": docify_system_prompt(st["messages"][0]["content"])}] \
@@ -856,10 +871,10 @@ async def main():
     ap.add_argument("--run-ids", nargs="+", default=["run_20260610_140358"])
     ap.add_argument("--out-dir", default="dataset/opd_2b/round2")
     ap.add_argument("--limit", type=int, default=0, help="cap states (0 = all; for smoke tests)")
-    ap.add_argument("--student-artifact-id", required=True)
-    ap.add_argument("--student-artifact-sha256", required=True)
-    ap.add_argument("--teacher-artifact-id", required=True)
-    ap.add_argument("--teacher-artifact-sha256", required=True)
+    ap.add_argument("--student-artifact-id", required=not _LEGACY_UNRECEIPTED)
+    ap.add_argument("--student-artifact-sha256", required=not _LEGACY_UNRECEIPTED)
+    ap.add_argument("--teacher-artifact-id", required=not _LEGACY_UNRECEIPTED)
+    ap.add_argument("--teacher-artifact-sha256", required=not _LEGACY_UNRECEIPTED)
     ap.add_argument(
         "--tokenizer-path",
         required=True,
@@ -877,12 +892,28 @@ async def main():
         raise RuntimeError("frozen OPD source inventory does not match its launcher")
     _verify_build_source_snapshot(build_sources)
     _load_frozen_local_dependencies(snapshot_root)
+    knob_overrides = bool(
+        _BUILD_TOOLS_RECEIPT
+        or not COUNTERFACTUAL_GRADING_ENABLED
+        or CHUNK != 200
+    )
+    if knob_overrides and not _LEGACY_UNRECEIPTED:
+        sys.exit(
+            "FATAL: OPD_BUILD_* overrides (TOOLS_JSON / NO_CF / CHUNK) are not "
+            "described by the receipted manifest schema yet; run knob builds with "
+            "KAETRAM_ALLOW_UNRECEIPTED=1 so the receipt is honestly labeled "
+            "legacy_unattested (schema extension proposed upstream)."
+        )
     for name in ("student_artifact_sha256", "teacher_artifact_sha256"):
         value = getattr(args, name)
+        if value is None and _LEGACY_UNRECEIPTED:
+            continue
         if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
             ap.error(f"--{name.replace('_', '-')} must be a lowercase SHA-256")
     for name in ("student_artifact_id", "teacher_artifact_id"):
         value = getattr(args, name)
+        if value is None and _LEGACY_UNRECEIPTED:
+            continue
         if not value.strip() or "://" in value or any(char.isspace() for char in value):
             ap.error(
                 f"--{name.replace('_', '-')} must be a non-URL artifact identifier"
@@ -893,21 +924,32 @@ async def main():
         snapshot_root=snapshot_root,
     )
     _verify_source_snapshot(source_inventory)
-    async with httpx.AsyncClient() as identity_client:
-        student_attestation, teacher_attestation = await asyncio.gather(
-            _verified_endpoint_attestation(
-                identity_client,
-                STUDENT_EP,
-                expected_deployment_id=args.student_artifact_id,
-                expected_checkpoint_sha256=args.student_artifact_sha256,
-            ),
-            _verified_endpoint_attestation(
-                identity_client,
-                TEACHER_EP,
-                expected_deployment_id=args.teacher_artifact_id,
-                expected_checkpoint_sha256=args.teacher_artifact_sha256,
-            ),
+    if _LEGACY_UNRECEIPTED and (
+        args.student_artifact_id is None or args.teacher_artifact_id is None
+    ):
+        print(
+            "UNRECEIPTED LEGACY MODE: skipping endpoint identity attestation; the "
+            "build receipt is labeled legacy_unattested.",
+            flush=True,
         )
+        student_attestation = {"mode": "legacy_unattested"}
+        teacher_attestation = {"mode": "legacy_unattested"}
+    else:
+        async with httpx.AsyncClient() as identity_client:
+            student_attestation, teacher_attestation = await asyncio.gather(
+                _verified_endpoint_attestation(
+                    identity_client,
+                    STUDENT_EP,
+                    expected_deployment_id=args.student_artifact_id,
+                    expected_checkpoint_sha256=args.student_artifact_sha256,
+                ),
+                _verified_endpoint_attestation(
+                    identity_client,
+                    TEACHER_EP,
+                    expected_deployment_id=args.teacher_artifact_id,
+                    expected_checkpoint_sha256=args.teacher_artifact_sha256,
+                ),
+            )
     tokenizer_path = Path(args.tokenizer_path).resolve()
     tokenizer_file = tokenizer_path / "tokenizer.json"
     if not tokenizer_file.is_file():
@@ -924,7 +966,7 @@ async def main():
         != tokenizer_sha256
     ):
         raise RuntimeError("tokenizer.json changed while materializing its snapshot")
-    if (
+    if student_attestation.get("mode") != "legacy_unattested" and (
         student_attestation["tokenizer_sha256"] != tokenizer_sha256
         or teacher_attestation["tokenizer_sha256"] != tokenizer_sha256
     ):
@@ -1094,10 +1136,22 @@ async def main():
             "holdout_every": HOLDOUT_EVERY,
             "early_weight": EARLY_WEIGHT,
             "malformed_parameter_pattern": MALFORMED_PARAM_RE.pattern,
-            "counterfactual_grading": True,
+            "counterfactual_grading": COUNTERFACTUAL_GRADING_ENABLED,
             "limit": args.limit,
         },
     }
+    if _LEGACY_UNRECEIPTED:
+        # Honest receipt for knob/legacy builds: record what the build actually
+        # did. These receipts do not pass validate_receipt_chain (schema
+        # extension proposed upstream); the paired trainer path is
+        # KAETRAM_ALLOW_UNRECEIPTED=1, and all downstream artifacts must be
+        # labeled provenance=legacy_unattested.
+        manifest["build_overrides"] = {
+            "provenance": "legacy_unattested",
+            "counterfactual_grading": COUNTERFACTUAL_GRADING_ENABLED,
+            "build_tools_json": _BUILD_TOOLS_RECEIPT,
+            "build_chunk": CHUNK,
+        }
     payload = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
     temporary = None
     try:
