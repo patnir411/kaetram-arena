@@ -136,7 +136,7 @@ class _FakeMCP:
     async def connect(self):
         return []
 
-    def get_tool_definitions(self):
+    def get_tool_definitions(self, schema_source="live"):
         return []
 
     async def close(self):

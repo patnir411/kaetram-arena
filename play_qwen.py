@@ -30,6 +30,7 @@ Usage (solo dev):
 
 import argparse
 import asyncio
+import copy
 import json
 import os
 import re
@@ -41,7 +42,11 @@ from pathlib import Path
 
 from openai import OpenAI
 
-from tool_surface import MODEL_VISIBLE_TOOL_NAMES
+from tool_surface import (
+    MODEL_VISIBLE_TOOL_DEFINITIONS,
+    MODEL_VISIBLE_TOOL_NAMES,
+    validate_live_tool_compatibility,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts" / "opd"))
 from canonicalize import recover_tool_calls  # noqa: E402
@@ -119,8 +124,8 @@ class MCPClient:
         if hasattr(self, "_transport"):
             await self._transport.__aexit__(None, None, None)
 
-    def get_tool_definitions(self) -> list[dict]:
-        """Return OpenAI-format tool definitions for the chat API."""
+    def get_tool_definitions(self, schema_source: str = "live") -> list[dict]:
+        """Return live historical schemas or the versioned frozen snapshot."""
         defs = []
         for name, info in self._tools.items():
             if name not in MODEL_VISIBLE_TOOL_NAMES:
@@ -133,7 +138,14 @@ class MCPClient:
                     "parameters": info["inputSchema"],
                 },
             })
-        return defs
+        if schema_source == "live":
+            return defs
+        if schema_source == "canonical":
+            # Runtime handshake: canonical model-visible prose is allowed to
+            # differ, but execution-relevant live signatures must not.
+            validate_live_tool_compatibility(defs)
+            return copy.deepcopy(MODEL_VISIBLE_TOOL_DEFINITIONS)
+        raise ValueError(f"unknown tool schema source: {schema_source!r}")
 
     def get_tool_names(self) -> list[str]:
         """Return the curated model-visible tool list."""
@@ -721,6 +733,11 @@ async def run_agent(args):
     sandbox = Path(args.sandbox)
     state_dir = sandbox / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
+    tool_schema_source = getattr(
+        args,
+        "tool_schema_source",
+        os.environ.get("KAETRAM_TOOL_SCHEMA_SOURCE", "live"),
+    )
 
     # Resolve run_dir: explicit flag wins, else fall back to <sandbox>/logs
     # (back-compat for solo dev invocations).
@@ -736,6 +753,7 @@ async def run_agent(args):
         "username": os.environ.get("KAETRAM_USERNAME", "QwenCompletionist"),
         "auth_mode": "subscription",
         "max_budget_usd": None,
+        "tool_schema_source": tool_schema_source,
     }
     if args.harness_meta and os.path.isfile(args.harness_meta):
         try:
@@ -783,8 +801,10 @@ async def run_agent(args):
     #   - serve_modal_base.py honors them — Qwen3.5's native chat template
     #     renders the tool spec + the `<tool_call><function=...>...</function>
     #     </tool_call>` format reminder.
-    #   - serve_modal.py ignores them (training/serve parity for SFT).
-    tool_defs = mcp.get_tool_definitions()
+    #   - historical r10 serve_modal.py ignores them.
+    #   - native_tools_v1 checkpoints require the canonical frozen schema.
+    # The default remains live so published OPD/r10 evaluations do not change.
+    tool_defs = mcp.get_tool_definitions(tool_schema_source)
 
     # Load system prompt once.
     system_prompt = ""
@@ -803,6 +823,7 @@ async def run_agent(args):
     info(
         f"Warm-loop started: personality={args.personality}, "
         f"endpoint={args.endpoint}, "
+        f"tool_schema_source={tool_schema_source}, "
         f"max_duration_seconds={args.max_duration_seconds or 'unbounded'}"
     )
 
@@ -902,6 +923,15 @@ def main():
     parser.add_argument("--personality", default="completionist",
                         choices=["grinder", "completionist", "explorer_tinkerer", "none"],
                         help="Personality block (must match training); shell handles substitution.")
+    parser.add_argument(
+        "--tool-schema-source",
+        choices=["live", "canonical"],
+        default=os.environ.get("KAETRAM_TOOL_SCHEMA_SOURCE", "live"),
+        help=(
+            "Tool schema sent to the model: live preserves historical r10/OPD "
+            "behavior; canonical is required by native_tools_v1 checkpoints"
+        ),
+    )
     args = parser.parse_args()
     asyncio.run(run_agent(args))
 
