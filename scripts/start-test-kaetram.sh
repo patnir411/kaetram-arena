@@ -37,6 +37,21 @@ LOG_FILE="$LOG_DIR/gameserver_${TEST_PORT}.log"
 mkdir -p "$LOG_DIR"
 
 NODE_BIN="${KAETRAM_NODE_BINARY:-$(command -v node || true)}"
+node_is_v20() { [ -n "$1" ] && case "$("$1" --version 2>/dev/null)" in v20.*) true ;; *) false ;; esac; }
+if ! node_is_v20 "$NODE_BIN" && [ -z "${KAETRAM_NODE_BINARY:-}" ]; then
+  # PATH node isn't v20 (VM default is v24) — fall back to nvm's node 20 install.
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [ -s "$NVM_DIR/nvm.sh" ]; then
+    # shellcheck disable=SC1091
+    . "$NVM_DIR/nvm.sh" >/dev/null 2>&1 || true
+    nvm use 20 >/dev/null 2>&1 || true
+    NODE_BIN="$(command -v node || true)"
+  fi
+  if ! node_is_v20 "$NODE_BIN"; then
+    NVM_NODE_20="$(ls -d "$NVM_DIR"/versions/node/v20.*/bin/node 2>/dev/null | sort -V | tail -1)"
+    [ -n "$NVM_NODE_20" ] && NODE_BIN="$NVM_NODE_20"
+  fi
+fi
 if [ -z "$NODE_BIN" ]; then
   echo "ERROR: Node.js missing — put Node 20 on PATH or set KAETRAM_NODE_BINARY" >&2
   exit 1
