@@ -1,0 +1,352 @@
+{
+  "bundle_count": 27,
+  "bundles": [
+    {
+      "agent": "agent_0",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 897,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260711_065435",
+        "sha256": "e072ccc052f0ccf73423898f201cfe4a5f76b14ebe325ea6eb51a960de3dc24e",
+        "size_bytes": 15432486
+      },
+      "run_id": "run_20260711_065435"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 1167,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260711_065435",
+        "sha256": "0435c59e784b6e6fa171efbb2bfc0d91c7f0f7beb1b5c853e2a0fb443b0ca2d0",
+        "size_bytes": 18415054
+      },
+      "run_id": "run_20260711_065435"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 1329,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260711_065435",
+        "sha256": "38c9a25c0a3c40967561a53232126595512810b7f4dc9e39aefc9799839f95a3",
+        "size_bytes": 19865499
+      },
+      "run_id": "run_20260711_065435"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 501,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260711_153427",
+        "sha256": "b60468d64a306db4d63da8548aa592830d857ee193cda9263f42198d51450eab",
+        "size_bytes": 8949448
+      },
+      "run_id": "run_20260711_153427"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 471,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260711_153427",
+        "sha256": "9074aaa3eb72bb33fdc849999a568e368d331dc7d186ca60571815c7001dac0f",
+        "size_bytes": 8609855
+      },
+      "run_id": "run_20260711_153427"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 537,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260711_153427",
+        "sha256": "019be88a6992e2f4e39b7e3aa2b567e56492b7a77cf34d23c42239b369cc84f4",
+        "size_bytes": 8970546
+      },
+      "run_id": "run_20260711_153427"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 517,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260713_084905",
+        "sha256": "cc16bcd939bc8adce449aaa56401d99e426d51d5fd215d0780d82c68a52b7dd3",
+        "size_bytes": 8579315
+      },
+      "run_id": "run_20260713_084905"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 353,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260713_084905",
+        "sha256": "36b91ee07dcbf6b27b83ec9801110b5d1e9e30d27f019f4267fde2a667159043",
+        "size_bytes": 6316292
+      },
+      "run_id": "run_20260713_084905"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 585,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260713_084905",
+        "sha256": "638b74cbce20faed18652deff45ba67ef713e7149b7273f7f8ecce36829c771f",
+        "size_bytes": 8968033
+      },
+      "run_id": "run_20260713_084905"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 659,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260713_191230",
+        "sha256": "e5085ee24738053d0ef3f6db09bb669e2799f916c6117521c0388aa9d61e4880",
+        "size_bytes": 10037496
+      },
+      "run_id": "run_20260713_191230"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 761,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260713_191230",
+        "sha256": "ceaef48679855239e2a20b44a52522cb54dde668ab5a7ebeda12a096f0cb8f68",
+        "size_bytes": 11207427
+      },
+      "run_id": "run_20260713_191230"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 839,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260713_191230",
+        "sha256": "cb54c776445adc9f8b47f05482e90ca025007cfe0d4388fe5fd275f78991cca1",
+        "size_bytes": 12003735
+      },
+      "run_id": "run_20260713_191230"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 629,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260715_030342",
+        "sha256": "583425939020735a0e76bcf184ceeef87ad8a5028fcf8786bf606811fc071b52",
+        "size_bytes": 10473444
+      },
+      "run_id": "run_20260715_030342"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 699,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260715_030342",
+        "sha256": "bff0228920947c305c180877a9bea39f6028175092712d930a29a454ba0965b1",
+        "size_bytes": 11168938
+      },
+      "run_id": "run_20260715_030342"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 801,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260715_030342",
+        "sha256": "1b3e029732c57ba3e03d015e4782b79da4612378af4f00f8a1bc0495f2583774",
+        "size_bytes": 12179346
+      },
+      "run_id": "run_20260715_030342"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 525,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260715_090731",
+        "sha256": "d9e44e1a7fbf95f22c655c348c9162abca851b41301d860535aea38c4a17965f",
+        "size_bytes": 8132154
+      },
+      "run_id": "run_20260715_090731"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 579,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260715_090731",
+        "sha256": "921ce50cee746ca286fce32f91086b82488ffd9ce440bcadb4d4a39afb9ad880",
+        "size_bytes": 8580645
+      },
+      "run_id": "run_20260715_090731"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 641,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260715_090731",
+        "sha256": "42090c9e5ba8064ddc0a0c4aab0395fd9dece0a2e17435030d0085cc5dfde395",
+        "size_bytes": 9181495
+      },
+      "run_id": "run_20260715_090731"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 609,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260715_151045",
+        "sha256": "2d898ac044a00eb7727811ddab00afe3edcb436770e21d1d8843aa3d123b0c1d",
+        "size_bytes": 10289737
+      },
+      "run_id": "run_20260715_151045"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 763,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260715_151045",
+        "sha256": "e5687eedd2d7126dc59cf6553977d25c96d0eb7577af09661e36afa70afdda20",
+        "size_bytes": 12065105
+      },
+      "run_id": "run_20260715_151045"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 845,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260715_151045",
+        "sha256": "f956a8f4aa00f1a9211022ff6a8d4917f13f45d4b6f759791678c9f0ec9c196d",
+        "size_bytes": 12653593
+      },
+      "run_id": "run_20260715_151045"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 737,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260715_211431",
+        "sha256": "6918184bdf88255139b32293ad39d71fbaac0739e6d668bd350a13310479973a",
+        "size_bytes": 11629709
+      },
+      "run_id": "run_20260715_211431"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 757,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260715_211431",
+        "sha256": "4051e38b310693d163bdbe0a31ce0e5ff35e2e9f6e7dd16d5cbd49b0238375b7",
+        "size_bytes": 11539553
+      },
+      "run_id": "run_20260715_211431"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 807,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260715_211431",
+        "sha256": "211d42828fba41289ff9eca3b1e946865095156dbf3c9bd2fe523cb7390b2c98",
+        "size_bytes": 11873572
+      },
+      "run_id": "run_20260715_211431"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 683,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260716_215512",
+        "sha256": "22bba83caf8575c66b40e6e81bae6735369b148c9f762aaa2efb4b4d0fc9deaa",
+        "size_bytes": 10615940
+      },
+      "run_id": "run_20260716_215512"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 685,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260716_215512",
+        "sha256": "03a1653d1abe2641b8cbf224ad63602013c2fd07c2f511a66ed4249db26d5309",
+        "size_bytes": 10208098
+      },
+      "run_id": "run_20260716_215512"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "opd_july_mechanism",
+      "content": {
+        "file_count": 629,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260716_215512",
+        "sha256": "c867d28d105d6d946a1ed192b8592a625390ef30679c5b828b0e9db6199253d7",
+        "size_bytes": 9393308
+      },
+      "run_id": "run_20260716_215512"
+    }
+  ],
+  "claim_groups": {
+    "opd_july_mechanism": [
+      "run_20260711_065435",
+      "run_20260711_153427",
+      "run_20260713_084905",
+      "run_20260713_191230",
+      "run_20260715_030342",
+      "run_20260715_090731",
+      "run_20260715_151045",
+      "run_20260715_211431",
+      "run_20260716_215512"
+    ]
+  },
+  "complete": true,
+  "manifest_sha256": "6fa185370f920771f01d280611c3685734900a4e7fb58c0ecd2f42b82a8ec47d",
+  "missing": [],
+  "raw_root": "dataset/raw",
+  "schema_version": "kaetram-historical-run-digests-v1",
+  "source_manifest": {
+    "name": "SOURCE_SHA256SUMS",
+    "sha256": "d166fa1b6bf46cb908d32cb4e14d5ae8215f9377d2aae1b12532f1aa183741a8"
+  },
+  "source_manifest_verified_file_count": 19005
+}

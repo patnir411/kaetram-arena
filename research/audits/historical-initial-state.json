@@ -1,0 +1,95 @@
+{
+  "canonical_initial_state": {
+    "active_quests": [],
+    "equipment": {},
+    "finished_quests": [
+      "Miner's Quest"
+    ],
+    "indoors": false,
+    "inventory": [
+      {
+        "count": 1,
+        "key": "bronzeaxe",
+        "slot": 0
+      },
+      {
+        "count": 1,
+        "key": "knife",
+        "slot": 1
+      },
+      {
+        "count": 1,
+        "key": "fishingpole",
+        "slot": 2
+      },
+      {
+        "count": 1,
+        "key": "coppersword",
+        "slot": 3
+      },
+      {
+        "count": 1,
+        "key": "woodenbow",
+        "slot": 4
+      }
+    ],
+    "is_dead": false,
+    "pos": {
+      "x": 328,
+      "y": 892
+    },
+    "skills": {},
+    "stats": {
+      "hp": 69,
+      "level": 1,
+      "max_hp": 69,
+      "xp": 0
+    }
+  },
+  "complete": true,
+  "groups": {
+    "opd_2b": {
+      "anomalies": [],
+      "clean_agent_run_bundles": 15,
+      "complete": true,
+      "expected_agent_run_bundles": 15,
+      "run_ids": [
+        "run_20260608_185339",
+        "run_20260610_140358",
+        "run_20260612_044933",
+        "run_20260613_112422",
+        "run_20260613_214956"
+      ]
+    },
+    "r10_base": {
+      "anomalies": [],
+      "clean_agent_run_bundles": 12,
+      "complete": true,
+      "expected_agent_run_bundles": 12,
+      "run_ids": [
+        "run_20260510_173852",
+        "run_20260510_211339",
+        "run_20260519_223921",
+        "run_20260520_143530"
+      ]
+    },
+    "r10_sft": {
+      "anomalies": [],
+      "clean_agent_run_bundles": 9,
+      "complete": true,
+      "expected_agent_run_bundles": 9,
+      "run_ids": [
+        "run_20260520_014319",
+        "run_20260520_044433",
+        "run_20260520_173902"
+      ]
+    }
+  },
+  "interpretation": "This verifies the first model-visible action and player-state snapshot in each recovered bundle. It does not by itself prove the database reset command that produced that state.",
+  "raw_root": "dataset/raw",
+  "schema_version": "kaetram-historical-initial-state-audit-v1",
+  "source_manifest": {
+    "name": "SHA256SUMS",
+    "sha256": "e954237243b9928a6d8096fbabb279b52bc93f0adc977e300e76e7eea40ae85d"
+  }
+}

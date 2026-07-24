@@ -1,0 +1,766 @@
+{
+  "bundle_count": 60,
+  "bundles": [
+    {
+      "agent": "agent_0",
+      "claim_group": "opd_2b",
+      "content": {
+        "file_count": 347,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260608_185339",
+        "sha256": "784b4abf3c9a277eb969106e77bf44f3aba58e1cde5ba2b9b2e2e825ee29a178",
+        "size_bytes": 5925611
+      },
+      "run_id": "run_20260608_185339"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "opd_2b",
+      "content": {
+        "file_count": 517,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260608_185339",
+        "sha256": "d682535c9259f6ffb113c62252229a609f9af2be942119517c34f69c1513dc6a",
+        "size_bytes": 8038771
+      },
+      "run_id": "run_20260608_185339"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "opd_2b",
+      "content": {
+        "file_count": 507,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260608_185339",
+        "sha256": "656b4b37208e4f121ded3e8e6ad31e32b1bf6c1373cd26831c521130f0f9a45c",
+        "size_bytes": 7721457
+      },
+      "run_id": "run_20260608_185339"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "opd_2b",
+      "content": {
+        "file_count": 577,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260610_140358",
+        "sha256": "c7ea9a3e23f2a4a4a0fda094ba830c23892612f5f658ddc4ab50e28d113da871",
+        "size_bytes": 9134499
+      },
+      "run_id": "run_20260610_140358"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "opd_2b",
+      "content": {
+        "file_count": 603,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260610_140358",
+        "sha256": "d0e48c6c823bab4d7f9cfc39726385dddb0db699442dd873bb2d24e9f14debd1",
+        "size_bytes": 9291857
+      },
+      "run_id": "run_20260610_140358"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "opd_2b",
+      "content": {
+        "file_count": 671,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260610_140358",
+        "sha256": "a635b882eda9215a6b99048afc43638ea1c4d946a28eb9bf7d712be013bbaf52",
+        "size_bytes": 9895094
+      },
+      "run_id": "run_20260610_140358"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "opd_2b",
+      "content": {
+        "file_count": 565,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260612_044933",
+        "sha256": "c4d57eca36bb95dec8f5b452c3a8c0a871d4eff1e8fc22ec13f1a1c28d6b8ed6",
+        "size_bytes": 9075376
+      },
+      "run_id": "run_20260612_044933"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "opd_2b",
+      "content": {
+        "file_count": 627,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260612_044933",
+        "sha256": "048b54cb4b056b97b60c7bca122f5805b8f956fa5b70de1c7d066264757c9b62",
+        "size_bytes": 9416916
+      },
+      "run_id": "run_20260612_044933"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "opd_2b",
+      "content": {
+        "file_count": 665,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260612_044933",
+        "sha256": "aa9fac23feac96a648e93a1c92c8fdbc42c98d6ff0dd7ea8d993edc5e6d64391",
+        "size_bytes": 9735515
+      },
+      "run_id": "run_20260612_044933"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "opd_2b",
+      "content": {
+        "file_count": 667,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260613_112422",
+        "sha256": "db461ec0cacf4260e2147f8f1ac7307dc8076ca61e19ef2cef0f673381ea29d0",
+        "size_bytes": 10488713
+      },
+      "run_id": "run_20260613_112422"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "opd_2b",
+      "content": {
+        "file_count": 743,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260613_112422",
+        "sha256": "8656b63e35e0e4b82065d0bf79fe6a58f585d0e14f59022ce92508d5fb58a9e1",
+        "size_bytes": 11315366
+      },
+      "run_id": "run_20260613_112422"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "opd_2b",
+      "content": {
+        "file_count": 907,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260613_112422",
+        "sha256": "4b4f79d1a6598d1b3cb7f2f8f830932850b816a7d66177baa6145f72f221ac59",
+        "size_bytes": 12818808
+      },
+      "run_id": "run_20260613_112422"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "opd_2b",
+      "content": {
+        "file_count": 639,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260613_214956",
+        "sha256": "eaf6454947485abf891d05b0417558249cc17968eb489af5fae546877ce09367",
+        "size_bytes": 9822614
+      },
+      "run_id": "run_20260613_214956"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "opd_2b",
+      "content": {
+        "file_count": 703,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260613_214956",
+        "sha256": "dc2129532cbeba48290b23f14c57b374fe8db862be7570a6b4e89703a6cc3934",
+        "size_bytes": 10452442
+      },
+      "run_id": "run_20260613_214956"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "opd_2b",
+      "content": {
+        "file_count": 723,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260613_214956",
+        "sha256": "4f53b169b222c7f69d8c5186dba9e544b646e2bde6bf052a23f26d24f528c915",
+        "size_bytes": 10571293
+      },
+      "run_id": "run_20260613_214956"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "r10_base",
+      "content": {
+        "file_count": 251,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260510_173852",
+        "sha256": "8590d8e4ebf7454431a4d5754a7066065e6723920c63dd3f2d12ca3c2c00d168",
+        "size_bytes": 2471060
+      },
+      "run_id": "run_20260510_173852"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "r10_base",
+      "content": {
+        "file_count": 361,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260510_173852",
+        "sha256": "d366eb164a15fe70dff25ebf6a104c2762ad73dc34e995870eafdf053444aa66",
+        "size_bytes": 3722411
+      },
+      "run_id": "run_20260510_173852"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "r10_base",
+      "content": {
+        "file_count": 351,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260510_173852",
+        "sha256": "8cb1d747da395325c75a71a9af7e34d971ca5e9f80c3cc1c2a3b7c5730109737",
+        "size_bytes": 3527998
+      },
+      "run_id": "run_20260510_173852"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "r10_base",
+      "content": {
+        "file_count": 501,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260510_211339",
+        "sha256": "ab0453c085390fa6bd80506a1b1155ee54bf8f4e91a52327c013a905729a70d3",
+        "size_bytes": 5081581
+      },
+      "run_id": "run_20260510_211339"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "r10_base",
+      "content": {
+        "file_count": 761,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260510_211339",
+        "sha256": "c3d218efcaa774ce80bad36dd8e3ddafa7692c00781c936a6cf6620863d2ac3a",
+        "size_bytes": 7917953
+      },
+      "run_id": "run_20260510_211339"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "r10_base",
+      "content": {
+        "file_count": 701,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260510_211339",
+        "sha256": "7cab51eff0160d46558a56edf23f46dd64c5ea81d64d40e383dacd84358c3940",
+        "size_bytes": 7195479
+      },
+      "run_id": "run_20260510_211339"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "r10_base",
+      "content": {
+        "file_count": 255,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260519_223921",
+        "sha256": "b8b1651a5140e18a2a0ec5db7d90f133f75e304946a4ced39ff8a4b71e06d180",
+        "size_bytes": 2624695
+      },
+      "run_id": "run_20260519_223921"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "r10_base",
+      "content": {
+        "file_count": 363,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260519_223921",
+        "sha256": "9865582aa92d1864ea568936713519392b0ed8f7a97fbbcaadc1057a9c947149",
+        "size_bytes": 3662295
+      },
+      "run_id": "run_20260519_223921"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "r10_base",
+      "content": {
+        "file_count": 335,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260519_223921",
+        "sha256": "6f043012881a6aef65d45074122a8636b9dcb523b6b711fe8b12717aeb43ad8f",
+        "size_bytes": 3470109
+      },
+      "run_id": "run_20260519_223921"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "r10_base",
+      "content": {
+        "file_count": 243,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260520_143530",
+        "sha256": "97042225555f4ccf93a85bdb508de782a84409983927704bc651b3ece81fa666",
+        "size_bytes": 2579763
+      },
+      "run_id": "run_20260520_143530"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "r10_base",
+      "content": {
+        "file_count": 369,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260520_143530",
+        "sha256": "2727a0d5c5950c7799e394d87a9189aad114da33368d2ec61b721397f6ab7f8c",
+        "size_bytes": 3868505
+      },
+      "run_id": "run_20260520_143530"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "r10_base",
+      "content": {
+        "file_count": 343,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260520_143530",
+        "sha256": "50a96e62a738ac50143e2db94b73991d74ab5760b0486966316c8d0524074248",
+        "size_bytes": 3517703
+      },
+      "run_id": "run_20260520_143530"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "r10_sft",
+      "content": {
+        "file_count": 261,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260520_014319",
+        "sha256": "818965d8868d1bc4d66b360215e2174fadcc971245b38b0ba61fbfde62efaaae",
+        "size_bytes": 2892901
+      },
+      "run_id": "run_20260520_014319"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "r10_sft",
+      "content": {
+        "file_count": 259,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260520_014319",
+        "sha256": "2fc9bae3255574f6d8a5ce16a19e79480c3548d9fda2953ed5f85d8ecc372597",
+        "size_bytes": 2941538
+      },
+      "run_id": "run_20260520_014319"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "r10_sft",
+      "content": {
+        "file_count": 265,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260520_014319",
+        "sha256": "d126d953c4e328b2093116d630d5823843ed968c074a357666a758a1a83e4163",
+        "size_bytes": 2829858
+      },
+      "run_id": "run_20260520_014319"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "r10_sft",
+      "content": {
+        "file_count": 245,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260520_044433",
+        "sha256": "8efb3febb7f80e8925fbe99cfab81a017a8fbab8791e6e79b05cd0fdc48c57d0",
+        "size_bytes": 2658918
+      },
+      "run_id": "run_20260520_044433"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "r10_sft",
+      "content": {
+        "file_count": 257,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260520_044433",
+        "sha256": "c426575e9b570063f99412993908a6a84fdaafe8068872a1568800e1b2c1e87a",
+        "size_bytes": 2903332
+      },
+      "run_id": "run_20260520_044433"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "r10_sft",
+      "content": {
+        "file_count": 277,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260520_044433",
+        "sha256": "d9f90a9c808861b2da807fdbcf3add9b38c9b2edc111e09278acbb5bb6f164f1",
+        "size_bytes": 2801656
+      },
+      "run_id": "run_20260520_044433"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "r10_sft",
+      "content": {
+        "file_count": 261,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260520_173902",
+        "sha256": "c3afa44e124981bee5c0154aea4207d783fadffa1e0fd7bf2a859384b5e0083d",
+        "size_bytes": 2874159
+      },
+      "run_id": "run_20260520_173902"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "r10_sft",
+      "content": {
+        "file_count": 261,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260520_173902",
+        "sha256": "25589490140491b3d39b6e5196ae5b911347c95d4dc073b97a0f8085696f3f63",
+        "size_bytes": 2828474
+      },
+      "run_id": "run_20260520_173902"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "r10_sft",
+      "content": {
+        "file_count": 275,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260520_173902",
+        "sha256": "4517e8ffbb58915ee7f78a3d8aaed298cdf123e94066e61ea03d257edcbccaa2",
+        "size_bytes": 2874121
+      },
+      "run_id": "run_20260520_173902"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "r10_source_corpus",
+      "content": {
+        "file_count": 15,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260504_140418",
+        "sha256": "6b5baf79f1cc4fcc213b389f32ef7572775293936c9b63d33a49f2cee8243801",
+        "size_bytes": 10719282
+      },
+      "run_id": "run_20260504_140418"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "r10_source_corpus",
+      "content": {
+        "file_count": 15,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260504_140418",
+        "sha256": "ef9457f04789b273be4709960aaaaa0283da039d214ddc9aee3da2fefa757db2",
+        "size_bytes": 13058684
+      },
+      "run_id": "run_20260504_140418"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "r10_source_corpus",
+      "content": {
+        "file_count": 17,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260504_140418",
+        "sha256": "86246719d05cfe8396e7fd872df21212062fbbc9ed735ea4a930ab1a869236e0",
+        "size_bytes": 12830769
+      },
+      "run_id": "run_20260504_140418"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "r10_source_corpus",
+      "content": {
+        "file_count": 15,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260504_172157",
+        "sha256": "94ecccc09eeec22117cb7213280a9102ea124afa2e0a070a1b100b44e9f1a533",
+        "size_bytes": 11186682
+      },
+      "run_id": "run_20260504_172157"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "r10_source_corpus",
+      "content": {
+        "file_count": 13,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260504_172157",
+        "sha256": "31e6188df85f75c43654c0cf10e6b7b60cba22a54f343489ea6162e16fe9ad54",
+        "size_bytes": 10243649
+      },
+      "run_id": "run_20260504_172157"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "r10_source_corpus",
+      "content": {
+        "file_count": 15,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260504_172157",
+        "sha256": "db19e0814f528dd5e16d7cc34877336cac10e611b0f0b5f8f3e91f0003d51b56",
+        "size_bytes": 11096287
+      },
+      "run_id": "run_20260504_172157"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "r10_source_corpus",
+      "content": {
+        "file_count": 15,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260504_221206",
+        "sha256": "dae26cba4b8b74393339dc06e56d92479aad990b58bb0b08ba8a5c700691da39",
+        "size_bytes": 10580342
+      },
+      "run_id": "run_20260504_221206"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "r10_source_corpus",
+      "content": {
+        "file_count": 13,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260504_221206",
+        "sha256": "0ade29eded58721d647d4008d42a1949f7aec717ffcb7b6161711fe1fb99a806",
+        "size_bytes": 11883455
+      },
+      "run_id": "run_20260504_221206"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "r10_source_corpus",
+      "content": {
+        "file_count": 15,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260504_221206",
+        "sha256": "24c2a2061d9904e383655be8e7f6c89dc0afbdaabbb7b69e0ac51fb45c50f076",
+        "size_bytes": 10905847
+      },
+      "run_id": "run_20260504_221206"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "r10_source_corpus",
+      "content": {
+        "file_count": 27,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260505_150033",
+        "sha256": "3cc65733e9df5744be9d2f33c06f8bdf63ddc64fdc11c0c81ad9723be1ba77fb",
+        "size_bytes": 24206676
+      },
+      "run_id": "run_20260505_150033"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "r10_source_corpus",
+      "content": {
+        "file_count": 21,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260505_150033",
+        "sha256": "51b187bbead98745b522947b14174936f57037f35328f8d56cc9cfe76ce0a325",
+        "size_bytes": 20350725
+      },
+      "run_id": "run_20260505_150033"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "r10_source_corpus",
+      "content": {
+        "file_count": 33,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260505_150033",
+        "sha256": "5c8ee48154e8ab85523d57ed3c14415a97cf5f036576dd1d9d960be2f324b845",
+        "size_bytes": 25270309
+      },
+      "run_id": "run_20260505_150033"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "r10_source_corpus",
+      "content": {
+        "file_count": 23,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260505_214542",
+        "sha256": "d9d3306adb41d5512f1fe59dc64d1d36792fd489bef4f8f3f9ed66d61fea0077",
+        "size_bytes": 19586945
+      },
+      "run_id": "run_20260505_214542"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "r10_source_corpus",
+      "content": {
+        "file_count": 21,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260505_214542",
+        "sha256": "d7466741ae509e98c5149c04551d4f53a9162c4f945dd4797d44def4c51deccb",
+        "size_bytes": 22601650
+      },
+      "run_id": "run_20260505_214542"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "r10_source_corpus",
+      "content": {
+        "file_count": 27,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260505_214542",
+        "sha256": "626af44e81e1a190f683d4637284a66bb955b447b467e460aeb6e7d38ad33bc0",
+        "size_bytes": 25321865
+      },
+      "run_id": "run_20260505_214542"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "teacher_and_capacity_references",
+      "content": {
+        "file_count": 197,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260606_205254",
+        "sha256": "13ea746b0bc54184a71acc2c0fbd7e424c2b0761e1d0d8af210463a6ac47c4a2",
+        "size_bytes": 3059047
+      },
+      "run_id": "run_20260606_205254"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "teacher_and_capacity_references",
+      "content": {
+        "file_count": 199,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260606_205254",
+        "sha256": "2e9507c6e7047d0408d34380f9d15de46efd627d6a8731e2fb1a06c3cc094485",
+        "size_bytes": 3078092
+      },
+      "run_id": "run_20260606_205254"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "teacher_and_capacity_references",
+      "content": {
+        "file_count": 247,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260606_205254",
+        "sha256": "835e5ba7ee8a5eaa9af7ecffa29ec9126419b9d99ecc91a83a6502f952770b40",
+        "size_bytes": 3632572
+      },
+      "run_id": "run_20260606_205254"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "teacher_and_capacity_references",
+      "content": {
+        "file_count": 155,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260607_150306",
+        "sha256": "d24dc196307559e4888317b7610aa6be9b1ede91dcfc548c316a2c06160eb603",
+        "size_bytes": 2383688
+      },
+      "run_id": "run_20260607_150306"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "teacher_and_capacity_references",
+      "content": {
+        "file_count": 173,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260607_150306",
+        "sha256": "cb2cf5390b1fd4a009316f64e4ed4e1101d2d6169efcbaa5c82d437eca80becf",
+        "size_bytes": 2567615
+      },
+      "run_id": "run_20260607_150306"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "teacher_and_capacity_references",
+      "content": {
+        "file_count": 191,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260607_150306",
+        "sha256": "57744abd92df9d699e5456ecd279755f6e0ded5f53037690f28c13f97c5f8587",
+        "size_bytes": 2702484
+      },
+      "run_id": "run_20260607_150306"
+    },
+    {
+      "agent": "agent_0",
+      "claim_group": "teacher_and_capacity_references",
+      "content": {
+        "file_count": 215,
+        "kind": "directory",
+        "path": "agent_0/runs/run_20260607_190204",
+        "sha256": "d60ec2fd69d7ff2e31bb56121056548d65adedbe43b046f98c1e3c88236a2dd9",
+        "size_bytes": 3271033
+      },
+      "run_id": "run_20260607_190204"
+    },
+    {
+      "agent": "agent_1",
+      "claim_group": "teacher_and_capacity_references",
+      "content": {
+        "file_count": 241,
+        "kind": "directory",
+        "path": "agent_1/runs/run_20260607_190204",
+        "sha256": "f0d122a1605b04482848d7610e97c29f66fd6edee460b268435afb78c198b877",
+        "size_bytes": 3514658
+      },
+      "run_id": "run_20260607_190204"
+    },
+    {
+      "agent": "agent_2",
+      "claim_group": "teacher_and_capacity_references",
+      "content": {
+        "file_count": 253,
+        "kind": "directory",
+        "path": "agent_2/runs/run_20260607_190204",
+        "sha256": "8e51a991b377c84067cc5898d8447ed55febb5196b188ce2b5e24a61690a54c3",
+        "size_bytes": 3596061
+      },
+      "run_id": "run_20260607_190204"
+    }
+  ],
+  "claim_groups": {
+    "opd_2b": [
+      "run_20260608_185339",
+      "run_20260610_140358",
+      "run_20260612_044933",
+      "run_20260613_112422",
+      "run_20260613_214956"
+    ],
+    "r10_base": [
+      "run_20260510_173852",
+      "run_20260510_211339",
+      "run_20260519_223921",
+      "run_20260520_143530"
+    ],
+    "r10_sft": [
+      "run_20260520_014319",
+      "run_20260520_044433",
+      "run_20260520_173902"
+    ],
+    "r10_source_corpus": [
+      "run_20260504_140418",
+      "run_20260504_172157",
+      "run_20260504_221206",
+      "run_20260505_150033",
+      "run_20260505_214542"
+    ],
+    "teacher_and_capacity_references": [
+      "run_20260606_205254",
+      "run_20260607_150306",
+      "run_20260607_190204"
+    ]
+  },
+  "complete": true,
+  "manifest_sha256": "168206d1c2f6502ca342fb9b79d39816cf8a6c7b675d7cef7cd3a7b1493ef4f3",
+  "missing": [],
+  "raw_root": "dataset/raw",
+  "schema_version": "kaetram-historical-run-digests-v1",
+  "source_manifest": {
+    "name": "SHA256SUMS",
+    "sha256": "e954237243b9928a6d8096fbabb279b52bc93f0adc977e300e76e7eea40ae85d"
+  }
+}

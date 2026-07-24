@@ -95,7 +95,9 @@ Applies to train_opd_modal.py / train_modal.py too.
 > history clean + loud [format] note). **Rerun (run_20260613_112422): 18/30 — best of program,
 > all 3 finished Herbalist 3/3 unseeded** (broke the stage-2 wall); Rick's 0/4 (3-link
 > execution failure: pole never re-equipped → 0 shrimp → 0 cook; cook=0 transfer). Format
-> errors 10.7%→5.1%; reasoning concise third-shape; 405 recoveries, self-correcting (0 relapse).
+> historical notes report errors 10.7%→5.1%, 405 rewritten sessions with one recovery marker,
+> and no later marker. Source logs/raw pre-rewrite emissions are not packaged; do not infer model
+> self-correction or zero relapse.
 > Full writeup: research/experiments/opd-2b.md. Round 4 (evidenced): privileged-context grading
 > for Rick's + harness fixes (pole re-equip, route-progress session note).
 >

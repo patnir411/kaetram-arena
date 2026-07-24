@@ -1,0 +1,40 @@
+{
+  "design_sha256": "039f3ebdd8a0808e8a91023e523a2ca8615bd363774686a2338770cf8056640f",
+  "dirty_paths": [],
+  "endpoint_health": {
+    "attestation": {
+      "api_model": "2b-opd-r3",
+      "chat_template_sha256": "562a0a6f72bf5722612866d9f5d7e947be4b08a429e407f8e522e70137db5e1e",
+      "checkpoint_sha256": "c4df1ea2fda9253d595ff4a2068c72dd4de173241ab93cc1ee0d5dc42e302873",
+      "deployment_id": "local-mlx-lm-0.31.3-opd_r3_2b-c26ae0691bd1-11908184ad9b",
+      "fix_mistral_regex": false,
+      "render_contract_sha256": "11908184ad9ba71352740d4d429790ea427446b11146be202bf873bd7163979f",
+      "runtime_environment_receipt_sha256": "7db666ab3753394be571a182ef53ba45817a6e1d1f8413badc1ff11ed18c4789",
+      "snapshot_lock_sha256": "8117a75f24b50625469ffff26384584ad99526bf687a79a8b11ad7612cf62a32",
+      "snapshot_tree_sha256": "76f449074cc548d6bc4411215dcd2f9b4ae09eac73256b2f26d487ce7baef007",
+      "tokenizer_sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+      "tokenizer_source_revision": "15852e8c16360a2fea060d615a32b45270f8a8fc"
+    },
+    "status": "ok"
+  },
+  "registration_sha256": "0d4f38ef15fe94509e593aa50d4967cda082ebd6b62e90b5e2aef3a4f0762eb7",
+  "sampling": {
+    "attempts": 3,
+    "base_seed": 730001,
+    "concurrency": 4,
+    "condition_order": "For each state-sample block, rotate the registered condition order by block_index modulo four. This balances deterministic order; it is not random assignment.",
+    "grid_rationale": "Twenty states times five paired seeds reproduces the 100-requests-per-cell scale of the earlier unverified development probe while adding R3 and the native-schema factor. It is a fixed finite grid for mechanism triage, not a power calculation or population sample.",
+    "max_tokens": 400,
+    "paired_seed_formula": "base_seed + 100 * zero_based_state_index + zero_based_sample_index",
+    "presence_penalty": 1.5,
+    "request_timeout_seconds": 360,
+    "samples_per_state_condition": 5,
+    "temperature": 1.0,
+    "top_k": 20,
+    "top_p": 0.95
+  },
+  "schema_version": "kaetram.local-trigger-incidence-run.v1.prelaunch",
+  "snapshot": "opd_r3_2b",
+  "source_git_commit": "514542a9f76cddbeefe68ef52d93a39a49225118",
+  "study_id": "local-trigger-incidence-v1"
+}

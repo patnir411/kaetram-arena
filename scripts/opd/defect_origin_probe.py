@@ -13,9 +13,12 @@ States: action states drawn from the base-2B baseline run (neutral contexts, no
 malformed history), rendered byte-parity via reconstruct_session/turn_to_chat.
 
 Usage:
-  R1_EP=https://...-kaetram-qwen-2b-opd-inference-serve.modal.run/v1 \
-  BASE_EP=https://...-kaetram-qwen-2b-inference-serve.modal.run/v1 \
+  R1_EP=http://127.0.0.1:8101/v1 \
+  BASE_EP=http://127.0.0.1:8102/v1 \
   python3 scripts/opd/defect_origin_probe.py -n 20 -k 5
+
+No endpoint is launched by this script. The zero-spend workflow uses already
+running local endpoints; do not point it at a metered service.
 """
 from __future__ import annotations
 
@@ -37,6 +40,7 @@ sys.path.insert(0, str(REPO / "finetune"))
 from canonicalize import docify_system_prompt, is_malformed  # noqa: E402
 from opd_probe import reconstruct_session  # noqa: E402
 from opd_round1 import turn_to_chat  # noqa: E402
+from endpoint_policy import require_zero_spend_endpoints  # noqa: E402
 
 BASE_RUN = "run_20260608_185339"
 MAX_HIST = 28
@@ -130,10 +134,21 @@ async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-n", type=int, default=20)
     ap.add_argument("-k", type=int, default=5)
+    ap.add_argument(
+        "--allow-metered-remote-endpoints",
+        action="store_true",
+        help="explicitly authorize non-loopback endpoints that may incur charges",
+    )
     args = ap.parse_args()
 
     r1_ep = os.environ["R1_EP"].rstrip("/")
     base_ep = os.environ.get("BASE_EP", "").rstrip("/")
+    checked = require_zero_spend_endpoints(
+        [r1_ep] + ([base_ep] if base_ep else []),
+        allow_metered_remote_endpoints=args.allow_metered_remote_endpoints,
+    )
+    r1_ep = checked[0]
+    base_ep = checked[1] if base_ep else ""
 
     states = collect_states(args.n)
     print(f"states: {len(states)}  samples/state: {args.k}", flush=True)

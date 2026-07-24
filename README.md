@@ -1,17 +1,26 @@
-# Kaetram AI Agent
+# Kaetram Arena
 
 ![Kaetram Observatory — live monitoring of three Claude agents (grinder, completionist, explorer) playing Kaetram in parallel](assets/kaetram.jpg)
 
 > **Writeups:** ["Hello, World": Learning to Train LLM Agents in 2026](https://x.com/patelnir41/status/2059614365536391636) ·
 > [Beyond Base: How On-Policy Distillation Made Our 2B Better Than It Started](https://x.com/patelnir41/status/2066495377151271386)
 
-**Research project** on **structured game-agent distillation** — making a small open model better at long-horizon, tool-mediated gameplay through a typed MCP tool API as the shared teacher–student interface, in a persistent 2D pixel MMORPG ([Kaetram](https://github.com/Kaetram/Kaetram-Open)).
+**Can a 2-billion-parameter open model learn to play a persistent MMORPG?**
+Kaetram Arena is a research project on **structured game-agent distillation**:
+making a small open model better at long-horizon, tool-mediated gameplay
+through a typed MCP tool API as the shared teacher–student interface, in a
+persistent 2D pixel MMORPG
+([Kaetram](https://github.com/Kaetram/Kaetram-Open)).
 
-**Headline result:** on-policy distillation (OPD) took a base **Qwen3.5-2B** from **12/30 to 18/30** on the Core-3 quest benchmark, clearing a quest wall the base model never passes (weights-only, same harness: 3/3 vs 0/3). Teacher: a scaffolded Qwen3.5-4B. This *reversed* the lesson of an earlier 9B SFT lane (r1–r10), where cross-vocabulary imitation of a Claude teacher **regressed** the student 3.5× below base. Full write-up: [`research/experiments/opd-2b.md`](research/experiments/opd-2b.md) + the case-study paper [`reference/overview.pdf`](reference/overview.pdf).
+**Historical result (not independently reproducible from this clone):** the project reports one base **Qwen3.5-2B** run at **12/30**, one recovery-off OPD round at **15/30**, and one later weights-plus-recovery run at **18/30** on the Core-3 quest benchmark. These runs lack immutable raw bundles and exact configuration parity, so the sequence is descriptive rather than a weights-only or causal comparison. Teacher: a scaffolded Qwen3.5-4B. An earlier 9B SFT lane (r1–r10) also reported a 3.5× regression under cross-vocabulary imitation of a Claude teacher. Evidence boundaries and the confirmatory plan are in [`research/paper/reviewer-handoff.md`](research/paper/reviewer-handoff.md); the historical narrative is in [`research/experiments/opd-2b.md`](research/experiments/opd-2b.md).
 
 The agent calls 17 structured tools (observe, attack, navigate, interact_npc, gather, craft_item, …) — never writes JavaScript or clicks pixels. Sessions across **4 frontier-LLM harnesses** (Claude / Codex / Gemini / OpenCode) are collected as gameplay trajectories (Claude is the primary corpus, the others are cross-harness comparisons), with OpenCode multiplexing across xAI Grok, NVIDIA Qwen3.5, and DeepSeek V4 via `--opencode-model`. Progress is measured against the **Core 3 quest benchmark** (see below).
 
-> **For developers:** see [`CLAUDE.md`](CLAUDE.md) for the full developer reference and [`session_log.md`](session_log.md) for the most recent decisions.
+> **For developers:** see [`CLAUDE.md`](CLAUDE.md) for the full developer
+> reference, [`session_log.md`](session_log.md) for the most recent decisions,
+> [`docs/reproducible-runs.md`](docs/reproducible-runs.md) for immutable run
+> contracts, and [`docs/local-unit-tests.md`](docs/local-unit-tests.md) for the
+> pinned clean-clone test bootstrap.
 
 ## What it does
 

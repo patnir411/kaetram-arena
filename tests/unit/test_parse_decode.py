@@ -7,7 +7,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts" / "log_analysis"))
 
-from parse import decode_tool_result_content, decode_kaetram_tool_output  # noqa: E402
+from parse import ToolCall, decode_tool_result_content, decode_kaetram_tool_output  # noqa: E402
 
 
 def test_format_note_stripped_observe():
@@ -40,3 +40,16 @@ def test_kaetram_output_strips_format_note():
     raw = '[format] x\n\n{"a": 1}\n\nASCII_MAP:grid'
     payload, am = decode_kaetram_tool_output(raw)
     assert payload == {"a": 1} and am == "grid"
+
+
+def test_recovered_caught_exception_is_an_execution_error():
+    call = ToolCall(
+        idx=0,
+        line_no=1,
+        name="observe",
+        short_name="observe",
+        input={},
+        tool_use_id="recovered_1_0",
+        result_payload="Error: simulated MCP failure",
+    )
+    assert call.is_error

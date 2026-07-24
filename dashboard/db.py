@@ -59,16 +59,29 @@ _CACHE_TTL = 3  # seconds
 # at server runtime from JSON definition files. We load them here so we
 # can accurately determine quest completion status (isFinished = stage >= stageCount).
 
+def _game_data_root() -> str:
+    configured = os.environ.get("KAETRAM_GAME_DIR", "").strip()
+    if configured:
+        return os.path.join(
+            os.path.expanduser(configured), "packages", "server", "data"
+        )
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "..",
+        "Kaetram-Open",
+        "packages",
+        "server",
+        "data",
+    )
+
+
 def _load_quest_definitions() -> dict[str, dict]:
     """Load quest definitions from Kaetram-Open to get name + stageCount.
 
     Returns dict keyed by quest key, e.g.:
         {"foresting": {"name": "Foresting", "stageCount": 3, "description": "..."}, ...}
     """
-    quest_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "..", "Kaetram-Open", "packages", "server", "data", "quests"
-    )
+    quest_dir = os.path.join(_game_data_root(), "quests")
     # Also try absolute path as fallback
     if not os.path.isdir(quest_dir):
         quest_dir = "/home/user/projects/Kaetram-Open/packages/server/data/quests"
@@ -104,10 +117,7 @@ def _load_achievement_definitions() -> dict[str, dict]:
     Returns dict keyed by achievement key, e.g.:
         {"firstrock": {"name": "First Rock", "description": "Mine your first rock!"}, ...}
     """
-    ach_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "..", "Kaetram-Open", "packages", "server", "data", "achievements.json"
-    )
+    ach_path = os.path.join(_game_data_root(), "achievements.json")
     if not os.path.isfile(ach_path):
         ach_path = "/home/user/projects/Kaetram-Open/packages/server/data/achievements.json"
 

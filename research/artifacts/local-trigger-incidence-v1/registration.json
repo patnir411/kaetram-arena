@@ -1,0 +1,125 @@
+{
+  "schema_version": "kaetram.local-trigger-incidence-registration.v1",
+  "study_id": "local-trigger-incidence-v1",
+  "status": "registered_before_outcomes",
+  "purpose": "Determine whether model-visible Python-style documentation and omission of the native tool schema create recoverable malformed emissions at matched historical decision states.",
+  "claim_boundary": {
+    "confirmatory": false,
+    "permitted": [
+      "checkpoint-conditional trigger incidence under the registered interfaces",
+      "paired inference-time interface contrasts on the fixed state pool",
+      "whether a larger natural-recovery evaluation has a viable manipulation"
+    ],
+    "prohibited": [
+      "checkpoint or training-method superiority",
+      "a recovery benefit",
+      "a learned self-correction policy",
+      "quest-performance improvement",
+      "generalization beyond the fixed checkpoints and historical state pool"
+    ]
+  },
+  "state_pool": {
+    "source_run_id": "run_20260608_185339",
+    "source_glob": "dataset/raw/agent_*/runs/run_20260608_185339/session_*.log",
+    "personality": "completionist",
+    "state_count": 20,
+    "decision_turn": 4,
+    "max_history_messages": 28,
+    "selection": "Filter to logs whose retained session metadata says personality=completionist, sort source paths relative to the supplied historical root, scan every floor(eligible_source_count/(2*state_count))-th path with a minimum stride of one, retain the fourth reconstructable decision state, and stop after 20 states.",
+    "outcome_independence": "Selection uses paths and parseability only; it does not inspect generations from this study."
+  },
+  "snapshots": {
+    "base_2b": {
+      "api_model": "2b-base",
+      "checkpoint_sha256": "aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1"
+    },
+    "opd_r2_2b": {
+      "api_model": "2b-opd-r2",
+      "checkpoint_sha256": "636aa92a16ee63965d5211625ba32c0524eb90da87f6b4727ee1f057e0486104"
+    },
+    "opd_r3_2b": {
+      "api_model": "2b-opd-r3",
+      "checkpoint_sha256": "c4df1ea2fda9253d595ff4a2068c72dd4de173241ab93cc1ee0d5dc42e302873"
+    }
+  },
+  "endpoint_contract": {
+    "tokenizer_sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+    "render_contract_sha256": "11908184ad9ba71352740d4d429790ea427446b11146be202bf873bd7163979f",
+    "chat_template_sha256": "562a0a6f72bf5722612866d9f5d7e947be4b08a429e407f8e522e70137db5e1e",
+    "fix_mistral_regex": false
+  },
+  "factors": {
+    "documentation": {
+      "python_docs": "Retain the historical Python-call-like literals in the system prompt.",
+      "canonical_docs": "Apply canonicalize.docify_system_prompt to system messages."
+    },
+    "native_tool_schema": {
+      "absent": "Omit the OpenAI tools field, matching the historical gradient-time renderer.",
+      "present": "Send the full frozen tool_surface.MODEL_VISIBLE_TOOL_DEFINITIONS."
+    }
+  },
+  "conditions": [
+    {
+      "condition_id": "python-docs_no-tools",
+      "documentation": "python_docs",
+      "native_tool_schema": "absent"
+    },
+    {
+      "condition_id": "python-docs_native-tools",
+      "documentation": "python_docs",
+      "native_tool_schema": "present"
+    },
+    {
+      "condition_id": "canonical-docs_no-tools",
+      "documentation": "canonical_docs",
+      "native_tool_schema": "absent"
+    },
+    {
+      "condition_id": "canonical-docs_native-tools",
+      "documentation": "canonical_docs",
+      "native_tool_schema": "present"
+    }
+  ],
+  "sampling": {
+    "samples_per_state_condition": 5,
+    "base_seed": 730001,
+    "paired_seed_formula": "base_seed + 100 * zero_based_state_index + zero_based_sample_index",
+    "condition_order": "For each state-sample block, rotate the registered condition order by block_index modulo four. This balances deterministic order; it is not random assignment.",
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "presence_penalty": 1.5,
+    "max_tokens": 400,
+    "concurrency": 4,
+    "attempts": 3,
+    "request_timeout_seconds": 360,
+    "grid_rationale": "Twenty states times five paired seeds reproduces the 100-requests-per-cell scale of the earlier unverified development probe while adding R3 and the native-schema factor. It is a fixed finite grid for mechanism triage, not a power calculation or population sample."
+  },
+  "outcomes": {
+    "primary": "Recovery opportunity: the response has no structured tool call and canonicalize.recover_tool_calls(content) returns at least one candidate.",
+    "secondary": [
+      "raw malformed-emission indicator from canonicalize.is_malformed",
+      "structured tool-call indicator",
+      "no-call indicator",
+      "malformed surface-form family",
+      "request failure"
+    ]
+  },
+  "analysis": {
+    "estimand_unit": "The registered finite set of 100 state-seed pairs per checkpoint-condition. States may be temporally dependent observations from one historical run and are not treated as independent population draws.",
+    "checkpoint_handling": "Analyze each fixed checkpoint separately; do not treat checkpoints as training replicates, pool them into a population effect, or generalize beyond the fixed request grid.",
+    "registered_contrasts_per_checkpoint": [
+      "native tools present minus absent, averaged over documentation conditions",
+      "canonical documentation minus Python documentation, averaged over native-schema conditions",
+      "documentation-by-native-schema difference in differences"
+    ],
+    "reporting": "Report exact finite-grid cell rates, paired rate differences, and the number of states with positive, negative, or zero paired differences. Do not report p-values, confidence intervals, binomial bounds, or claims of population uncertainty.",
+    "incomplete_cells": "Retain failures, but emit no registered contrasts unless every scheduled request succeeds."
+  },
+  "provenance": {
+    "endpoint_policy": "Loopback-only local endpoints; metered or remote endpoint overrides are not permitted by this registration.",
+    "endpoint_identity": "Require /health status ok and exact api_model, checkpoint, canonical tokenizer, render contract, chat template, and tokenizer-regex mode before creating an outcome directory.",
+    "source_identity": "The preparation receipt hashes every selected source log and rendered message list. The run receipt records the clean Arena commit containing this registration.",
+    "retention": "Retain the complete design, raw response messages, request metadata without endpoint URLs, endpoint attestation, results, summaries, and SHA-256 artifact indexes."
+  }
+}

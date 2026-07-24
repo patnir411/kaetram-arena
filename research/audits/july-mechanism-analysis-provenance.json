@@ -1,0 +1,59 @@
+{
+  "generation_worktree_clean": true,
+  "implementation_files": [
+    {
+      "file_count": 1,
+      "kind": "file",
+      "path": "run_manifest.py",
+      "sha256": "71cde9af4b7b7b5de2a19b72fcf7e779e79497357106081903ce31b6ddb6216d",
+      "size_bytes": 24429
+    },
+    {
+      "file_count": 1,
+      "kind": "file",
+      "path": "scripts/arm_stats.py",
+      "sha256": "f5ddcb26d938341eb5e5f0718ca02d9984a20ad7e07d77dba489c92416051fcf",
+      "size_bytes": 19489
+    },
+    {
+      "file_count": 1,
+      "kind": "file",
+      "path": "scripts/audit_historical_artifacts.py",
+      "sha256": "ffc4f4823ef3fc91afc9d7b93aa31ce08b8a32c3b286ecf6201240962ad0e05a",
+      "size_bytes": 3491
+    },
+    {
+      "file_count": 1,
+      "kind": "file",
+      "path": "scripts/capture_analysis_provenance.py",
+      "sha256": "fcc225e943c6884c5416a6f7d9fd03bfb0f436b32d8b06ddd1a8e0cd77872bef",
+      "size_bytes": 6852
+    },
+    {
+      "file_count": 1,
+      "kind": "file",
+      "path": "scripts/log_analysis/artifact_requirements.py",
+      "sha256": "9b35da612e5ee188c452a565a40504f43e4e65dcd5c667e3d100f67cfe98cad9",
+      "size_bytes": 6161
+    },
+    {
+      "file_count": 1,
+      "kind": "file",
+      "path": "scripts/log_analysis/parse.py",
+      "sha256": "da8e27dbfaacc404c5762084b2672e21d39c1390011fd1547605b37c7decc636",
+      "size_bytes": 55088
+    },
+    {
+      "file_count": 1,
+      "kind": "file",
+      "path": "scripts/render_july_mechanism_results.py",
+      "sha256": "37e21aafbe35a63d3838d794c3a769760485613b2978e9a96248f6c1b9076625",
+      "size_bytes": 18166
+    }
+  ],
+  "implementation_sha256": "55605b8c920e47365fd862d12de085f94631c887a08139a0a53a4c8f951cbf36",
+  "manifest_sha256": "ebdfdf6c886355d4370fcdbb78daf47c2e3b02798b6272805054bd6744e11623",
+  "python_version": "3.12.12",
+  "schema_version": "kaetram.analysis-provenance.v1",
+  "source_git_commit": "57485899692934b83398816977eb7c3c16b9e28e"
+}

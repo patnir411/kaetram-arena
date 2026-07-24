@@ -1,0 +1,3 @@
+# Apple-silicon, zero-cost local inference runtime used by
+# scripts/local_mlx_endpoint.py. The launcher rejects version drift.
+mlx-lm==0.31.3

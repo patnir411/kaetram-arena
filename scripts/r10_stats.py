@@ -20,12 +20,19 @@ re-run. With perfect separation the exact Mann-Whitney floor drops to
 
 Run:  python3 scripts/r10_stats.py
 """
+import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path("scripts/log_analysis")))
-from parse import (  # noqa: E402
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+from scripts.log_analysis.parse import (  # noqa: E402
     list_agent_dirs, list_runs, parse_run_sessions, progression_for_quests,
+)
+from scripts.log_analysis.artifact_requirements import (  # noqa: E402
+    MissingEvidenceError,
+    require_agent_run_logs,
+    require_files,
 )
 
 try:
@@ -48,10 +55,23 @@ CORPUS = ["run_20260504_140418", "run_20260504_172157", "run_20260504_221206",
 TOOLS = ["observe", "navigate", "interact_npc", "query_quest", "attack", "gather"]
 
 
-def run_stage_total_and_foresting(run_id):
+def validate_inputs(raw_root: Path, train_json: Path):
+    require_agent_run_logs(
+        raw_root,
+        agents=AGENTS,
+        run_ids=[*BASE, *SFT],
+        analysis="r10 base-vs-SFT statistics",
+    )
+    require_files(
+        [train_json],
+        analysis="r10 completionist tool-mix analysis",
+    )
+
+
+def run_stage_total_and_foresting(run_id, raw_root: Path):
     """Return (sum of Core-3 stages over the 3 agents, list of per-agent
     Foresting-completed bools) for one run, read from logs."""
-    ads = {ad.name: ad for ad in list_agent_dirs()}
+    ads = {ad.name: ad for ad in list_agent_dirs(raw_root)}
     total, forest = 0, []
     for an in AGENTS:
         rd = [r for r in list_runs(ads[an]) if r.name == run_id]
@@ -72,10 +92,10 @@ def run_stage_total_and_foresting(run_id):
     return total, forest
 
 
-def completionist_eval_mix(run_ids):
+def completionist_eval_mix(run_ids, raw_root: Path):
     """% of each tool among the completionist (agent_1) eval tool calls."""
     import collections
-    ads = {ad.name: ad for ad in list_agent_dirs()}
+    ads = {ad.name: ad for ad in list_agent_dirs(raw_root)}
     c = collections.Counter()
     for rd in list_runs(ads["agent_1"]):
         if rd.name not in run_ids:
@@ -88,14 +108,16 @@ def completionist_eval_mix(run_ids):
     return {t: 100 * c[t] / tot for t in TOOLS}, c, tot
 
 
-def completionist_train_target_mix(path="dataset/qwen_sft/train.json"):
+def completionist_train_target_mix(path: str | Path = "dataset/qwen_sft/train.json"):
     """% of each tool among the completionist training TARGET actions
     (assistant tool calls in the SFT records) -- what the model was trained
     to emit. This is the corpus column in the tool-mix table."""
     import json
     import collections
     c = collections.Counter()
-    for r in json.load(open(path)):
+    with Path(path).open(encoding="utf-8") as handle:
+        records = json.load(handle)
+    for r in records:
         if r.get("personality") != "completionist":
             continue
         for m in r["messages"]:
@@ -106,11 +128,41 @@ def completionist_train_target_mix(path="dataset/qwen_sft/train.json"):
     return {t: 100 * c[t] / tot for t in TOOLS}
 
 
-def main():
-    base_stage = [run_stage_total_and_foresting(r)[0] for r in BASE]
-    sft_stage = [run_stage_total_and_foresting(r)[0] for r in SFT]
-    base_f = [b for r in BASE for b in run_stage_total_and_foresting(r)[1] if b is not None]
-    sft_f = [b for r in SFT for b in run_stage_total_and_foresting(r)[1] if b is not None]
+def main(argv: list[str] | None = None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--raw-root",
+        type=Path,
+        default=Path("dataset/raw"),
+        help="raw agent-log root (default: dataset/raw)",
+    )
+    parser.add_argument(
+        "--train-json",
+        type=Path,
+        default=Path("dataset/qwen_sft/train.json"),
+        help="r10 SFT training records used for tool-mix analysis",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        validate_inputs(args.raw_root, args.train_json)
+    except MissingEvidenceError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    base_stage = [run_stage_total_and_foresting(r, args.raw_root)[0] for r in BASE]
+    sft_stage = [run_stage_total_and_foresting(r, args.raw_root)[0] for r in SFT]
+    base_f = [
+        result
+        for run_id in BASE
+        for result in run_stage_total_and_foresting(run_id, args.raw_root)[1]
+        if result is not None
+    ]
+    sft_f = [
+        result
+        for run_id in SFT
+        for result in run_stage_total_and_foresting(run_id, args.raw_root)[1]
+        if result is not None
+    ]
 
     print(f"Per-run Core-3 stages  base (n={len(base_stage)}): {base_stage}")
     print(f"Per-run Core-3 stages  sft  (n={len(sft_stage)}): {sft_stage}")
@@ -136,9 +188,9 @@ def main():
             print(f"  completion-rate drop: {(bc/len(base_f)) / (sc/len(sft_f)):.1f}x")
 
     # --- Tool-mix fingerprint (completionist) ---
-    corpus = completionist_train_target_mix()
-    sft_mix, _, _ = completionist_eval_mix(SFT)
-    base_mix, _, _ = completionist_eval_mix(BASE_3H)
+    corpus = completionist_train_target_mix(args.train_json)
+    sft_mix, _, _ = completionist_eval_mix(SFT, args.raw_root)
+    base_mix, _, _ = completionist_eval_mix(BASE_3H, args.raw_root)
     print("\nCompletionist tool-mix (% of tool calls):")
     print(f"  {'tool':<14}{'corpus':>8}{'SFT':>8}{'base3h':>8}{'|SFT-corpus|':>14}")
     for t in TOOLS:
@@ -146,7 +198,8 @@ def main():
         print(f"  {t:<14}{corpus[t]:>7.1f}%{sft_mix[t]:>7.1f}%{base_mix[t]:>7.1f}%{d:>13.1f}")
     print("  (corpus = completionist training-target distribution; SFT inference"
           " tracks it within ~1pp on interact_npc/query_quest/navigate, NOT observe)")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

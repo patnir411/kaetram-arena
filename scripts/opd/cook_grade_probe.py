@@ -23,8 +23,11 @@ Contexts are reconstructed byte-parity with the OPD build (reconstruct_session
 graded under exactly the distribution the training pipeline queries it on.
 
 Usage:
-  FOURB_EP=https://<ws>--kaetram-qwen-4b-inference-serve.modal.run/v1 \
+  FOURB_EP=http://127.0.0.1:8104/v1 \
       python3 scripts/opd/cook_grade_probe.py -n 30
+
+No endpoint is launched by this script. The zero-spend workflow uses an
+already-running local scorer; do not point it at a metered service.
 """
 from __future__ import annotations
 
@@ -45,15 +48,7 @@ sys.path.insert(0, str(REPO / "finetune"))
 from opd_probe import reconstruct_session  # noqa: E402
 from opd_round1 import turn_to_chat  # noqa: E402
 from render import patch_qwen_chat_template  # noqa: E402
-
-TEACHER_EP = os.environ["FOURB_EP"].rstrip("/")
-# Optional: the behavior-student endpoint (the r1 checkpoint the r2 build
-# scored against). When set, the probe reports teacher-minus-student
-# ADVANTAGE margins — the actual OPD gradient signal — alongside raw teacher
-# likelihood. Codex pass-3 requirement: teacher likelihood alone cannot
-# establish state-blindness of the training signal, because candidate-
-# intrinsic surface biases may cancel between teacher and student.
-STUDENT_EP = (os.environ.get("STUDENT_EP") or "").rstrip("/") or None
+from endpoint_policy import require_zero_spend_endpoints  # noqa: E402
 MAX_HIST_MSGS = 28
 
 # r3 seeded collections (milestone ladder incl. Rick's fishing/cook states).
@@ -145,22 +140,6 @@ def collect_states(run_ids: list[str], want: str, limit: int) -> list[dict]:
     return out
 
 
-async def score(client, sem, ctx_text, full_text):
-    async with sem:
-        for attempt in range(4):
-            try:
-                r = await client.post(f"{TEACHER_EP}/score", json={
-                    "context_text": ctx_text, "full_text": full_text}, timeout=300)
-                if r.status_code == 200:
-                    return r.json()
-                if r.status_code == 400:
-                    return None
-            except (httpx.TimeoutException, httpx.HTTPError):
-                pass
-            await asyncio.sleep(3.0 * (attempt + 1))
-    return None
-
-
 async def _score_ep(client, sem, ep, ctx, full):
     async with sem:
         for attempt in range(4):
@@ -177,12 +156,12 @@ async def _score_ep(client, sem, ep, ctx, full):
     return None
 
 
-async def probe(tok, states, candidates, label):
+async def probe(tok, states, candidates, label, teacher_ep, student_ep=None):
     """Per state, score every candidate on the teacher (and student if
-    STUDENT_EP is set). Margins are computed on the quantity that actually
+    student_ep is set). Margins are computed on the quantity that actually
     drives training when both endpoints are available: the mean per-token
     ADVANTAGE (teacher − student logprob); otherwise on raw teacher logprob."""
-    signal = "advantage (teacher−student)" if STUDENT_EP else "teacher logprob"
+    signal = "advantage (teacher−student)" if student_ep else "teacher logprob"
     print(f"\n--- {label}: {len(states)} states x {len(candidates)} candidates "
           f"[signal: {signal}] ---")
     margins = []
@@ -194,19 +173,19 @@ async def probe(tok, states, candidates, label):
             ctx = tok.apply_chat_template(
                 st["messages"], tokenize=False, add_generation_prompt=True)
             t_resps = await asyncio.gather(*[
-                _score_ep(client, sem, TEACHER_EP, ctx, ctx + em)
+                _score_ep(client, sem, teacher_ep, ctx, ctx + em)
                 for em in candidates.values()])
             s_resps = [None] * len(candidates)
-            if STUDENT_EP:
+            if student_ep:
                 s_resps = await asyncio.gather(*[
-                    _score_ep(client, sem, STUDENT_EP, ctx, ctx + em)
+                    _score_ep(client, sem, student_ep, ctx, ctx + em)
                     for em in candidates.values()])
             means, t_means = {}, {}
             for cand, t_resp, s_resp in zip(candidates, t_resps, s_resps):
-                if t_resp is None or (STUDENT_EP and s_resp is None):
+                if t_resp is None or (student_ep and s_resp is None):
                     break
                 t_vals = t_resp["target_logprobs"]
-                if STUDENT_EP:
+                if student_ep:
                     s_vals = s_resp["target_logprobs"]
                     if t_resp["target_token_ids"] != s_resp["target_token_ids"]:
                         break  # tokenization boundary guard
@@ -238,7 +217,7 @@ async def probe(tok, states, candidates, label):
               f"positive fraction {sum(m > 0 for m in margins)}/{len(margins)}")
         for c, vals in per_cand.items():
             extra = (f"   (teacher-only {statistics.fmean(per_cand_t[c]):+.3f})"
-                     if STUDENT_EP else "")
+                     if student_ep else "")
             print(f"     mean {signal} {c:<22} {statistics.fmean(vals):+.3f}{extra}")
     return margins
 
@@ -246,7 +225,20 @@ async def probe(tok, states, candidates, label):
 async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-n", type=int, default=30, help="states per condition")
+    ap.add_argument(
+        "--allow-metered-remote-endpoints",
+        action="store_true",
+        help="explicitly authorize non-loopback endpoints that may incur charges",
+    )
     args = ap.parse_args()
+    teacher_ep = os.environ["FOURB_EP"].rstrip("/")
+    student_ep = (os.environ.get("STUDENT_EP") or "").rstrip("/") or None
+    checked = require_zero_spend_endpoints(
+        [teacher_ep] + ([student_ep] if student_ep else []),
+        allow_metered_remote_endpoints=args.allow_metered_remote_endpoints,
+    )
+    teacher_ep = checked[0]
+    student_ep = checked[1] if student_ep else None
 
     from transformers import AutoTokenizer
     tok = AutoTokenizer.from_pretrained("Qwen/Qwen3.5-2B", trust_remote_code=True)
@@ -259,8 +251,14 @@ async def main():
         print("insufficient states — check run IDs / predicates")
         sys.exit(1)
 
-    cook_m = await probe(tok, cook_states, CANDIDATES_COOK, "COOK (support-hole hypothesis)")
-    ctrl_m = await probe(tok, ctrl_states, CANDIDATES_CONTROL, "CONTROL (teacher-competent lily)")
+    cook_m = await probe(
+        tok, cook_states, CANDIDATES_COOK, "COOK (support-hole hypothesis)",
+        teacher_ep, student_ep,
+    )
+    ctrl_m = await probe(
+        tok, ctrl_states, CANDIDATES_CONTROL, "CONTROL (teacher-competent lily)",
+        teacher_ep, student_ep,
+    )
 
     if cook_m and ctrl_m:
         dm = statistics.median(ctrl_m) - statistics.median(cook_m)

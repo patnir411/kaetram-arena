@@ -1,0 +1,134 @@
+{
+  "schema_version": "kaetram.local-weight-pilot.v1",
+  "pilot_id": "local-render-parity-pilot-v1",
+  "status": "preregistered_exploratory",
+  "claim_boundary": {
+    "confirmatory": false,
+    "purpose": "Exercise the matched local renderer and estimate action-throughput feasibility before any confirmatory run.",
+    "prohibited_claims": [
+      "model superiority",
+      "quest-completion improvement",
+      "recovery benefit",
+      "generalization"
+    ]
+  },
+  "protocol": {
+    "scenario": "D",
+    "duration_seconds": 300,
+    "episodes_per_cell": 1,
+    "personality": "completionist",
+    "prompt_agent_name": "EvalCompletionist",
+    "include_game_knowledge": true,
+    "recovery": false,
+    "tool_schema_source": "canonical",
+    "mongo_database": "kaetram_devlopment",
+    "schedule_algorithm": "sha256-rank-v1",
+    "schedule_seed": 20260723,
+    "environment_seed_mechanism": "kaetram-environment-rng-attestation/v2",
+    "environment_rng_algorithm": "mulberry32-sha256-v1",
+    "environment_seed_reason": "Paired seeds hold the deterministic game RNG stream fixed across weight arms while retaining replicate-level variation."
+  },
+  "models": {
+    "base_2b": {
+      "api_model": "2b-base"
+    },
+    "opd_r2_2b": {
+      "api_model": "2b-opd-r2"
+    },
+    "opd_r3_2b": {
+      "api_model": "2b-opd-r3"
+    }
+  },
+  "cells": [
+    {
+      "cell_id": "rep01-r2",
+      "replicate": 1,
+      "snapshot": "opd_r2_2b",
+      "inference_seed": 1729,
+      "environment_seed": 41001,
+      "schedule_index": 0
+    },
+    {
+      "cell_id": "rep01-r3",
+      "replicate": 1,
+      "snapshot": "opd_r3_2b",
+      "inference_seed": 1729,
+      "environment_seed": 41001,
+      "schedule_index": 1
+    },
+    {
+      "cell_id": "rep01-base",
+      "replicate": 1,
+      "snapshot": "base_2b",
+      "inference_seed": 1729,
+      "environment_seed": 41001,
+      "schedule_index": 2
+    },
+    {
+      "cell_id": "rep02-base",
+      "replicate": 2,
+      "snapshot": "base_2b",
+      "inference_seed": 2718,
+      "environment_seed": 41002,
+      "schedule_index": 3
+    },
+    {
+      "cell_id": "rep02-r2",
+      "replicate": 2,
+      "snapshot": "opd_r2_2b",
+      "inference_seed": 2718,
+      "environment_seed": 41002,
+      "schedule_index": 4
+    },
+    {
+      "cell_id": "rep02-r3",
+      "replicate": 2,
+      "snapshot": "opd_r3_2b",
+      "inference_seed": 2718,
+      "environment_seed": 41002,
+      "schedule_index": 5
+    },
+    {
+      "cell_id": "rep03-base",
+      "replicate": 3,
+      "snapshot": "base_2b",
+      "inference_seed": 3141,
+      "environment_seed": 41003,
+      "schedule_index": 6
+    },
+    {
+      "cell_id": "rep03-r2",
+      "replicate": 3,
+      "snapshot": "opd_r2_2b",
+      "inference_seed": 3141,
+      "environment_seed": 41003,
+      "schedule_index": 7
+    },
+    {
+      "cell_id": "rep03-r3",
+      "replicate": 3,
+      "snapshot": "opd_r3_2b",
+      "inference_seed": 3141,
+      "environment_seed": 41003,
+      "schedule_index": 8
+    }
+  ],
+  "reporting": {
+    "primary_diagnostics": [
+      "valid structured tool calls per minute",
+      "zero-turn episode count",
+      "tool parse rate",
+      "API error count",
+      "wall-clock budget overrun"
+    ],
+    "exploratory_game_metrics": [
+      "core3_stages_advanced",
+      "quest_stages_advanced",
+      "xp_db_delta",
+      "unique_positions"
+    ],
+    "unit_of_reporting": "independent episode",
+    "exclusions": "No outcome-based exclusions. Invalid provenance or canonical-start receipts remain in the inventory and are reported as invalid cells.",
+    "confirmatory_reuse": "Pilot outcomes may inform feasibility and power planning but must not be pooled into the confirmatory estimate."
+  }
+}

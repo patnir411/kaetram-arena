@@ -1,0 +1,32 @@
+{
+  "schema_version": "kaetram.local-weight-recovery-factorial-public-artifacts.v1",
+  "pilot_id": "local-weights-recovery-30m-v1",
+  "bundle_index_sha256": "c6c69bbf3416cf8405c211032b5c1e3fdc250c264325faed69bf618e941aab0e",
+  "files": [
+    {
+      "path": "cells.csv",
+      "size_bytes": 4853,
+      "sha256": "0829dd8da2e375b45184166a60070c50d52cacfed5bf2dc958ff5ddf415d5c7a"
+    },
+    {
+      "path": "paired-differences.csv",
+      "size_bytes": 711,
+      "sha256": "c326533240e663a46381869f67b86c2beda3ed59c1ae1f6ae37d11e4e86111c0"
+    },
+    {
+      "path": "paper-table-public.md",
+      "size_bytes": 1107,
+      "sha256": "928fcbfbb7ba4c169f7ed61c8267f8755a2a18cbc53b96294a6a05ae8f55a4f9"
+    },
+    {
+      "path": "paper-table-public.tex",
+      "size_bytes": 968,
+      "sha256": "5a951e8062f52feea4170e452d30d3247f1070805a3b6213bd96668da180c9fe"
+    },
+    {
+      "path": "public-summary.json",
+      "size_bytes": 1208,
+      "sha256": "75ea5d3fb524721ac7749508f069e0acfc8d0f5d775c3f8072cd38ec62794f6d"
+    }
+  ]
+}

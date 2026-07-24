@@ -1,0 +1,109 @@
+{
+  "artifact_index_sha256": "fe117a98c506be441be12c07e4f467b00751807ee8f473e8026998fa257c1560",
+  "collapsed_cells": [
+    {
+      "condition_id": "python-docs_no-tools",
+      "opportunity_rate": 0.3,
+      "outcome_stable_states": 20,
+      "recovery_opportunity_states": 6,
+      "snapshot": "base_2b",
+      "state_outputs": 20
+    },
+    {
+      "condition_id": "python-docs_native-tools",
+      "opportunity_rate": 0.5,
+      "outcome_stable_states": 20,
+      "recovery_opportunity_states": 10,
+      "snapshot": "base_2b",
+      "state_outputs": 20
+    },
+    {
+      "condition_id": "canonical-docs_no-tools",
+      "opportunity_rate": 0.2,
+      "outcome_stable_states": 20,
+      "recovery_opportunity_states": 4,
+      "snapshot": "base_2b",
+      "state_outputs": 20
+    },
+    {
+      "condition_id": "canonical-docs_native-tools",
+      "opportunity_rate": 0.6,
+      "outcome_stable_states": 20,
+      "recovery_opportunity_states": 12,
+      "snapshot": "base_2b",
+      "state_outputs": 20
+    },
+    {
+      "condition_id": "python-docs_no-tools",
+      "opportunity_rate": 0.25,
+      "outcome_stable_states": 20,
+      "recovery_opportunity_states": 5,
+      "snapshot": "opd_r2_2b",
+      "state_outputs": 20
+    },
+    {
+      "condition_id": "python-docs_native-tools",
+      "opportunity_rate": 0.55,
+      "outcome_stable_states": 20,
+      "recovery_opportunity_states": 11,
+      "snapshot": "opd_r2_2b",
+      "state_outputs": 20
+    },
+    {
+      "condition_id": "canonical-docs_no-tools",
+      "opportunity_rate": 0.25,
+      "outcome_stable_states": 20,
+      "recovery_opportunity_states": 5,
+      "snapshot": "opd_r2_2b",
+      "state_outputs": 20
+    },
+    {
+      "condition_id": "canonical-docs_native-tools",
+      "opportunity_rate": 0.4,
+      "outcome_stable_states": 20,
+      "recovery_opportunity_states": 8,
+      "snapshot": "opd_r2_2b",
+      "state_outputs": 20
+    },
+    {
+      "condition_id": "python-docs_no-tools",
+      "opportunity_rate": 0.35,
+      "outcome_stable_states": 20,
+      "recovery_opportunity_states": 7,
+      "snapshot": "opd_r3_2b",
+      "state_outputs": 20
+    },
+    {
+      "condition_id": "python-docs_native-tools",
+      "opportunity_rate": 0.35,
+      "outcome_stable_states": 20,
+      "recovery_opportunity_states": 7,
+      "snapshot": "opd_r3_2b",
+      "state_outputs": 20
+    },
+    {
+      "condition_id": "canonical-docs_no-tools",
+      "opportunity_rate": 0.3,
+      "outcome_stable_states": 20,
+      "recovery_opportunity_states": 6,
+      "snapshot": "opd_r3_2b",
+      "state_outputs": 20
+    },
+    {
+      "condition_id": "canonical-docs_native-tools",
+      "opportunity_rate": 0.6,
+      "outcome_stable_states": 20,
+      "recovery_opportunity_states": 12,
+      "snapshot": "opd_r3_2b",
+      "state_outputs": 20
+    }
+  ],
+  "groups_with_identical_semantic_responses": 240,
+  "groups_with_multiple_semantic_responses": 0,
+  "groups_with_stable_recovery_outcome": 240,
+  "registered_samples_per_state_condition": 5,
+  "schema_version": "kaetram.local-trigger-incidence-seed-diversity-audit.v1",
+  "semantic_response_count_after_within_group_deduplication": 240,
+  "state_condition_groups": 240,
+  "study_id": "local-trigger-incidence-v1"
+}

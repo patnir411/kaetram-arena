@@ -19,6 +19,7 @@ from dashboard.constants import (
 )
 from dashboard.parsers import parse_session_log, quick_session_summary, live_session_stats
 from dashboard.game_state import extract_game_state_from_db
+from dashboard.eval_latest import LatestEvalPointerError, resolve_latest_eval_dir
 
 logger = logging.getLogger(__name__)
 
@@ -611,11 +612,19 @@ class APIMixin:
     _eval_cache = {"data": None, "mtime": 0}
 
     def send_eval_latest(self):
-        """Return latest eval comparison results from dataset/eval/latest/ (or dataset/eval/)."""
-        # Prefer latest symlink (new run-dir layout), fall back to flat layout
-        eval_dir = os.path.join(DATASET_DIR, "eval", "latest")
-        if not os.path.isdir(eval_dir):
-            eval_dir = os.path.join(DATASET_DIR, "eval")
+        """Return results from the validated latest-run pointer or legacy flat layout."""
+        eval_root = os.path.join(DATASET_DIR, "eval")
+        try:
+            latest_dir = resolve_latest_eval_dir(eval_root)
+        except LatestEvalPointerError as exc:
+            logger.error("Invalid latest evaluation pointer: %s", exc)
+            return self._send_json({
+                "status": "invalid_latest_pointer",
+                "models": [],
+            })
+        # A missing pointer is allowed for clean clones and the legacy flat
+        # dataset layout. An invalid pointer never silently selects stale data.
+        eval_dir = os.fspath(latest_dir) if latest_dir is not None else eval_root
         if not os.path.isdir(eval_dir):
             return self._send_json({"status": "no_eval_data", "models": []})
 
@@ -775,15 +784,62 @@ class APIMixin:
         """Return live status from running eval sandboxes (/tmp/kaetram_eval_*)."""
         import glob as _glob
 
-        # TTL fast-path: while the cache is fresh, skip the fingerprint glob
-        # entirely. The eval tab polls every 2 s; the fingerprint involved a
-        # glob + per-file getmtime that ran on every request. After TTL we
-        # still build the fingerprint to detect on-disk changes faster than
-        # waiting for the next TTL window.
+        # Validate the promoted run before either cache path. Pointer promotion,
+        # pointer corruption, and watchdog changes must invalidate the cache
+        # even when the live sandbox logs have not changed.
+        eval_root = os.path.join(DATASET_DIR, "eval")
+        pointer_path = os.path.join(eval_root, "latest-run.txt")
+        try:
+            latest_eval_dir = resolve_latest_eval_dir(eval_root)
+        except LatestEvalPointerError as exc:
+            logger.error("Invalid latest evaluation pointer: %s", exc)
+            latest_eval_dir = None
+            completed_results_allowed = False
+            latest_pointer_status = "invalid"
+            latest_pointer_error = str(exc)
+        else:
+            completed_results_allowed = True
+            latest_pointer_status = (
+                "promoted" if latest_eval_dir is not None else "legacy"
+            )
+            latest_pointer_error = ""
+        completed_eval_dir = (
+            os.fspath(latest_eval_dir) if latest_eval_dir is not None else eval_root
+        )
+
+        def file_identity(path):
+            try:
+                item = os.stat(path, follow_symlinks=False)
+            except OSError:
+                return None
+            return (
+                item.st_dev,
+                item.st_ino,
+                item.st_mode,
+                item.st_size,
+                item.st_mtime_ns,
+                item.st_ctime_ns,
+            )
+
+        status_path = os.path.join(completed_eval_dir, "watchdog_status.json")
+        alert_path = os.path.join(completed_eval_dir, "watchdog_alert.txt")
+        eval_fingerprint = (
+            latest_pointer_status,
+            latest_pointer_error,
+            completed_eval_dir,
+            file_identity(pointer_path),
+            file_identity(status_path) if completed_results_allowed else None,
+            file_identity(alert_path) if completed_results_allowed else None,
+        )
+
+        # The eval tab polls every 2 s. A fresh cache may skip the sandbox-log
+        # scan only when the validated run/watchdog fingerprint is unchanged.
         now = time.time()
         if (
             APIMixin._eval_live_cache["data"] is not None
             and now - APIMixin._eval_live_cache["computed_at"] < EVAL_LIVE_CACHE_TTL
+            and APIMixin._eval_live_cache.get("eval_fingerprint")
+            == eval_fingerprint
         ):
             return self._send_json(APIMixin._eval_live_cache["data"])
 
@@ -798,6 +854,8 @@ class APIMixin:
         if (
             APIMixin._eval_live_cache["data"] is not None
             and APIMixin._eval_live_cache["fingerprint"] == fingerprint
+            and APIMixin._eval_live_cache.get("eval_fingerprint")
+            == eval_fingerprint
         ):
             # Disk unchanged — extend the cache window.
             APIMixin._eval_live_cache["computed_at"] = now
@@ -859,11 +917,12 @@ class APIMixin:
                     except Exception as e:
                         logger.debug("eval log parse failed for %s: %s", model_name, e)
 
-            # Completed episode count from results.json (check latest symlink first)
-            results_path = os.path.join(DATASET_DIR, "eval", "latest", model_name, "results.json")
-            if not os.path.isfile(results_path):
-                results_path = os.path.join(DATASET_DIR, "eval", model_name, "results.json")
-            if os.path.isfile(results_path):
+            # Completed episode count from the validated pointer (or the
+            # legacy flat layout when no pointer exists).
+            results_path = os.path.join(
+                completed_eval_dir, model_name, "results.json"
+            )
+            if completed_results_allowed and os.path.isfile(results_path):
                 try:
                     with open(results_path) as f:
                         rd = json.load(f)
@@ -875,20 +934,15 @@ class APIMixin:
 
             models[model_name] = model
 
-        eval_dir = os.path.join(DATASET_DIR, "eval", "latest")
-        if not os.path.isdir(eval_dir):
-            eval_dir = os.path.join(DATASET_DIR, "eval")
         watchdog = None
         watchdog_alert = ""
-        status_path = os.path.join(eval_dir, "watchdog_status.json")
-        alert_path = os.path.join(eval_dir, "watchdog_alert.txt")
-        if os.path.isfile(status_path):
+        if completed_results_allowed and os.path.isfile(status_path):
             try:
                 with open(status_path) as f:
                     watchdog = json.load(f)
             except Exception:
                 watchdog = None
-        if os.path.isfile(alert_path):
+        if completed_results_allowed and os.path.isfile(alert_path):
             try:
                 with open(alert_path) as f:
                     watchdog_alert = f.read().strip()
@@ -900,10 +954,13 @@ class APIMixin:
             "eval_running": any(m["active"] for m in models.values()),
             "watchdog": watchdog,
             "watchdog_alert": watchdog_alert,
+            "latest_pointer_status": latest_pointer_status,
+            "latest_pointer_error": latest_pointer_error,
         }
         APIMixin._eval_live_cache = {
             "data": payload,
             "computed_at": now,
             "fingerprint": fingerprint,
+            "eval_fingerprint": eval_fingerprint,
         }
         self._send_json(payload)

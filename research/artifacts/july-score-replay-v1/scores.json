@@ -1,0 +1,359 @@
+{
+  "lane_scores": [
+    {
+      "agent": "agent_0",
+      "herbalist_wall_pass": false,
+      "included_observation_count": 660,
+      "lane_index": 0,
+      "run_id": "run_20260711_065435",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 0,
+        "Rick's Roll": 0
+      },
+      "total": 3
+    },
+    {
+      "agent": "agent_1",
+      "herbalist_wall_pass": false,
+      "included_observation_count": 1009,
+      "lane_index": 1,
+      "run_id": "run_20260711_065435",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 1,
+        "Rick's Roll": 0
+      },
+      "total": 4
+    },
+    {
+      "agent": "agent_2",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 1158,
+      "lane_index": 2,
+      "run_id": "run_20260711_065435",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 2,
+        "Rick's Roll": 0
+      },
+      "total": 5
+    },
+    {
+      "agent": "agent_0",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 528,
+      "lane_index": 3,
+      "run_id": "run_20260711_153427",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 3,
+        "Rick's Roll": 0
+      },
+      "total": 6
+    },
+    {
+      "agent": "agent_1",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 591,
+      "lane_index": 4,
+      "run_id": "run_20260711_153427",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 3,
+        "Rick's Roll": 0
+      },
+      "total": 6
+    },
+    {
+      "agent": "agent_2",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 595,
+      "lane_index": 5,
+      "run_id": "run_20260711_153427",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 3,
+        "Rick's Roll": 0
+      },
+      "total": 6
+    },
+    {
+      "agent": "agent_0",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 637,
+      "lane_index": 6,
+      "run_id": "run_20260713_084905",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 2,
+        "Rick's Roll": 0
+      },
+      "total": 5
+    },
+    {
+      "agent": "agent_1",
+      "herbalist_wall_pass": false,
+      "included_observation_count": 428,
+      "lane_index": 7,
+      "run_id": "run_20260713_084905",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 0,
+        "Rick's Roll": 0
+      },
+      "total": 3
+    },
+    {
+      "agent": "agent_2",
+      "herbalist_wall_pass": false,
+      "included_observation_count": 712,
+      "lane_index": 8,
+      "run_id": "run_20260713_084905",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 1,
+        "Rick's Roll": 0
+      },
+      "total": 4
+    },
+    {
+      "agent": "agent_0",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 730,
+      "lane_index": 9,
+      "run_id": "run_20260713_191230",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 2,
+        "Rick's Roll": 0
+      },
+      "total": 5
+    },
+    {
+      "agent": "agent_1",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 836,
+      "lane_index": 10,
+      "run_id": "run_20260713_191230",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 2,
+        "Rick's Roll": 0
+      },
+      "total": 5
+    },
+    {
+      "agent": "agent_2",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 963,
+      "lane_index": 11,
+      "run_id": "run_20260713_191230",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 2,
+        "Rick's Roll": 0
+      },
+      "total": 5
+    },
+    {
+      "agent": "agent_0",
+      "herbalist_wall_pass": false,
+      "included_observation_count": 662,
+      "lane_index": 12,
+      "run_id": "run_20260715_030342",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 1,
+        "Rick's Roll": 0
+      },
+      "total": 4
+    },
+    {
+      "agent": "agent_1",
+      "herbalist_wall_pass": false,
+      "included_observation_count": 766,
+      "lane_index": 13,
+      "run_id": "run_20260715_030342",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 1,
+        "Rick's Roll": 0
+      },
+      "total": 4
+    },
+    {
+      "agent": "agent_2",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 882,
+      "lane_index": 14,
+      "run_id": "run_20260715_030342",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 2,
+        "Rick's Roll": 0
+      },
+      "total": 5
+    },
+    {
+      "agent": "agent_0",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 581,
+      "lane_index": 15,
+      "run_id": "run_20260715_090731",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 2,
+        "Rick's Roll": 0
+      },
+      "total": 5
+    },
+    {
+      "agent": "agent_1",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 609,
+      "lane_index": 16,
+      "run_id": "run_20260715_090731",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 2,
+        "Rick's Roll": 0
+      },
+      "total": 5
+    },
+    {
+      "agent": "agent_2",
+      "herbalist_wall_pass": false,
+      "included_observation_count": 739,
+      "lane_index": 17,
+      "run_id": "run_20260715_090731",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 1,
+        "Rick's Roll": 0
+      },
+      "total": 4
+    },
+    {
+      "agent": "agent_0",
+      "herbalist_wall_pass": false,
+      "included_observation_count": 654,
+      "lane_index": 18,
+      "run_id": "run_20260715_151045",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 1,
+        "Rick's Roll": 0
+      },
+      "total": 4
+    },
+    {
+      "agent": "agent_1",
+      "herbalist_wall_pass": false,
+      "included_observation_count": 937,
+      "lane_index": 19,
+      "run_id": "run_20260715_151045",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 1,
+        "Rick's Roll": 0
+      },
+      "total": 4
+    },
+    {
+      "agent": "agent_2",
+      "herbalist_wall_pass": false,
+      "included_observation_count": 947,
+      "lane_index": 20,
+      "run_id": "run_20260715_151045",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 1,
+        "Rick's Roll": 0
+      },
+      "total": 4
+    },
+    {
+      "agent": "agent_0",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 783,
+      "lane_index": 21,
+      "run_id": "run_20260715_211431",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 2,
+        "Rick's Roll": 0
+      },
+      "total": 5
+    },
+    {
+      "agent": "agent_1",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 837,
+      "lane_index": 22,
+      "run_id": "run_20260715_211431",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 3,
+        "Rick's Roll": 0
+      },
+      "total": 6
+    },
+    {
+      "agent": "agent_2",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 855,
+      "lane_index": 23,
+      "run_id": "run_20260715_211431",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 3,
+        "Rick's Roll": 0
+      },
+      "total": 6
+    },
+    {
+      "agent": "agent_0",
+      "herbalist_wall_pass": false,
+      "included_observation_count": 743,
+      "lane_index": 24,
+      "run_id": "run_20260716_215512",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 1,
+        "Rick's Roll": 0
+      },
+      "total": 4
+    },
+    {
+      "agent": "agent_1",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 804,
+      "lane_index": 25,
+      "run_id": "run_20260716_215512",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 2,
+        "Rick's Roll": 0
+      },
+      "total": 5
+    },
+    {
+      "agent": "agent_2",
+      "herbalist_wall_pass": true,
+      "included_observation_count": 686,
+      "lane_index": 26,
+      "run_id": "run_20260716_215512",
+      "stages": {
+        "Foresting": 3,
+        "Herbalist's Desperation": 2,
+        "Rick's Roll": 0
+      },
+      "total": 5
+    }
+  ],
+  "manifest_sha256": "63e8c6c70670fa4e2f5d527892093f4fb96d85be91e3896647a056eaf995b7bf",
+  "registry_manifest_sha256": "d18225c19ce896f2bbfc85fd1f285b19453629f817d44916a60e37b0b74ea626",
+  "schema_version": "kaetram.july-score-projection-scores.v1",
+  "score_source": "anonymous observe-result projection through each lane's inclusive offset-aware six-hour cutoff"
+}

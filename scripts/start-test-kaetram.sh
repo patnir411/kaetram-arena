@@ -27,25 +27,63 @@ done
 
 
 TEST_PORT="${TEST_PORT:-9191}"
-KAETRAM_DIR="$HOME/projects/Kaetram-Open"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+KAETRAM_DIR="${KAETRAM_GAME_DIR:-$HOME/projects/Kaetram-Open}"
 SERVER_DIR="$KAETRAM_DIR/packages/server"
 LOG_DIR="/tmp/kaetram_test"
 LOG_FILE="$LOG_DIR/gameserver_${TEST_PORT}.log"
 
 mkdir -p "$LOG_DIR"
 
-NVM_SH="$HOME/.nvm/nvm.sh"
-[ -f "$NVM_SH" ] || NVM_SH="$(brew --prefix nvm 2>/dev/null)/nvm.sh"
-# shellcheck disable=SC1090
-source "$NVM_SH"
-nvm use 20 --silent
+NODE_BIN="${KAETRAM_NODE_BINARY:-$(command -v node || true)}"
+node_is_v20() { [ -n "$1" ] && case "$("$1" --version 2>/dev/null)" in v20.*) true ;; *) false ;; esac; }
+if ! node_is_v20 "$NODE_BIN" && [ -z "${KAETRAM_NODE_BINARY:-}" ]; then
+  # PATH node isn't v20 (VM default is v24) — fall back to nvm's node 20 install.
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [ -s "$NVM_DIR/nvm.sh" ]; then
+    # shellcheck disable=SC1091
+    . "$NVM_DIR/nvm.sh" >/dev/null 2>&1 || true
+    nvm use 20 >/dev/null 2>&1 || true
+    NODE_BIN="$(command -v node || true)"
+  fi
+  if ! node_is_v20 "$NODE_BIN"; then
+    NVM_NODE_20="$(ls -d "$NVM_DIR"/versions/node/v20.*/bin/node 2>/dev/null | sort -V | tail -1)"
+    [ -n "$NVM_NODE_20" ] && NODE_BIN="$NVM_NODE_20"
+  fi
+fi
+if [ -z "$NODE_BIN" ]; then
+  echo "ERROR: Node.js missing — put Node 20 on PATH or set KAETRAM_NODE_BINARY" >&2
+  exit 1
+fi
+NODE_VERSION="$("$NODE_BIN" --version 2>/dev/null || true)"
+case "$NODE_VERSION" in
+  v20.*) ;;
+  *)
+    echo "ERROR: Kaetram requires Node 20; $NODE_BIN reported '${NODE_VERSION:-unknown}'" >&2
+    exit 1
+    ;;
+esac
+
+port_is_open() {
+  if python3 "$PROJECT_DIR/port_probe.py" --host 127.0.0.1 --port "$1"; then
+    return 0
+  else
+    probe_status=$?
+    if [ "$probe_status" -eq 1 ]; then
+      return 1
+    fi
+    echo "ERROR: port probe failed for $1 (exit $probe_status)" >&2
+    exit 1
+  fi
+}
 
 if [ ! -f "$SERVER_DIR/dist/main.js" ]; then
   echo "ERROR: $SERVER_DIR/dist/main.js missing — run 'yarn build' in $KAETRAM_DIR first" >&2
   exit 1
 fi
 
-if ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${TEST_PORT}\$"; then
+if port_is_open "$TEST_PORT"; then
   echo "ERROR: port ${TEST_PORT} already in use — kill the existing listener or pick another TEST_PORT" >&2
   exit 1
 fi
@@ -54,7 +92,7 @@ fi
 # in .env.defaults, so dormant — but reserve +1 anyway so a future config flip
 # doesn't silently double-bind). See packages/server/src/args.ts:36.
 API_PORT=$((TEST_PORT + 1))
-if ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${API_PORT}\$"; then
+if port_is_open "$API_PORT"; then
   echo "ERROR: api port ${API_PORT} (TEST_PORT+1) already in use — Kaetram reserves it for apiPort" >&2
   exit 1
 fi
@@ -66,4 +104,4 @@ export SKIP_DATABASE=false
 cd "$SERVER_DIR"
 echo "[start-test-kaetram] starting on :${TEST_PORT} (NODE_ENV=e2e, db=kaetram_e2e)"
 echo "[start-test-kaetram] log: $LOG_FILE"
-exec node --enable-source-maps dist/main.js --port "$TEST_PORT" 2>&1 | tee -a "$LOG_FILE"
+exec "$NODE_BIN" --enable-source-maps dist/main.js --port "$TEST_PORT" 2>&1 | tee -a "$LOG_FILE"

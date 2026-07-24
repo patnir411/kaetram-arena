@@ -1,0 +1,276 @@
+{
+  "schema_version": "kaetram.local-weight-recovery-factorial.v1",
+  "pilot_id": "local-weights-recovery-30m-v1",
+  "status": "preregistered_exploratory",
+  "claim_boundary": {
+    "confirmatory": false,
+    "purpose": "Test whether 30-minute local cells expose task progress or recovery events before committing to the six-hour confirmatory factorial.",
+    "prohibited_claims": [
+      "model superiority",
+      "causal weight effect",
+      "causal recovery effect or benefit",
+      "quest-completion improvement",
+      "generalization"
+    ]
+  },
+  "protocol": {
+    "scenario": "D",
+    "duration_seconds": 1800,
+    "episodes_per_cell": 1,
+    "personality": "completionist",
+    "prompt_agent_name": "EvalCompletionist",
+    "include_game_knowledge": true,
+    "recovery_factor": [
+      false,
+      true
+    ],
+    "tool_schema_source": "canonical",
+    "mongo_database": "kaetram_devlopment",
+    "schedule_algorithm": "balanced-paired-order-v1",
+    "schedule_seed": 20260725,
+    "environment_seed_mechanism": "kaetram-environment-rng-attestation/v2",
+    "environment_rng_algorithm": "mulberry32-sha256-v1",
+    "environment_seed_reason": "Paired seeds hold the initial deterministic gameplay RNG state fixed across all weight and recovery arms within each replicate; realized streams may diverge after treatment-dependent actions."
+  },
+  "models": {
+    "base_2b": {
+      "api_model": "2b-base",
+      "checkpoint_sha256": "aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1"
+    },
+    "opd_r2_2b": {
+      "api_model": "2b-opd-r2",
+      "checkpoint_sha256": "636aa92a16ee63965d5211625ba32c0524eb90da87f6b4727ee1f057e0486104"
+    },
+    "opd_r3_2b": {
+      "api_model": "2b-opd-r3",
+      "checkpoint_sha256": "c4df1ea2fda9253d595ff4a2068c72dd4de173241ab93cc1ee0d5dc42e302873"
+    }
+  },
+  "artifact_contract": {
+    "tokenizer_sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+    "render_contract_sha256": "11908184ad9ba71352740d4d429790ea427446b11146be202bf873bd7163979f",
+    "chat_template_sha256": "562a0a6f72bf5722612866d9f5d7e947be4b08a429e407f8e522e70137db5e1e",
+    "system_prompt_sha256": "b86e0fa3306778f03420ab59528df537723ba035d6d1efec723ac4624c49b734",
+    "game_revision": "7a3d722e8e200ca44fd959099386b42a5fbe0cb5",
+    "game_bundle_sha256": "b0f9e42b0da63dc7bb1f9172136cd8a1361f762e683b72011172db286c256916",
+    "source_identity": "The launch requires a clean arena commit containing this registration; prelaunch.json records that exact commit and every cell must match it."
+  },
+  "decoding_contract": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "presence_penalty": 1.5,
+    "max_response_tokens": 2048,
+    "max_context_tokens": 16384,
+    "request_seed_derivation": "derive_request_seed(inference_seed, session_number, turn)"
+  },
+  "recovery_contract": {
+    "off_state": "KAETRAM_TOOL_RECOVERY is absent",
+    "on_state": "KAETRAM_TOOL_RECOVERY is exactly 1",
+    "trigger": "The endpoint returned no structured tool calls, content is nonempty, and recover_tool_calls(content) returns at least one confidently parsed canonical-name call.",
+    "execution": "Execute every recovered call once in emitted order; do not override or supplement a nonempty structured-call response.",
+    "history_rewrite": "Replace the malformed endpoint text in model history with a canonical assistant tool-call turn.",
+    "correction_result_prefix": "[format]",
+    "correction_note_sha256": "3436d38e216feb6646ac6ea6003d45e4629f31afba119ce3df4be5e80e5c9e6d",
+    "recovery_opportunity": "A raw no-structured-call emission for which recover_tool_calls(content) returns one or more calls.",
+    "recovery_attempt": "One recovered call executed by the harness.",
+    "recovery_success": "A recovered call has a paired retained tool result that does not decode as an execution error.",
+    "recovery_failure": "A recovered call is unpaired or its retained tool result decodes as an execution error.",
+    "retry_limit": "No automatic retry; each recovered call is attempted once."
+  },
+  "cells": [
+    {
+      "cell_id": "rep01-base-rec-off",
+      "replicate": 1,
+      "snapshot": "base_2b",
+      "recovery": false,
+      "inference_seed": 1729,
+      "environment_seed": 42001,
+      "schedule_index": 0
+    },
+    {
+      "cell_id": "rep01-base-rec-on",
+      "replicate": 1,
+      "snapshot": "base_2b",
+      "recovery": true,
+      "inference_seed": 1729,
+      "environment_seed": 42001,
+      "schedule_index": 1
+    },
+    {
+      "cell_id": "rep01-r2-rec-on",
+      "replicate": 1,
+      "snapshot": "opd_r2_2b",
+      "recovery": true,
+      "inference_seed": 1729,
+      "environment_seed": 42001,
+      "schedule_index": 2
+    },
+    {
+      "cell_id": "rep01-r2-rec-off",
+      "replicate": 1,
+      "snapshot": "opd_r2_2b",
+      "recovery": false,
+      "inference_seed": 1729,
+      "environment_seed": 42001,
+      "schedule_index": 3
+    },
+    {
+      "cell_id": "rep01-r3-rec-off",
+      "replicate": 1,
+      "snapshot": "opd_r3_2b",
+      "recovery": false,
+      "inference_seed": 1729,
+      "environment_seed": 42001,
+      "schedule_index": 4
+    },
+    {
+      "cell_id": "rep01-r3-rec-on",
+      "replicate": 1,
+      "snapshot": "opd_r3_2b",
+      "recovery": true,
+      "inference_seed": 1729,
+      "environment_seed": 42001,
+      "schedule_index": 5
+    },
+    {
+      "cell_id": "rep02-r3-rec-off",
+      "replicate": 2,
+      "snapshot": "opd_r3_2b",
+      "recovery": false,
+      "inference_seed": 2718,
+      "environment_seed": 42002,
+      "schedule_index": 6
+    },
+    {
+      "cell_id": "rep02-r3-rec-on",
+      "replicate": 2,
+      "snapshot": "opd_r3_2b",
+      "recovery": true,
+      "inference_seed": 2718,
+      "environment_seed": 42002,
+      "schedule_index": 7
+    },
+    {
+      "cell_id": "rep02-base-rec-on",
+      "replicate": 2,
+      "snapshot": "base_2b",
+      "recovery": true,
+      "inference_seed": 2718,
+      "environment_seed": 42002,
+      "schedule_index": 8
+    },
+    {
+      "cell_id": "rep02-base-rec-off",
+      "replicate": 2,
+      "snapshot": "base_2b",
+      "recovery": false,
+      "inference_seed": 2718,
+      "environment_seed": 42002,
+      "schedule_index": 9
+    },
+    {
+      "cell_id": "rep02-r2-rec-off",
+      "replicate": 2,
+      "snapshot": "opd_r2_2b",
+      "recovery": false,
+      "inference_seed": 2718,
+      "environment_seed": 42002,
+      "schedule_index": 10
+    },
+    {
+      "cell_id": "rep02-r2-rec-on",
+      "replicate": 2,
+      "snapshot": "opd_r2_2b",
+      "recovery": true,
+      "inference_seed": 2718,
+      "environment_seed": 42002,
+      "schedule_index": 11
+    },
+    {
+      "cell_id": "rep03-r2-rec-on",
+      "replicate": 3,
+      "snapshot": "opd_r2_2b",
+      "recovery": true,
+      "inference_seed": 3141,
+      "environment_seed": 42003,
+      "schedule_index": 12
+    },
+    {
+      "cell_id": "rep03-r2-rec-off",
+      "replicate": 3,
+      "snapshot": "opd_r2_2b",
+      "recovery": false,
+      "inference_seed": 3141,
+      "environment_seed": 42003,
+      "schedule_index": 13
+    },
+    {
+      "cell_id": "rep03-r3-rec-on",
+      "replicate": 3,
+      "snapshot": "opd_r3_2b",
+      "recovery": true,
+      "inference_seed": 3141,
+      "environment_seed": 42003,
+      "schedule_index": 14
+    },
+    {
+      "cell_id": "rep03-r3-rec-off",
+      "replicate": 3,
+      "snapshot": "opd_r3_2b",
+      "recovery": false,
+      "inference_seed": 3141,
+      "environment_seed": 42003,
+      "schedule_index": 15
+    },
+    {
+      "cell_id": "rep03-base-rec-off",
+      "replicate": 3,
+      "snapshot": "base_2b",
+      "recovery": false,
+      "inference_seed": 3141,
+      "environment_seed": 42003,
+      "schedule_index": 16
+    },
+    {
+      "cell_id": "rep03-base-rec-on",
+      "replicate": 3,
+      "snapshot": "base_2b",
+      "recovery": true,
+      "inference_seed": 3141,
+      "environment_seed": 42003,
+      "schedule_index": 17
+    }
+  ],
+  "reporting": {
+    "primary_diagnostics": [
+      "raw endpoint generations",
+      "structured-call emission rate",
+      "raw structured calls passing the registered shallow name/argument validator per observed minute",
+      "canonical executed calls per observed minute",
+      "logged API-error count",
+      "raw malformed-emission count",
+      "recovery-opportunity count",
+      "recovery-attempt count",
+      "recovery execution-success count",
+      "zero-turn episode count",
+      "wall-clock budget overrun",
+      "terminal-chain validity",
+      "attestation and sealed-artifact validity"
+    ],
+    "exploratory_game_metrics": [
+      "core3_stages_advanced",
+      "quest_stages_advanced",
+      "xp_db_delta",
+      "unique_positions",
+      "canonical action counts"
+    ],
+    "unit_of_reporting": "The episode is the cell-level observation; the three replicate/seed blocks are the independent sampling units, and recovery conditions are paired within replicate and weight.",
+    "pairing": "Inference and environment seeds are paired across all six weight x recovery arms within replicate.",
+    "arm_summary": "For each of the six weight x recovery arms, report all three cell values, mean rates, raw denominators, and zero counts; do not report a superiority test or confidence interval.",
+    "paired_contrasts": "For every replicate and weight, report recovery-on minus recovery-off for canonical executed calls, calls per observed minute, raw structured calls, malformed emissions, recovered calls, Core-3 stages, all-quest stages, XP delta, and unique positions. Report all nine contrasts without pooling into a confirmatory estimate.",
+    "definitions": "Malformed emissions are raw endpoint contents matching canonicalize.is_malformed. Recovery opportunities are raw no-structured-call contents producing one or more canonicalize.recover_tool_calls candidates. Raw structured calls must have a canonical name, JSON-object arguments, no unknown or missing registered properties, and registered primitive property types; this is a shallow validator, not full JSON Schema conformance. Canonical executions must equal raw structured calls plus recovered calls by tool in recovery-on cells, and raw structured calls alone in recovery-off cells.",
+    "exclusions": "No outcome-based exclusions. Cells the launcher marks invalid remain in the completed inventory and are reported as invalid cells. If any launcher-valid cell fails the independent provenance, recovery-identity, terminal-chain, canonical-start, raw-emission, DB-boundary, or conservation audit, analysis fails closed and no descriptive result is issued until the discrepancy is resolved.",
+    "confirmatory_reuse": "These exploratory outcomes cannot be pooled into the confirmatory estimate."
+  }
+}

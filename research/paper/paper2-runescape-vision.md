@@ -12,7 +12,7 @@ Train AI agents to execute and defend against adversarial social strategies in a
 
 ## Why This Paper Exists
 
-Paper 1 (Kaetram) proves the distillation infrastructure works. Paper 2 is where the **agent safety research** lives. No existing paper studies adversarial multi-agent dynamics using the RuneScape scam taxonomy as ground truth. This directly maps to AI safety concerns that Anthropic, DeepMind, and the alignment community care about:
+Paper 1 (Kaetram) is intended to validate the distillation infrastructure but is currently an under-replicated case study. Paper 2 is where the **agent safety research** lives. No existing paper studies adversarial multi-agent dynamics using the RuneScape scam taxonomy as ground truth. This directly maps to AI safety concerns that Anthropic, DeepMind, and the alignment community care about:
 
 - Deception detection in multi-agent systems
 - Social manipulation via economic incentives

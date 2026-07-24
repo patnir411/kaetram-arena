@@ -7,20 +7,45 @@ within the next N turns *of the same session*? Cross-tabulate by tool.
 Answers: (a) what fraction of the corpus is low-credit / dead-end, and
 (b) are high-credit turns disproportionately interact_npc / query_quest.
 """
-import sys, bisect
+import argparse
+import bisect
+import sys
 from pathlib import Path
 from collections import defaultdict
 
-sys.path.insert(0, str(Path("scripts/log_analysis")))
-from parse import (  # noqa: E402
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+from scripts.log_analysis.parse import (  # noqa: E402
     list_agent_dirs, list_runs, parse_run_sessions,
     progression_for_quests, quest_stage_counts,
+)
+from scripts.log_analysis.artifact_requirements import (  # noqa: E402
+    MissingEvidenceError,
+    require_agent_run_logs,
 )
 
 SOURCE_RUNS = {
     "run_20260504_140418", "run_20260504_172157", "run_20260504_221206",
     "run_20260505_150033", "run_20260505_214542",
 }
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument(
+    "--raw-root",
+    type=Path,
+    default=Path("dataset/raw"),
+    help="raw agent-log root (default: dataset/raw)",
+)
+args = parser.parse_args()
+try:
+    require_agent_run_logs(
+        args.raw_root,
+        agents=("agent_0", "agent_1", "agent_2"),
+        run_ids=SOURCE_RUNS,
+        analysis="r10 hindsight-credit diagnostic",
+    )
+except MissingEvidenceError as exc:
+    print(f"ERROR: {exc}", file=sys.stderr)
+    raise SystemExit(2) from exc
 ALL_QUESTS = list(quest_stage_counts().keys())
 WINDOWS = [5, 10, 20]
 
@@ -33,7 +58,7 @@ n_sessions = n_adv_sessions = 0
 turns_in_adv = turns_in_dead = 0
 runs_seen = 0
 
-for ad in list_agent_dirs():
+for ad in list_agent_dirs(args.raw_root):
     for rd in list_runs(ad):
         if rd.name not in SOURCE_RUNS:
             continue

@@ -99,6 +99,7 @@ train_image = (
     })
     .add_local_python_source("notifications")
     .add_local_python_source("render")
+    .add_local_python_source("tool_surface")
 )
 
 with train_image.imports():
@@ -147,7 +148,9 @@ LOGGING_STEPS = 10
 # Mask user/system/tool tokens — train loss only on assistant responses.
 MASK_INPUT_TOKENS = True
 
-EXPERIMENT_NAME = "kaetram-qwen3.5-9b-r10"
+# Deliberately separate from the historical r10 checkpoint: this experiment
+# is the first one trained with the model-visible native tool schema.
+EXPERIMENT_NAME = "kaetram-qwen3.5-9b-native-tools-v1"
 
 
 # ---------------------------------------------------------------------------
@@ -159,9 +162,11 @@ EXPERIMENT_NAME = "kaetram-qwen3.5-9b-r10"
 import random as _random
 
 from render import (
+    RENDER_CONTRACT_FILENAME,
     build_system_prompt,
     patch_qwen_chat_template,
     render_record,
+    resolve_render_contract,
 )
 
 
@@ -224,11 +229,22 @@ def load_kaetram_dataset(train_bytes: bytes, val_bytes: bytes, metadata_bytes: b
     metadata = json.loads(metadata_bytes)
     system_prompt = metadata["system_prompt"]
     personality_suffixes = metadata.get("personality_suffixes", {})
+    render_contract = resolve_render_contract(metadata)
 
     def parse_and_format(raw_bytes, augment_rng=None):
         records = json.loads(raw_bytes)
         rows = [
-            {"text": render_record(rec, system_prompt, personality_suffixes, tokenizer, rng=augment_rng)}
+            {
+                "text": render_record(
+                    rec,
+                    system_prompt,
+                    personality_suffixes,
+                    tokenizer,
+                    rng=augment_rng,
+                    render_mode=render_contract["tool_render_mode"],
+                    tools=render_contract["tools"],
+                )
+            }
             for rec in records
         ]
         return datasets.Dataset.from_list(rows)
@@ -271,6 +287,8 @@ def train(train_data: bytes, val_data: bytes, metadata: bytes):
     print(f"Training data: {len(train_data):,} bytes")
     print(f"Validation data: {len(val_data):,} bytes")
     print(f"Metadata: {len(metadata):,} bytes")
+    render_contract = resolve_render_contract(json.loads(metadata))
+    print(f"Render contract: {render_contract['tool_render_mode']}")
 
     # bf16, not 4-bit — QLoRA is not recommended for Qwen3.5.
     print(f"Loading {MODEL_ID}...")
@@ -309,6 +327,10 @@ def train(train_data: bytes, val_data: bytes, metadata: bytes):
     # (SFTConfig.completion_only_loss does not work with dataset_text_field="text"
     # — without a response_template it silently no-ops).
     output_dir = f"/checkpoints/{EXPERIMENT_NAME}"
+    import os as _os
+    _os.makedirs(output_dir, exist_ok=True)
+    with open(f"{output_dir}/{RENDER_CONTRACT_FILENAME}", "w", encoding="utf-8") as f:
+        json.dump(render_contract, f, indent=2)
     print(f"Loss masking: train_on_responses_only={MASK_INPUT_TOKENS}")
     sft_config = SFTConfig(
         output_dir=output_dir,
@@ -395,7 +417,6 @@ def train(train_data: bytes, val_data: bytes, metadata: bytes):
     # adapter, optimizer state (optimizer.pt), scheduler state (scheduler.pt),
     # and RNG state (rng_state.pth — Python/numpy/torch/CUDA generators).
     print("Starting training...")
-    import os as _os
     _has_ckpt = _os.path.exists(output_dir) and any(
         d.startswith("checkpoint-") for d in _os.listdir(output_dir)
     )
@@ -426,6 +447,12 @@ def train(train_data: bytes, val_data: bytes, metadata: bytes):
     print(f"Saving merged safetensors to {merged_dir}...")
     model.save_pretrained_merged(merged_dir, tokenizer, save_method="merged_16bit")
 
+    # The serving path reads this exact manifest and refuses an unversioned
+    # non-r10 checkpoint. Keep a copy beside both deployable artifact forms.
+    for artifact_dir in (adapter_dir, merged_dir):
+        with open(f"{artifact_dir}/{RENDER_CONTRACT_FILENAME}", "w", encoding="utf-8") as f:
+            json.dump(render_contract, f, indent=2)
+
     # Save metrics
     metrics = {
         "train_loss": result.metrics.get("train_loss"),
@@ -439,6 +466,9 @@ def train(train_data: bytes, val_data: bytes, metadata: bytes):
         "save_method": "merged_16bit",
         "max_seq_len": MAX_SEQ_LEN,
         "loss_masking": MASK_INPUT_TOKENS,
+        "tool_render_mode": render_contract["tool_render_mode"],
+        "tool_schema_version": render_contract["tool_schema_version"],
+        "tool_schema_sha256": render_contract["tool_schema_sha256"],
     }
     with open(f"{output_dir}/training_metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
@@ -541,6 +571,18 @@ def merge_checkpoint(checkpoint_name: str):
     print(f"Merging with Unsloth and saving to {merged_dir}...")
     model.save_pretrained_merged(merged_dir, tokenizer, save_method="merged_16bit")
 
+    contract_path = f"{output_dir}/{RENDER_CONTRACT_FILENAME}"
+    if not os.path.exists(contract_path):
+        raise FileNotFoundError(
+            f"Missing {RENDER_CONTRACT_FILENAME} in {output_dir}; refusing to "
+            "produce an unversioned merged checkpoint"
+        )
+    with open(contract_path, encoding="utf-8") as f:
+        render_contract = resolve_render_contract(json.load(f))
+    for artifact_dir in (adapter_dir, merged_dir):
+        with open(f"{artifact_dir}/{RENDER_CONTRACT_FILENAME}", "w", encoding="utf-8") as f:
+            json.dump(render_contract, f, indent=2)
+
     checkpoint_vol.commit()
 
     print(f"\nDone! Merged model saved:")
@@ -594,6 +636,7 @@ def main(skip_preflight: bool = False):
             "tests/unit/test_chat_template_byte_level.py",
             "tests/unit/test_prompt_parity.py",
             "tests/unit/test_tool_vocab_drift.py",
+            "tests/unit/test_render_contract.py",
         ]
         print("=" * 60)
         print("Preflight: running dataset-shape gate suites...")

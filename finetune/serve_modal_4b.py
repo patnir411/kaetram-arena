@@ -32,6 +32,7 @@ serve_image = (
         "SGLANG_DISABLE_CUDNN_CHECK": "1",
     })
     .add_local_python_source("render")
+    .add_local_python_source("endpoint_identity")
 )
 
 BASE_MODEL_ID = "Qwen/Qwen3.5-4B"
@@ -54,6 +55,7 @@ QWEN_DECODE_MODE = "thinking_general"
 # source of truth shared with train_modal.py, serve_modal.py, and the
 # convert_to_qwen.py truncation gate.
 from render import patch_qwen_chat_template
+from endpoint_identity import endpoint_attestation
 
 
 @app.cls(
@@ -148,6 +150,7 @@ class Inference:
 
         @web_app.get("/health")
         async def health():
+            attestation = endpoint_attestation("4b-base")
             return {
                 "status": "ok",
                 "model": BASE_MODEL_ID,
@@ -162,6 +165,7 @@ class Inference:
                 },
                 "capabilities": ["chat", "score"],
                 "supports_system_prefix": True,
+                "attestation": attestation,
             }
 
         def _apply_system_prefix(messages, system_prefix):

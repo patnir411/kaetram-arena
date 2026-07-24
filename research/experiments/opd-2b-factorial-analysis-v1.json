@@ -1,0 +1,155 @@
+{
+  "schema_version": "kaetram-opd-factorial-analysis-contract-v1",
+  "experiment_id": "opd-2b-core3-weights-x-recovery-v1",
+  "status": "prospective_outcome_blind",
+  "registered_before_outcome_access": true,
+  "primary_metric": "core3_stages_advanced",
+  "independent_unit": "fresh_world_replicate_cluster",
+  "arm_outcome": {
+    "aggregation": "sum",
+    "personality_lanes": [
+      "grinder",
+      "completionist",
+      "explorer_tinkerer"
+    ],
+    "range": [
+      0,
+      30
+    ]
+  },
+  "primary_estimands": [
+    {
+      "name": "r2_minus_base_recovery_off",
+      "formula": "Y(r2,off)-Y(base,off)",
+      "coefficients": {
+        "base_off": -1,
+        "r2_off": 1
+      }
+    },
+    {
+      "name": "r3_minus_base_recovery_off",
+      "formula": "Y(r3,off)-Y(base,off)",
+      "coefficients": {
+        "base_off": -1,
+        "r3_off": 1
+      }
+    },
+    {
+      "name": "recovery_on_minus_off_base",
+      "formula": "Y(base,on)-Y(base,off)",
+      "coefficients": {
+        "base_off": -1,
+        "base_on": 1
+      }
+    },
+    {
+      "name": "recovery_on_minus_off_r2",
+      "formula": "Y(r2,on)-Y(r2,off)",
+      "coefficients": {
+        "r2_off": -1,
+        "r2_on": 1
+      }
+    },
+    {
+      "name": "recovery_on_minus_off_r3",
+      "formula": "Y(r3,on)-Y(r3,off)",
+      "coefficients": {
+        "r3_off": -1,
+        "r3_on": 1
+      }
+    },
+    {
+      "name": "r2_minus_base_recovery_interaction",
+      "formula": "(Y(r2,on)-Y(r2,off))-(Y(base,on)-Y(base,off))",
+      "coefficients": {
+        "base_off": 1,
+        "base_on": -1,
+        "r2_off": -1,
+        "r2_on": 1
+      }
+    },
+    {
+      "name": "r3_minus_base_recovery_interaction",
+      "formula": "(Y(r3,on)-Y(r3,off))-(Y(base,on)-Y(base,off))",
+      "coefficients": {
+        "base_off": 1,
+        "base_on": -1,
+        "r3_off": -1,
+        "r3_on": 1
+      }
+    }
+  ],
+  "estimator": {
+    "name": "mean_paired_cluster_difference",
+    "pairing_key": "replicate",
+    "personality_lanes_are_independent_samples": false
+  },
+  "inference": {
+    "primary_method": "two_sided_paired_student_t",
+    "null_mean_difference": 0,
+    "familywise_alpha": 0.05,
+    "family_size": 7,
+    "multiplicity_adjustment": "bonferroni",
+    "zero_null_decision": "reject iff bonferroni_adjusted_p<=0.05",
+    "per_comparison_alpha": 0.0071428571428571435,
+    "simultaneous_confidence_level": 0.9928571428571429,
+    "confidence_interval": "student_t_mean_difference",
+    "statistical_engine": {
+      "package": "scipy",
+      "version": "1.18.0",
+      "distribution": "scipy.stats.t"
+    },
+    "sensitivity_method": "exact_two_sided_sign_flip",
+    "sensitivity_is_confirmatory": false
+  },
+  "standardized_effect": {
+    "name": "hedges_g_z",
+    "raw_effect": "cohen_d_z=mean(paired_differences)/sd_sample(paired_differences)",
+    "small_sample_correction": "J(df)=Gamma(df/2)/(sqrt(df/2)*Gamma((df-1)/2))",
+    "degrees_of_freedom": "n_replicates-1"
+  },
+  "practical_relevance": {
+    "sesoi_stages": 3,
+    "decision_interval": "bonferroni_simultaneous_confidence_interval",
+    "rules_in_order": [
+      {
+        "decision": "relevant_positive",
+        "condition": "lower_bound>3"
+      },
+      {
+        "decision": "relevant_negative",
+        "condition": "upper_bound<-3"
+      },
+      {
+        "decision": "practically_equivalent",
+        "condition": "lower_bound>-3 and upper_bound<3"
+      },
+      {
+        "decision": "inconclusive",
+        "condition": "otherwise"
+      }
+    ]
+  },
+  "zero_variance_policy": {
+    "status": "confirmatory_inference_not_estimable_zero_variance",
+    "test_statistic": null,
+    "p_value": null,
+    "confidence_interval": null,
+    "standardized_effect": null,
+    "practical_relevance_decision": "inconclusive"
+  },
+  "missingness_and_reruns": {
+    "technical_validity_must_be_assessed_without_outcome_access": true,
+    "outcome_dependent_exclusion": "forbidden",
+    "partial_pairwise_deletion": "forbidden",
+    "invalid_cell_scope": "entire_18_cell_replicate_cluster",
+    "confirmatory_requirement": "all_20_registered_replicate_clusters_complete_and_valid",
+    "analysis_on_incomplete_inventory": "forbidden",
+    "replacement_after_any_cell_starts": "forbidden",
+    "rerun_requirement": "new_experiment_id_and_new_outcome_blind_registration"
+  },
+  "stopping_rule": {
+    "interim_outcome_analysis": "forbidden",
+    "early_stopping": "forbidden"
+  }
+}

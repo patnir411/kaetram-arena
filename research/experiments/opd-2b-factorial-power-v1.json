@@ -1,0 +1,42 @@
+{
+  "schema_version": "kaetram-opd-power-analysis-v1",
+  "experiment_id": "opd-2b-core3-weights-x-recovery-v1",
+  "primary_metric": "core3_stages_advanced",
+  "primary_estimands": [
+    "r2_minus_base_recovery_off",
+    "r3_minus_base_recovery_off",
+    "recovery_on_minus_off_base",
+    "recovery_on_minus_off_r2",
+    "recovery_on_minus_off_r3",
+    "r2_minus_base_recovery_interaction",
+    "r3_minus_base_recovery_interaction"
+  ],
+  "familywise_alpha": 0.05,
+  "target_power": 0.8,
+  "planned_replicates": 20,
+  "method": "Prospective two-sided paired Student-t working-model power under normally distributed paired differences, population standardized effect delta/sigma_D=1, Bonferroni alpha 0.05/7, and scipy.stats.nct from scipy==1.18.0. Seventeen clusters is the minimum with conditional per-estimand model power at least 0.8; 20 is frozen before outcome access and must not be reduced.",
+  "power_model": "independent_normally_distributed_paired_differences",
+  "assumptions": [
+    "The independent unit is one fresh-world replicate cluster, not a personality lane or cell.",
+    "The minimum relevant paired cluster difference is 3 Core-3 stages on the 0-30 replicate-arm scale.",
+    "The standard deviation of a paired cluster difference is at most 3 Core-3 stages.",
+    "All three personality lanes are summed before any registered contrast is formed.",
+    "Paired cluster differences are modeled as independent and normally distributed; mean and variance alone do not determine power without this working model.",
+    "Working-model power is at least 0.8 for each estimand conditionally under population delta/sigma_D=1; it is not 0.8 power to reject all seven hypotheses jointly.",
+    "The SD<=3 assumption is unsupported by historical paired data and is especially strong for the interaction contrasts, whose range is -60 to 60.",
+    "This is an assumption-driven prospective calculation; it does not claim an empirical variance estimate from the historical unpaired runs."
+  ],
+  "standardized_effect": 1.0,
+  "standardized_effect_definition": "delta_over_sigma_D=population_mean(paired cluster differences)/population_SD(paired cluster differences)",
+  "per_estimand_two_sided_alpha": 0.0071428571428571435,
+  "calculation_absolute_tolerance": 5e-15,
+  "calculation": {
+    "engine": "scipy==1.18.0",
+    "distribution": "scipy.stats.nct",
+    "minimum_replicates_at_target_power": 17,
+    "power_at_16": 0.7938544220598713,
+    "power_at_17": 0.830990138886351,
+    "power_at_20": 0.9107747406019532,
+    "critical_t_at_20": 3.013624610310775
+  }
+}
